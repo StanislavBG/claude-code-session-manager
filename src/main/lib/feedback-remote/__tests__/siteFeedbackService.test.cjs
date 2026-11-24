@@ -240,6 +240,10 @@ test('relay error codes pass through verbatim with a one-line explanation', asyn
 
 /** Seed one inbox item directly through the single writer. */
 async function seedItem(hostId = 'FB-ABCDE', screenshot = PNG) {
+  // The inbox writes only into a known widget project: a box for cwd in the keystore.
+  if (!(await keystore.listBoxes({ projectCwd: cwd })).length) {
+    await keystore.addBox({ boxId: 'BOX00001', projectCwd: cwd, publicKey: 'pk', fingerprint: 'fp', privateKeyJwk: { kty: 'EC' } });
+  }
   await inbox.writeItem({
     cwd, hostId, boxId: 'BOX00001', receivedAt: '2026-11-23T10:00:00.000Z', origin: 'https://a.example',
     report: { schemaVersion: 1, clientReportId: crypto.randomUUID(), title: 'Broken', type: 'bug', user: null },

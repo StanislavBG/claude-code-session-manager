@@ -26,8 +26,10 @@
  * is gone drops the entry. A hostId already stored for a different clientReportId is refused with
  * an error whose `code` is 'host_id_clash' (the drain records and acks such an envelope).
  *
- * Every write path first registers cwd (absolute, existing) with config.addAllowedRoot, so a
- * project root nothing else registered this session is still writable.
+ * Every write path first registers cwd with config.addAllowedRoot, so a project root nothing
+ * else registered this session is still writable — but only a known widget project (a box's
+ * projectCwd, or a cwd already holding feedback-inbox/); any other cwd throws code
+ * 'unknown_project' and the boundary is not widened (see registerRoot).
  *
  * `reporterVerified` is the drain's signed-reporter check (feedbackBoxDrain.cjs): true, false or
  * null (no signature); anything else given to writeItem is stored as null.
@@ -38,8 +40,10 @@
 
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const config = require('../../config.cjs');
+const feedbackBoxKeys = require('./feedbackBoxKeys.cjs');
 const { readJsonOr } = require('../util/atomicFs.cjs');
 const { opsPath, assertOpsWrite, ensureRuntimeIgnores, resolveProjectRoot } = require('../opsOwnership.cjs');
 
@@ -139,21 +143,57 @@ function ensureIgnore(cwd) {
 }
 
 /**
+ * Error for a cwd that is not a known widget project; `code` is 'unknown_project'.
+ * @param {string} message
+ */
+function unknownProject(message) {
+  const err = new Error(`siteFeedbackInbox: ${message}`);
+  /** @type {any} */ (err).code = 'unknown_project';
+  return err;
+}
+
+/** @param {string} p */
+function isDirSync(p) {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+/** @param {string} parent @param {string} child true when child is strictly inside parent */
+function isStrictAncestor(parent, child) {
+  const rel = path.relative(parent, child);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
  * Widen config.cjs's write boundary to this project root right before a write, as
  * projectHomeAdminRoutes.cjs does: the drain reaches projects no pty/route registered this
- * session. Refuses a relative or missing cwd so the boundary is never widened to a guess.
+ * session. Only a known widget project is registered: cwd must be absolute, an existing
+ * directory, and either the projectCwd of a box in feedbackBoxKeys or already hold a
+ * session-manager-operations/feedback-inbox/ namespace. The home directory, the filesystem root
+ * and (for the namespace case) any ancestor of a box's project are never registered. Anything
+ * else throws `unknown_project` before the boundary is touched.
  * @param {unknown} cwd
- * @returns {string}
+ * @returns {Promise<string>}
  */
-function registerRoot(cwd) {
+async function registerRoot(cwd) {
   if (typeof cwd !== 'string' || !cwd || !path.isAbsolute(cwd)) {
     throw new Error('siteFeedbackInbox: cwd must be an absolute path');
   }
-  let isDir = false;
-  try { isDir = fs.statSync(cwd).isDirectory(); } catch { /* missing */ }
-  if (!isDir) throw new Error('siteFeedbackInbox: cwd does not exist or is not a directory');
-  config.addAllowedRoot(cwd);
-  return cwd;
+  if (!isDirSync(cwd)) throw new Error('siteFeedbackInbox: cwd does not exist or is not a directory');
+  const abs = path.resolve(cwd);
+  if (abs === path.resolve(os.homedir()) || abs === path.parse(abs).root) {
+    throw unknownProject('the home directory or filesystem root is never a feedback project');
+  }
+  const boxes = await feedbackBoxKeys.listBoxes();
+  const projects = boxes.map((b) => path.resolve(b.projectCwd));
+  let known = projects.includes(abs);
+  if (!known && !projects.some((p) => isStrictAncestor(abs, p))) {
+    let ns = '';
+    try { ns = nsRoot(abs); } catch { /* not a resolvable project root */ }
+    known = !!ns && isDirSync(ns);
+  }
+  if (!known) throw unknownProject('cwd is not a project with a feedback widget');
+  config.addAllowedRoot(abs);
+  return abs;
 }
 
 /** @typedef {Record<string, string>} ClientIdIndex clientReportId -> hostId */
@@ -194,7 +234,7 @@ async function loadIndex(cwd) {
 
 /** @param {string} cwd @param {ClientIdIndex} index */
 async function saveIndex(cwd, index) {
-  registerRoot(cwd);
+  await registerRoot(cwd);
   await writeJson(indexPath(cwd), { version: 1, byClientReportId: { ...index } });
 }
 
@@ -232,7 +272,7 @@ async function writeItem(args) {
   const clientReportId = requireString(report.clientReportId, 'report.clientReportId');
   requireBuffer(screenshot, 'screenshot');
   requireBuffer(annotated, 'annotated');
-  registerRoot(cwd);
+  await registerRoot(cwd);
   return serialize(async () => {
     const index = await loadIndex(cwd);
     const known = index[clientReportId];
@@ -250,7 +290,7 @@ async function writeItem(args) {
     }
     index[clientReportId] = hostId;
     await saveIndex(cwd, index);
-    registerRoot(cwd);
+    await registerRoot(cwd);
     await config.writeBinaryAtomic(itemPath(cwd, hostId, 'screenshot.png'), screenshot, { writer: WRITER });
     await config.writeBinaryAtomic(itemPath(cwd, hostId, 'annotated.png'), annotated, { writer: WRITER });
     await writeJson(itemPath(cwd, hostId, 'report.json'), report);
@@ -283,7 +323,7 @@ async function appendRejected(args) {
   if (typeof hostId !== 'string') throw new Error('siteFeedbackInbox: hostId must be a string');
   if (typeof code !== 'string' || !REJECT_CODE_RE.test(code)) throw new Error('siteFeedbackInbox: code must be a short snake_case code');
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) throw new Error('siteFeedbackInbox: bytes must be a non-negative number');
-  registerRoot(cwd);
+  await registerRoot(cwd);
   const line = JSON.stringify({ at, boxId, hostId: hostId.slice(0, 64), code, bytes }) + '\n';
   const file = path.join(nsRoot(cwd), 'rejected.jsonl');
   return serialize(async () => {
@@ -291,7 +331,7 @@ async function appendRejected(args) {
     let prev = '';
     try { prev = await fsp.readFile(file, 'utf8'); } catch { /* first line */ }
     if (prev && !prev.endsWith('\n')) prev += '\n';
-    registerRoot(cwd);
+    await registerRoot(cwd);
     await config.writeTextAtomic(file, prev + line, { writer: WRITER });
     ensureIgnore(cwd);
   });
@@ -367,12 +407,12 @@ async function get(cwd, hostId) {
  */
 async function updateMeta(cwd, hostId, patch) {
   assertHostId(hostId);
-  registerRoot(cwd);
+  await registerRoot(cwd);
   return serialize(async () => {
     const meta = await readMeta(cwd, hostId);
     if (!meta) throw new Error(`siteFeedbackInbox: no item ${hostId}`);
     const next = patch(meta);
-    registerRoot(cwd);
+    await registerRoot(cwd);
     await writeJson(itemPath(cwd, hostId, 'meta.json'), next);
     ensureIgnore(cwd);
     return next;
@@ -412,7 +452,7 @@ async function linkEpic(cwd, hostId, epicId) {
 /** @param {string} cwd @param {string} hostId */
 async function removeNow(cwd, hostId) {
   const dir = itemPath(cwd, hostId);
-  registerRoot(cwd);
+  await registerRoot(cwd);
   assertOpsWrite(dir, WRITER);
   await fsp.rm(dir, { recursive: true, force: true });
 }
@@ -438,7 +478,7 @@ async function dropFromIndex(cwd, hostIds) {
  */
 async function remove(cwd, hostId) {
   assertHostId(hostId);
-  registerRoot(cwd);
+  await registerRoot(cwd);
   return serialize(async () => {
     let existed = true;
     try { await fsp.access(itemPath(cwd, hostId)); } catch { existed = false; }
@@ -459,7 +499,7 @@ async function prune(cwd, days, opts = {}) {
   if (typeof days !== 'number' || !Number.isFinite(days) || days < 0) {
     throw new Error('siteFeedbackInbox: days must be a non-negative number');
   }
-  registerRoot(cwd);
+  await registerRoot(cwd);
   const cutoff = (opts.now ?? Date.now()) - days * DAY_MS;
   return serialize(async () => {
     /** @type {string[]} */

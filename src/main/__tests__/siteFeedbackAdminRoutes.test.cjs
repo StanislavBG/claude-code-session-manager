@@ -8,6 +8,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
+const os = require('node:os');
 const { registerAdminRoute } = require('../lib/feedback-remote/siteFeedbackAdminRoutes.cjs');
 
 const CWD = '/home/u/proj';
@@ -65,10 +66,11 @@ function makeService(over = {}) {
   return service;
 }
 
-function setup(over) {
+function setup(over, boxes = [{ boxId: 'box1', projectCwd: CWD }]) {
   const adminHttp = makeFakeAdminHttp();
   const service = makeService(over);
-  registerAdminRoute(adminHttp, { service });
+  const boxKeys = { listBoxes: async () => boxes };
+  registerAdminRoute(adminHttp, { service, boxKeys });
   return { adminHttp, service };
 }
 
@@ -365,5 +367,39 @@ test.each([
   expect(r.status).toBe(400);
   expect(r.body.ok).toBe(false);
   expect(r.body.error).toMatch(re);
+  expect(service.calls).toEqual([]);
+});
+
+test.each([
+  ['an unknown cwd', '/home/u/other'],
+  ['the home directory', os.homedir()],
+  ['an ancestor of a project', '/home/u'],
+])('inbox, item and status answer 404 unknown_project for %s before any inbox call', async (_n, cwd) => {
+  const { adminHttp, service } = setup();
+  const calls = [
+    adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd } }),
+    adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd, id: 'FB-AB123' } }),
+    adminHttp.call('POST', '/admin/site-feedback/status', { body: { cwd, id: 'FB-AB123', status: 'open' } }),
+  ];
+  for (const r of await Promise.all(calls)) {
+    expect(r.status).toBe(404);
+    expect(r.body).toMatchObject({ ok: false, error: 'unknown_project' });
+  }
+  expect(service.calls).toEqual([]);
+});
+
+test('a known project (a box projectCwd) reaches the inbox on all three routes', async () => {
+  const { adminHttp, service } = setup();
+  expect((await adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd: CWD } })).status).toBe(200);
+  expect((await adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd: CWD, id: 'FB-AB123' } })).status).toBe(200);
+  expect((await adminHttp.call('POST', '/admin/site-feedback/status', { body: { cwd: CWD, id: 'FB-AB123', status: 'open' } })).status).toBe(200);
+  expect(service.calls.map((c) => c[0])).toEqual(['listItems', 'getItem', 'setStatus']);
+});
+
+test('with no boxes at all every inbox route answers 404 unknown_project', async () => {
+  const { adminHttp, service } = setup(undefined, []);
+  const r = await adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd: CWD } });
+  expect(r.status).toBe(404);
+  expect(r.body.error).toBe('unknown_project');
   expect(service.calls).toEqual([]);
 });

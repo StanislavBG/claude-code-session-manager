@@ -21,6 +21,9 @@
  * item route returns local image paths only, never image bytes, and lifts meta.reporterVerified
  * (true = signed by the site, false = signature did not match, null = claimed by site / legacy
  * item) onto item.reporterVerified so customer_feedback_get shows it without reading meta.
+ * The three /admin/site-feedback/* routes answer 404 `unknown_project` for a cwd that is not the
+ * projectCwd of a widget box (feedbackBoxKeys.listBoxes), before any inbox call — so an admin
+ * call can never point the inbox (and its write-boundary widening) at an arbitrary directory.
  * Deliberately NO route that mints an Epic (SINGLE-CREATOR LAW, epicMint.cjs).
  */
 'use strict';
@@ -141,7 +144,7 @@ function httpStatusFor(result) {
   const code = typeof result.error === 'string' ? result.error : '';
   if (CONFLICT_ERRORS.has(code)) return 409;
   if (INPUT_ERRORS.has(code)) return 400;
-  if (code === 'not_found') return 404;
+  if (code === 'not_found' || code === 'unknown_project') return 404;
   if (LOCAL_ERRORS.has(code)) return 500;
   return 502;
 }
@@ -196,12 +199,22 @@ function route(fn) {
   };
 }
 
+/** Failure for a cwd with no widget box (HTTP 404). */
+const UNKNOWN_PROJECT = Object.freeze({ ok: false, error: 'unknown_project', message: 'no feedback widget is set up for this project' });
+
 /**
  * @param {any} adminHttp
- * @param {{ service?: any }} [opts] test seam
+ * @param {{ service?: any, boxKeys?: { listBoxes: (opts?: { projectCwd?: string }) => Promise<unknown[]> } }} [opts] test seams
  */
 function registerAdminRoute(adminHttp, opts = {}) {
   const svc = () => getService(opts.service);
+  const boxKeys = () => opts.boxKeys || require('./feedbackBoxKeys.cjs');
+  /** @param {string} cwd */
+  const knownProject = async (cwd) => {
+    const boxes = await boxKeys().listBoxes();
+    const abs = path.resolve(cwd);
+    return boxes.some((/** @type {any} */ b) => b && typeof b.projectCwd === 'string' && path.resolve(b.projectCwd) === abs);
+  };
 
   adminHttp.registerRoute('POST', '/admin/feedback-widget/create', route(async (req) => {
     const b = await readJsonBody(req);
@@ -244,7 +257,9 @@ function registerAdminRoute(adminHttp, opts = {}) {
   adminHttp.registerRoute('GET', '/admin/site-feedback/inbox', route(async (_req, q) => {
     const cwd = requireCwd(q.get('cwd'));
     const rawStatus = q.get('status');
-    const r = await svc().listItems(rawStatus ? { cwd, status: requireStatus(rawStatus) } : { cwd });
+    const status = rawStatus ? requireStatus(rawStatus) : undefined;
+    if (!await knownProject(cwd)) return UNKNOWN_PROJECT;
+    const r = await svc().listItems(status ? { cwd, status } : { cwd });
     if (r && r.ok !== false && Array.isArray(r.items)) {
       return { ...r, items: r.items.map((/** @type {any} */ it) => (it && typeof it === 'object' && typeof it.hostId === 'string' ? { ...it, id: it.hostId } : it)) };
     }
@@ -254,6 +269,7 @@ function registerAdminRoute(adminHttp, opts = {}) {
   adminHttp.registerRoute('GET', '/admin/site-feedback/item', route(async (_req, q) => {
     const cwd = requireCwd(q.get('cwd'));
     const hostId = requireHostId(q.get('id'));
+    if (!await knownProject(cwd)) return UNKNOWN_PROJECT;
     const r = await svc().getItem({ cwd, hostId });
     const item = r && r.ok !== false ? r.item : null;
     if (item && typeof item === 'object' && !Array.isArray(item)) {
@@ -271,6 +287,7 @@ function registerAdminRoute(adminHttp, opts = {}) {
     if (b.note !== undefined && b.note !== null && (typeof b.note !== 'string' || b.note.length > MAX_NOTE)) {
       throw new InputError(`note must be a string of at most ${MAX_NOTE} characters`);
     }
+    if (!await knownProject(cwd)) return UNKNOWN_PROJECT;
     return svc().setStatus({ cwd, hostId, status, note: typeof b.note === 'string' ? b.note : null });
   }));
 }

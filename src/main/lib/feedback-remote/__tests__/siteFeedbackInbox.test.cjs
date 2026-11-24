@@ -7,24 +7,51 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, beforeAll, afterAll, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../../../config.cjs');
 const inbox = require('../siteFeedbackInbox.cjs');
+const keystore = require('../feedbackBoxKeys.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   while (tmpDirs.length) await fsp.rm(tmpDirs.pop(), { recursive: true, force: true });
 });
+
+// A temp keystore: the inbox only registers roots that own a widget box there.
+let prevSchedHome;
+let schedHome;
+beforeAll(() => {
+  prevSchedHome = process.env.SM_SCHEDULER_HOME;
+  schedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-site-inbox-sched-'));
+  process.env.SM_SCHEDULER_HOME = schedHome;
+});
+afterAll(() => {
+  if (prevSchedHome === undefined) delete process.env.SM_SCHEDULER_HOME;
+  else process.env.SM_SCHEDULER_HOME = prevSchedHome;
+  fs.rmSync(schedHome, { recursive: true, force: true });
+});
+
+let boxSeq = 0;
+/** Record a widget box for projectCwd in the temp keystore. */
+async function addBoxFor(projectCwd) {
+  boxSeq += 1;
+  await keystore.addBox({
+    boxId: `box_t${boxSeq}`, projectCwd, publicKey: `pk${boxSeq}`, fingerprint: `fp${boxSeq}`,
+    privateKeyJwk: { kty: 'EC' },
+  });
+}
 
 async function mkTmpCwd() {
   const dir = fs.realpathSync(await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-site-inbox-')));
   fs.mkdirSync(path.join(dir, 'session-manager-operations'), { recursive: true });
   config.addAllowedRoot(dir);
   tmpDirs.push(dir);
+  await addBoxFor(dir);
   return dir;
 }
 
@@ -166,6 +193,7 @@ test('writeItem registers an unregistered project root itself (real config.cjs b
   fs.mkdirSync(base, { recursive: true });
   const cwd = fs.realpathSync(await fsp.mkdtemp(path.join(base, 'sm-site-inbox-unreg-')));
   tmpDirs.push(cwd);
+  await addBoxFor(cwd);
   expect(config.getAllowedRoots()).not.toContain(cwd);
   expect(await inbox.writeItem(item(cwd, 'FB-UNRG1', '2026-11-24T10:00:00.000Z')))
     .toEqual({ duplicate: false, hostId: 'FB-UNRG1' });
@@ -255,4 +283,73 @@ test('a write that crashed after its index entry resumes under the same hostId',
   fs.writeFileSync(path.join(ns(cwd), 'index.json'), JSON.stringify({ version: 1, byClientReportId: { [a.report.clientReportId]: 'FB-RSM01' } }));
   expect(await inbox.writeItem(a)).toEqual({ duplicate: false, hostId: 'FB-RSM01' });
   expect((await inbox.get(cwd, 'FB-RSM01')).meta.status).toBe('open');
+});
+
+/** Every write path, called against cwd; each must reject with code unknown_project. */
+async function expectAllRefused(cwd) {
+  const calls = [
+    () => inbox.writeItem(item(cwd, 'FB-UNKN1', '2026-11-24T10:00:00.000Z')),
+    () => inbox.setStatus(cwd, 'FB-UNKN1', 'open'),
+    () => inbox.linkEpic(cwd, 'FB-UNKN1', 'e1'),
+    () => inbox.remove(cwd, 'FB-UNKN1'),
+    () => inbox.prune(cwd, 30),
+    () => inbox.appendRejected({ cwd, at: 'x', boxId: 'b', hostId: '', code: 'bad_envelope', bytes: 0 }),
+  ];
+  for (const call of calls) {
+    const err = await call().catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe('unknown_project');
+  }
+}
+
+test('a known project (box projectCwd) is registered with the write boundary', async () => {
+  const cwd = await mkTmpCwd();
+  const spy = vi.spyOn(config, 'addAllowedRoot');
+  await inbox.writeItem(item(cwd, 'FB-KNWN1', '2026-11-24T10:00:00.000Z'));
+  expect(spy).toHaveBeenCalledWith(cwd);
+  expect(fs.existsSync(path.join(ns(cwd), 'items', 'FB-KNWN1', 'meta.json'))).toBe(true);
+});
+
+test('a cwd already holding feedback-inbox/ (box since deleted) stays writable', async () => {
+  const dir = fs.realpathSync(await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-site-inbox-ns-')));
+  tmpDirs.push(dir);
+  fs.mkdirSync(ns(dir), { recursive: true });
+  config.addAllowedRoot(dir);
+  expect(await inbox.writeItem(item(dir, 'FB-NSOK1', '2026-11-24T10:00:00.000Z')))
+    .toEqual({ duplicate: false, hostId: 'FB-NSOK1' });
+});
+
+test('an unknown cwd is refused with unknown_project and the boundary is unchanged', async () => {
+  const base = path.join(os.homedir(), '.cache');
+  fs.mkdirSync(base, { recursive: true });
+  const cwd = fs.realpathSync(await fsp.mkdtemp(path.join(base, 'sm-site-inbox-unknown-')));
+  tmpDirs.push(cwd);
+  const before = config.getAllowedRoots();
+  const spy = vi.spyOn(config, 'addAllowedRoot');
+  await expectAllRefused(cwd);
+  expect(spy).not.toHaveBeenCalled();
+  expect(config.getAllowedRoots()).toEqual(before);
+  expect(fs.existsSync(ns(cwd))).toBe(false);
+});
+
+test('the home directory is never registered, even when a box claims it', async () => {
+  await addBoxFor(os.homedir());
+  const spy = vi.spyOn(config, 'addAllowedRoot');
+  const nsExisted = fs.existsSync(ns(os.homedir()));
+  await expectAllRefused(os.homedir());
+  expect(spy).not.toHaveBeenCalled();
+  expect(fs.existsSync(ns(os.homedir()))).toBe(nsExisted);
+});
+
+test('an ancestor of a project is never registered, even holding a feedback-inbox/ namespace', async () => {
+  const parent = fs.realpathSync(await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-site-inbox-parent-')));
+  tmpDirs.push(parent);
+  fs.mkdirSync(ns(parent), { recursive: true });
+  const child = path.join(parent, 'proj');
+  fs.mkdirSync(child);
+  await addBoxFor(child);
+  const spy = vi.spyOn(config, 'addAllowedRoot');
+  await expectAllRefused(parent);
+  expect(spy).not.toHaveBeenCalled();
+  expect(fs.readdirSync(ns(parent))).toEqual([]);
 });

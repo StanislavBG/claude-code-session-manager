@@ -73,6 +73,10 @@ beforeEach(() => {
     serviceConfirmSas: vi.fn(async () => ({ ok: true, service })),
     serviceRevoke: vi.fn(async () => ({ ok: true, relayRevoked: true })),
     relayClientRevoke: vi.fn(async () => ({ ok: true })),
+    servicePairCancel: vi.fn(async () => {
+      list = { ...list, pending: list.pending.filter((p) => p.pairingId !== 'pair-1') }
+      return { ok: true, cancelled: true, dropped: 1 }
+    }),
   }
   clipboard = vi.fn(async () => ({ ok: true }))
   ;(window as unknown as { api: unknown }).api = { webRemote: api, clipboard: { writeText: clipboard } }
@@ -169,15 +173,45 @@ describe('SettingsRemoteServices', () => {
     expect(q('remote-service-disabled')?.textContent).toContain('Pair a device')
   })
 
-  it('confirms a pending SAS and Deny hides it', async () => {
+  it('confirms a pending SAS', async () => {
     list = { ok: true, services: [], pending: [pendingEntry], relayOrphans: [] }
     await mount()
     expect((q('remote-service-sas-confirm') as HTMLButtonElement).disabled).toBe(true)
     await type(q('remote-service-sas-input'), '123456')
     await click(q('remote-service-sas-confirm'))
     expect(api.serviceConfirmSas).toHaveBeenCalledWith('pair-1', '123456')
+  })
+
+  it('Deny cancels the pairing through servicePairCancel and reloads the list', async () => {
+    list = { ok: true, services: [], pending: [pendingEntry], relayOrphans: [] }
+    await mount()
+    expect(api.servicesList).toHaveBeenCalledTimes(1)
     await click(q('remote-service-sas-deny'))
-    expect(q('remote-service-sas-confirm')).toBeNull()
+    expect(api.servicePairCancel).toHaveBeenCalledWith('pair-1')
+    expect(api.servicesList).toHaveBeenCalledTimes(2)
+    expect(q('remote-service-pending')).toBeNull()
+    expect(useToast.getState().toasts.filter((t) => t.kind === 'error')).toHaveLength(0)
+  })
+
+  it('Deny failure (ok:false) shows an error toast and keeps the row', async () => {
+    list = { ok: true, services: [], pending: [pendingEntry], relayOrphans: [] }
+    api.servicePairCancel.mockResolvedValueOnce({ ok: false, error: 'nope' })
+    await mount()
+    await click(q('remote-service-sas-deny'))
+    expect(api.servicePairCancel).toHaveBeenCalledWith('pair-1')
+    expect(lastToast()?.kind).toBe('error')
+    expect(lastToast()?.message).toContain('nope')
+    expect(q('remote-service-pending')).not.toBeNull()
+  })
+
+  it('Deny failure (thrown) shows an error toast and keeps the row', async () => {
+    list = { ok: true, services: [], pending: [pendingEntry], relayOrphans: [] }
+    api.servicePairCancel.mockRejectedValueOnce(new Error('ipc down'))
+    await mount()
+    await click(q('remote-service-sas-deny'))
+    expect(lastToast()?.kind).toBe('error')
+    expect(lastToast()?.message).toContain('ipc down')
+    expect(q('remote-service-pending')).not.toBeNull()
   })
 
   it('lists paired services and revokes one behind a confirm', async () => {

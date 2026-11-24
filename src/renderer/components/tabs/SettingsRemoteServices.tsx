@@ -114,7 +114,6 @@ export function SettingsRemoteServices({
   const [services, setServices] = useState<WebRemoteService[]>([])
   const [pending, setPending] = useState<WebRemotePendingService[]>([])
   const [orphans, setOrphans] = useState<WebRemoteRelayOrphan[]>([])
-  const [denied, setDenied] = useState<string[]>([])
   const [formOpen, setFormOpen] = useState(false)
   const [name, setName] = useState('')
   const [homeCwd, setHomeCwd] = useState('')
@@ -213,9 +212,21 @@ export function SettingsRemoteServices({
     }
   }
 
-  const handleDeny = (pairingId: string) => {
-    setDenied((d) => [...d, pairingId])
-    if (active?.pairingId === pairingId) resetForm()
+  const handleDeny = async (pairingId: string) => {
+    setBusyId(pairingId)
+    try {
+      const r = await window.api.webRemote.servicePairCancel(pairingId)
+      if (!r.ok) {
+        showToast('error', `Deny failed: ${r.error}`)
+        return
+      }
+      if (active?.pairingId === pairingId) resetForm()
+      await refresh()
+    } catch (e) {
+      showToast('error', `Deny failed: ${errMsg(e)}`)
+    } finally {
+      setBusyId(null)
+    }
   }
 
   const handleRevokeService = async (serviceId: string) => {
@@ -263,7 +274,6 @@ export function SettingsRemoteServices({
       <RevokeButton testId={testId} onClick={() => setConfirmRevoke(id)} disabled={busyId === id} />
     )
 
-  const visiblePending = pending.filter((p) => !denied.includes(p.pairingId))
   const msLeft = active ? active.codeExpiresAt - now : 0
   const canStart = !starting && name.trim().length > 0 && !!homeCwd && scope.length > 0
 
@@ -356,9 +366,9 @@ export function SettingsRemoteServices({
         </div>
       )}
 
-      {usable && visiblePending.length > 0 && (
+      {usable && pending.length > 0 && (
         <div className="space-y-2 mt-2.5">
-          {visiblePending.map((p) => (
+          {pending.map((p) => (
             <PendingRow key={p.pairingId} pending={p} onConfirm={handleConfirmSas} onDeny={handleDeny} busy={busyId === p.pairingId} />
           ))}
         </div>

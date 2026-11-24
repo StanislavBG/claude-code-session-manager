@@ -24,6 +24,7 @@ const {
   CHAT_MODE_TRUTH_INSTRUCTION,
   SCHEDULER_TURN_INSTRUCTION,
   STOP_SENTINEL,
+  turnInstructionFor,
 } = require('../chatRunner.cjs');
 const { autoStartTurnInstruction } = require('../lib/feedback-remote/autoStartedSession.cjs');
 
@@ -120,4 +121,27 @@ test('an auto-started Epic turn splits back into the human’s words', async () 
   );
   expect(split.body).toBe(HUMAN);
   expect(split.blockKeys).toEqual(['auto-start-turn', 'chat-mode-truth']);
+});
+
+test('composed turn prompts queue what remains instead of listing it', () => {
+  const os = require('os');
+  const cwd = os.tmpdir();
+  const sid = 'no-such-epic-preamble-anchors';
+  // Mirrors chatRunner's own composition at its `-p` call site.
+  const chat = turnInstructionFor('manual', cwd, sid) + CHAT_MODE_TRUTH_INSTRUCTION + HUMAN;
+  const sched = turnInstructionFor('scheduler', cwd, sid) + CHAT_MODE_TRUTH_INSTRUCTION + HUMAN;
+
+  const oneShot = 'do the part that fits, report exactly what landed, and queue or schedule what ' +
+    'remains; only a step that needs the human goes back to them.';
+  const schedLine = 'Give everything left open an outcome (queue, decide, schedule or close it), ' +
+    'and end with a short report of what you did.';
+
+  expect(chat).toContain(oneShot);
+  expect(sched).toContain(oneShot);
+  expect(sched).toContain(schedLine);
+  expect(chat).toContain('Otherwise complete the task and end with a concise summary of what you did.');
+  for (const p of [chat, sched]) {
+    expect(p).not.toContain('say what remains');
+    expect(p).not.toContain('Make the safest reasonable choice');
+  }
 });

@@ -279,8 +279,8 @@ const SCHEDULER_TURN_INSTRUCTION =
   `IMPORTANT: This turn was started by the scheduler and nobody is watching. ` +
   `Never ask questions and never print ${STOP_SENTINEL}. Act on the message below with ` +
   `the /develop skill's Phase 2 rules (reset, fix the spec, archive, or queue a fix wave). ` +
-  `Make the safest reasonable choice for anything left open, and end with a short report ` +
-  `of what you did.\n\n`;
+  `Give everything left open an outcome (queue, decide, schedule or close it), and end ` +
+  `with a short report of what you did.\n\n`;
 
 /**
  * Picks the instruction block that opens a turn: scheduler turns and
@@ -350,7 +350,8 @@ const CHAT_MODE_TRUTH_INSTRUCTION =
   `timeout, then report the actual result. This turn is hard-killed after ` +
   `${KILL_CEILING_MIN} minutes of wall-clock. Size every synchronous poll to ` +
   `finish inside that budget; if the work cannot fit, do the part that fits, ` +
-  `report exactly what landed, and say what remains. End this turn with ` +
+  `report exactly what landed, and queue or schedule what remains; only a step ` +
+  `that needs the human goes back to them. End this turn with ` +
   `either a real result or an explicit statement that the user needs to ` +
   `reply for the work to continue.\n\n`;
 

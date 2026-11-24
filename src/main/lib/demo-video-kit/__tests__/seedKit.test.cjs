@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 8 (the kind-marketing.md playbook must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('8');
+test('KIT_VERSION is bumped to 9 (the season-complete series rule must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('9');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

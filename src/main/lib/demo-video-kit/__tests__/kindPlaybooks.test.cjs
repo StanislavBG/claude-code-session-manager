@@ -21,6 +21,15 @@ test('kind-tiktok.md is seeded and states the TikTok format, contract and rules'
   }
 });
 
+test('kind-tiktok.md series rule saves a season-complete outcome', () => {
+  const md = readTiktok();
+  expect(md).toContain('project_video_outcome_write');
+  expect(md).toContain('Season complete');
+  expect(md).toMatch(/outcome:\s*'season-complete'/);
+  expect(md).toMatch(/review stage or the final stage/);
+  expect(md).toContain('end PASS');
+});
+
 test('kind-tiktok.md holds no other project\'s own content', () => {
   expect(readTiktok()).not.toMatch(/burrow|bilko|veggie|garden/i);
 });

@@ -90,7 +90,10 @@ When the `Video target:` line names a series brief file:
 2. Make the next episode exactly as they say: its premise, cast, topic and beats. Follow the
    brief's topic; never invent a premise, never pick an episode the files do not schedule.
 3. Use the project persona for the host and voice; never borrow another project's characters.
-4. When the files have no next episode left, save nothing and end the report with
-   `Season complete: <brief path> has no next episode`.
+4. When the files have no next episode left, in the review stage or the final stage alike,
+   call `project_video_outcome_write` once with `{ videoId: <the Entry id>, outcome:
+   'season-complete', text: 'Season complete: <brief path> has no next episode' }`. Save no
+   video and no review material, end the report with that same `Season complete` line, and
+   end PASS: a finished season is a passing run, not a failure.
 
 Never update the series files yourself unless the brief says to.

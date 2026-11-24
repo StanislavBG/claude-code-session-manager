@@ -155,5 +155,20 @@ jobs:
       TAG: ${{ github.ref_name }}
       REPO: ${{ github.repository }}
     steps:
-      - name: Publish draft release and mark latest
-        run: gh release edit "$TAG" --repo "$REPO" --draft=false --latest
+      # Full history + tags so scripts/release-notes.cjs can find the previous tag
+      # and read release-notes/after-<prev>.md from the tag's own tree.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Publish draft release with notes and mark latest
+        run: |
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          if ! node scripts/release-notes.cjs --tag "$TAG" > "$NOTES"; then
+            echo "::error::scripts/release-notes.cjs failed for $TAG; release left as draft"
+            exit 1
+          fi
+          gh release edit "$TAG" --repo "$REPO" --draft=false --latest --notes-file "$NOTES"

@@ -32,6 +32,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | ops-sweep.cjs | manual; `node scripts/ops-sweep.cjs <cwd>` | yes |
 | postinstall.cjs | npm `postinstall` | yes |
 | purge-dry-run.cjs | manual / validators, read-only; `node scripts/purge-dry-run.cjs <cwd> <epicId>` prints `purgeEpic({ dryRun: true })` JSON (artifacts by kind + counts), deletes nothing; a real purge stays the epic:purge IPC | no |
+| release-notes.cjs | `.github/workflows/release.yml` finalize-release job, and manual; `node scripts/release-notes.cjs --tag <ref> [--prev <tag>]` prints the GitHub release body (upgrade note from the tag tree + commit subjects since prev) — convention in [release-notes/README.md](../release-notes/README.md) | no |
 | refresh-vad-assets.mjs | `npm run refresh:vad-assets` | no |
 | replay-verdicts.cjs | manual, dev-only, read-only | no |
 | scheduler-mcp-server.cjs | registered as an MCP server (`seedSchedulerMcp.cjs`, `send-feedback` SKILL.md) | yes |

@@ -1,7 +1,9 @@
 import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
-  testMatch: ['tests/e2e/**/*.spec.{mjs,ts}', 'tests/smoke/**/*.spec.ts'],
+  // + one real-Chromium shot spec whose PRD gate runs it through this root config (the other
+  // tests/web-ui specs run via tests/web-ui/playwright.config.ts).
+  testMatch: ['tests/e2e/**/*.spec.{mjs,ts}', 'tests/smoke/**/*.spec.ts', 'tests/web-ui/project-feedback-shots.spec.ts'],
   // Exclude stale agent worktrees (they hold duplicate spec copies). The rotted
   // cycle-1 e2e/*.spec.mjs (live-transcript, history-dashboard, new-session,
   // overview-billing, broadcast) were DELETED — they asserted removed UI; the

@@ -6,7 +6,7 @@
 
 import type { ConsoleEntry, NetworkEntry } from './buffers';
 import type { ElementDescription } from './selector';
-import type { FeedbackUser } from './host';
+import { copySigned, type FeedbackUser } from './host';
 
 // ---------- Report v1 types ----------
 
@@ -79,6 +79,8 @@ export interface ReportUser {
   id: string;
   name?: string;
   email?: string;
+  exp?: number;
+  sig?: string;
 }
 
 export interface ReportV1 {
@@ -236,6 +238,7 @@ function user(r: FeedbackUser | null): ReportUser | null {
   const out: ReportUser = { id };
   if (r.name) out.name = r.name;
   if (r.email) out.email = r.email;
+  copySigned(r, out);
   return out;
 }
 

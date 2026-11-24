@@ -19,6 +19,18 @@ export interface FeedbackUser {
   id?: string;
   name?: string;
   email?: string;
+  /** Signature expiry from the site's backend; passed through unchanged for the desktop to verify. */
+  exp?: number;
+  /** Signature from the site's backend (the widget never holds the secret). */
+  sig?: string;
+}
+
+export const SIG_MAX = 100;
+
+/** Copies exp/sig onto `out` only when well-formed; malformed values are dropped. */
+export function copySigned(from: { exp?: unknown; sig?: unknown }, out: { exp?: number; sig?: string }): void {
+  if (typeof from.exp === 'number' && Number.isFinite(from.exp)) out.exp = from.exp;
+  if (typeof from.sig === 'string' && from.sig.length > 0 && from.sig.length <= SIG_MAX) out.sig = from.sig;
 }
 
 /** window.FeedbackConfig as the embedding site writes it (README §1). */
@@ -91,7 +103,9 @@ function normalizeUser(user: unknown): FeedbackUser | null {
   if (typeof u.id === 'string') out.id = u.id;
   if (typeof u.name === 'string') out.name = u.name;
   if (typeof u.email === 'string') out.email = u.email;
-  return out.id || out.name || out.email ? out : null;
+  if (!(out.id || out.name || out.email)) return null;
+  copySigned(u, out);
+  return out;
 }
 
 /** The <script> tag that loaded the widget (document.currentScript while it executes). */

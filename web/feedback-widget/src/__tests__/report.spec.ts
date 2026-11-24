@@ -107,6 +107,33 @@ describe('buildReport', () => {
     expect(r.project).toBe('ABCDEFGH');
   });
 
+  it('passes signed exp and sig through into report.user unchanged', () => {
+    const sig = 'Zx9_-'.repeat(20);
+    const r = buildReport(state({ reporter: { id: 'u_8841', email: 'maya@lumenstays.com', exp: 1795000000, sig } }));
+    expectValid(r);
+    expect(r.user).toEqual({ id: 'u_8841', email: 'maya@lumenstays.com', exp: 1795000000, sig });
+  });
+
+  it('omits exp and sig from report.user when the reporter has none', () => {
+    const r = buildReport(state({ reporter: { id: 'u_8841', name: 'Maya Chen' } }));
+    expectValid(r);
+    expect(r.user).toEqual({ id: 'u_8841', name: 'Maya Chen' });
+    expect(Object.keys(r.user!)).toEqual(['id', 'name']);
+  });
+
+  it('drops malformed exp and sig, never sending them', () => {
+    const bad = [
+      { exp: '1795000000', sig: 42 },
+      { exp: Number.NaN, sig: '' },
+      { exp: Number.NEGATIVE_INFINITY, sig: 's'.repeat(101) },
+    ];
+    for (const b of bad) {
+      const r = buildReport(state({ reporter: { id: 'u_1', ...b } as never }));
+      expectValid(r);
+      expect(r.user).toEqual({ id: 'u_1' });
+    }
+  });
+
   it('records a capture error and validates', () => {
     const r = buildReport(state({
       capture: { capturedAt: '2026-11-23T10:42:17.204Z', width: 2560, height: 1600, scale: 2, error: 'E'.repeat(300) },

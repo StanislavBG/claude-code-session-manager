@@ -169,6 +169,49 @@ describe('Feedback.identify()', () => {
   });
 });
 
+describe('Feedback.identify() signed fields (exp, sig)', () => {
+  it('passes exp and sig through unchanged', () => {
+    init();
+    window.Feedback!.identify({ id: 'u_1', exp: 1795000000, sig: 'a'.repeat(100) });
+    expect(getReporter()).toEqual({ id: 'u_1', exp: 1795000000, sig: 'a'.repeat(100) });
+  });
+
+  it('keeps the old shape when exp and sig are absent', () => {
+    init();
+    window.Feedback!.identify({ id: 'u_1', name: 'Maya' });
+    const r = getReporter()!;
+    expect(r).toEqual({ id: 'u_1', name: 'Maya' });
+    expect('exp' in r).toBe(false);
+    expect('sig' in r).toBe(false);
+  });
+
+  it('drops malformed exp and sig, keeping the rest', () => {
+    init();
+    const bad = [
+      { exp: '1795000000', sig: 1 },
+      { exp: Number.NaN, sig: '' },
+      { exp: Number.POSITIVE_INFINITY, sig: 'a'.repeat(101) },
+      { exp: null, sig: null },
+    ];
+    for (const b of bad) {
+      window.Feedback!.identify({ id: 'u_1', ...b } as never);
+      expect(getReporter()).toEqual({ id: 'u_1' });
+    }
+  });
+
+  it('a lone exp/sig without an identity is still anonymous', () => {
+    init();
+    window.Feedback!.identify({ exp: 1795000000, sig: 'abc' } as never);
+    expect(getReporter()).toBeNull();
+  });
+
+  it('reads exp and sig from FeedbackConfig.user too', () => {
+    window.FeedbackConfig = { user: { id: 'u_1', exp: 1795000000, sig: 'abc' } };
+    init();
+    expect(getReporter()).toEqual({ id: 'u_1', exp: 1795000000, sig: 'abc' });
+  });
+});
+
 describe('window.Feedback when the widget does not render', () => {
   it('exists on a touch-only page: identify stores the reporter, open/close never throw', () => {
     setPointers({ coarse: true, fine: false });

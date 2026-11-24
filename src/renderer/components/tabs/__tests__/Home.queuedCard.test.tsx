@@ -131,13 +131,48 @@ describe('QueuedCard', () => {
     expect(popover!.textContent).toContain('job-1')
     expect(popover!.textContent).toContain('foo')
     expect(popover!.textContent).toContain('~12m')
-    expect(popover!.textContent).toContain('Nudge scheduler now')
+    expect(popover!.textContent).not.toContain('Nudge scheduler now')
+    expect(popover!.textContent).toContain('Open in Scheduler')
 
     await act(async () => {
       row.dispatchEvent(new MouseEvent('click', { bubbles: true }))
       await Promise.resolve()
     })
     expect(document.querySelector('[data-testid="queue-job-popover"]')).toBeNull()
+  })
+
+  it('the popover is view-only: no nudge, and Open in Scheduler navigates without waking the scheduler', async () => {
+    const runNow = vi.fn(() => Promise.resolve({ ok: true }))
+    ;(window as unknown as { api: { schedule: { runNow: typeof runNow } } }).api = { schedule: { runNow } }
+    const onNavigate = vi.fn()
+    const el = await mount({ onNavigate })
+    await act(async () => {
+      useScheduleState.setState({
+        snapshot: {
+          jobs: [{ slug: 'job-1', title: 'Fix the thing', status: 'pending', cwd: '/home/bilko/Projects/foo' }],
+          history: [],
+          paused: null,
+          concurrency: 3,
+        } as never,
+        loaded: true,
+      })
+      await Promise.resolve()
+    })
+    const row = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Fix the thing'))!
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    const popover = document.querySelector('[data-testid="queue-job-popover"]')!
+    const buttons = Array.from(popover.querySelectorAll('button'))
+    expect(buttons.map((b) => b.textContent)).toEqual(['Open in Scheduler →'])
+    await act(async () => {
+      buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(onNavigate).toHaveBeenCalledWith('scheduler')
+    expect(document.querySelector('[data-testid="queue-job-popover"]')).toBeNull()
+    expect(runNow).not.toHaveBeenCalled()
   })
 
   it('pages 7 pending jobs: 5 visible, header count, pager, Next shows the rest', async () => {

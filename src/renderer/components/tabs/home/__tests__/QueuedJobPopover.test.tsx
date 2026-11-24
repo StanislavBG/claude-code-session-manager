@@ -8,9 +8,8 @@ import { QueuedJobPopover } from '../QueuedJobPopover'
 /**
  * Coverage for the Home dashboard's per-job queue popover (Home Screen A
  * fidelity — variants/home-a.jsx's `queuePop`). Verifies real job details
- * render, close-on-outside-click/Escape, and that 'Nudge scheduler now'
- * (wired to schedule.runNow()) only appears when the caller supplies
- * onRunNow — QueuedCard only does so for a still-pending job.
+ * render, close-on-outside-click/Escape, and that the popover is view-only:
+ * no 'Nudge scheduler now' scheduler control, only 'Open in Scheduler'.
  */
 
 let container: HTMLDivElement | null = null
@@ -63,20 +62,18 @@ describe('QueuedJobPopover', () => {
     expect(container!.textContent).toContain('Open in Scheduler')
   })
 
-  it('shows "Nudge scheduler now" only when onRunNow is provided', async () => {
+  it('never shows a "Nudge scheduler now" control, even for a pending job', async () => {
     await mount({ job, onClose: vi.fn(), onOpenScheduler: vi.fn() })
-    expect(container!.textContent).not.toContain('Nudge scheduler now')
+    expect(container!.textContent).not.toContain('Nudge')
+    const labels = Array.from(container!.querySelectorAll('button')).map((b) => b.textContent)
+    expect(labels).toEqual(['Open in Scheduler →'])
   })
 
-  it('calls onRunNow when Nudge scheduler now is clicked', async () => {
-    const onRunNow = vi.fn()
-    await mount({ job, onClose: vi.fn(), onOpenScheduler: vi.fn(), onRunNow })
-    const btn = Array.from(container!.querySelectorAll('button')).find((b) => b.textContent === 'Nudge scheduler now')!
-    await act(async () => {
-      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      await Promise.resolve()
-    })
-    expect(onRunNow).toHaveBeenCalledTimes(1)
+  it('ignores a stray onRunNow prop — the popover has no nudge action', async () => {
+    const props = { job, onClose: vi.fn(), onOpenScheduler: vi.fn(), onRunNow: vi.fn() }
+    await mount(props as Parameters<typeof QueuedJobPopover>[0])
+    expect(container!.textContent).not.toContain('Nudge scheduler now')
+    expect(container!.querySelectorAll('button').length).toBe(1)
   })
 
   it('calls onOpenScheduler when "Open in Scheduler" is clicked', async () => {

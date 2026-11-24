@@ -2,11 +2,9 @@
  * QueuedJobPopover — small anchored popover shown when a QueuedCard row is
  * clicked (Home Screen A's `queuePop`, variants/home-a.jsx), rebuilt with
  * this app's Tailwind tokens. Shows only real job fields (title/slug,
- * project, estimateMinutes, status) and only real actions: "Open in
- * Scheduler" always, "Nudge scheduler now" only for a still-pending job
- * (wired to `schedule.runNow()`, which wakes the whole queue rather than
- * targeting this job specifically — see the button's title). No "Skip
- * next" — no per-job skip API exists in this codebase.
+ * project, estimateMinutes, status) and one action: "Open in Scheduler".
+ * The Dashboard is view-only, so no scheduler control (nudge, skip) lives
+ * here — those belong to the Scheduler page.
  */
 import { useEffect, useRef } from 'react'
 import type { ScheduleJob } from '../../../../preload/api'
@@ -23,12 +21,10 @@ export function QueuedJobPopover({
   job,
   onClose,
   onOpenScheduler,
-  onRunNow,
 }: {
   job: QueuedJobPopoverJob
   onClose: () => void
   onOpenScheduler: () => void
-  onRunNow?: () => void
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -75,15 +71,6 @@ export function QueuedJobPopover({
         >
           Open in Scheduler →
         </button>
-        {onRunNow && (
-          <button
-            onClick={onRunNow}
-            title="Wakes the scheduler to check for due jobs immediately — does not force this specific job to run out of turn or bypass the concurrency cap."
-            className="text-[11.5px] font-semibold px-2.5 py-[5px] rounded-md bg-accent text-bg-hi hover:bg-accent-dark text-left"
-          >
-            Nudge scheduler now
-          </button>
-        )}
       </div>
     </div>
   )

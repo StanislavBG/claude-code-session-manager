@@ -54,7 +54,6 @@ import { useOutsideNeedsYou } from '../../lib/useOutsideNeedsYou'
 import { usePanelFocus } from '../../lib/panelFocus'
 import { useDashboardRefresh } from '../../lib/useDashboardRefresh'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
-import { runSchedulerNow } from '../../lib/schedulerActions'
 import { projectColorFor } from '../../lib/projectColor'
 import { openProjectTab } from '../../lib/homeOpenProject'
 import { useSessionSlots } from '../../lib/useSessionSlots'
@@ -558,11 +557,6 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
   const paged = usePagedList(pending, 5)
   const [openSlug, setOpenSlug] = useState<string | null>(null)
 
-  const runNow = () => {
-    void runSchedulerNow()
-    setOpenSlug(null)
-  }
-
   return (
     <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] min-h-0 overflow-auto">
       <div className="flex items-center justify-between mb-2.5">
@@ -597,7 +591,6 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
                   job={q as QueuedJobPopoverJob}
                   onClose={() => setOpenSlug(null)}
                   onOpenScheduler={() => { setOpenSlug(null); onNavigate?.('scheduler') }}
-                  onRunNow={q.status === 'pending' ? runNow : undefined}
                 />
               )}
             </div>

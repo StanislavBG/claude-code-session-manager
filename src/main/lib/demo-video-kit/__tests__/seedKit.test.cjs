@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 14 (persona cast validation must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('14');
+test('KIT_VERSION is bumped to 15 (per-speaker cast voices must reach installed kits)', () => {
+  expect(KIT_VERSION).toBe('15');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

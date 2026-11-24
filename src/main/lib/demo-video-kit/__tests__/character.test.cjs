@@ -265,3 +265,101 @@ test('inspectCharacter tells none-saved from saved-but-unusable, and why', () =>
   expect(readCharacter(project({ ...kokoro, cast: [{ name: 'Bit' }] }))).toBeNull();
   expect(readCharacter(project({ ...kokoro, cast: [{ name: 'Pip' }] })).json.cast).toEqual([{ name: 'Pip' }]);
 });
+
+// Per-speaker voices: a stub TTS at <root>/bin/tts that logs each call to calls.jsonl.
+const TTS_STUB = [
+  '#!/usr/bin/env node',
+  "const fs = require('fs');",
+  "const a = process.argv.slice(2);",
+  "const get = (k) => a[a.indexOf(k) + 1];",
+  "const speaker = get('--speaker'); const text = get('--text'); const out = get('--out');",
+  "fs.appendFileSync('calls.jsonl', JSON.stringify({ speaker, text }) + '\\n');",
+  "if (speaker === 'broken') { process.stderr.write('tts: no model for broken'); process.exit(1); }",
+  "fs.writeFileSync(out, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60), Buffer.from(text)]));",
+].join('\n');
+const ttsVoice = (key) => ({ engine: 'command', command: ['bin/tts', '--speaker', key, '--text', '{text}', '--out', '{out}'] });
+
+function castProject(cast, voice = ttsVoice('host')) {
+  const root = project({ name: 'Bit', palette: ['#fff'], voice, cast });
+  fs.mkdirSync(path.join(root, 'bin'));
+  fs.writeFileSync(path.join(root, 'bin', 'tts'), TTS_STUB);
+  fs.chmodSync(path.join(root, 'bin', 'tts'), 0o755);
+  return root;
+}
+const calls = (root) => {
+  const f = path.join(root, 'calls.jsonl');
+  return fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+};
+function runCli(root, lines) {
+  const { spawnSync } = require('node:child_process');
+  const spec = path.join(root, 'spec.json');
+  fs.writeFileSync(spec, JSON.stringify({ projectRoot: root, lines }));
+  const r = spawnSync(process.execPath, [CHAR_CJS, 'speak', spec], { encoding: 'utf8' });
+  return { status: r.status, stderr: r.stderr, result: JSON.parse(r.stdout) };
+}
+const CAST = [
+  { name: 'Gran Oak', voice: ttsVoice('oak') },
+  { name: 'Pip', voice: ttsVoice('pip') },
+  { name: 'Moss' },
+  { name: 'Fern', voice: { engine: 'kokoro', id: 'bf_emma' } },
+  { name: 'Crack', voice: ttsVoice('broken') },
+];
+
+test.skipIf(process.platform === 'win32')('CLI: host and cast lines each run their own speaker voice, in order', () => {
+  const root = castProject(CAST);
+  const o = (n) => path.join(root, `${n}.wav`);
+  const r = runCli(root, [
+    { text: 'hello', out: o('a') },
+    { text: 'creak', out: o('b'), speaker: ' gran oak ' },
+    { text: 'squeak', out: o('c'), speaker: 'PIP' },
+    { text: 'again', out: o('d'), speaker: 'bit' },
+    { text: 'null', out: o('e'), speaker: null },
+  ]);
+  expect(r.status).toBe(0);
+  expect(r.result).toEqual({ ok: true, outs: ['a', 'b', 'c', 'd', 'e'].map(o) });
+  expect(calls(root)).toEqual([
+    { speaker: 'host', text: 'hello' },
+    { speaker: 'oak', text: 'creak' },
+    { speaker: 'pip', text: 'squeak' },
+    { speaker: 'host', text: 'again' },
+    { speaker: 'host', text: 'null' },
+  ]);
+});
+
+test.skipIf(process.platform === 'win32')('CLI: a failing cast voice exits 1 with its stderr and makes no further calls', () => {
+  const root = castProject(CAST);
+  const o = (n) => path.join(root, `${n}.wav`);
+  const r = runCli(root, [
+    { text: 'one', out: o('a') },
+    { text: 'two', out: o('b'), speaker: 'Crack' },
+    { text: 'three', out: o('c') },
+  ]);
+  expect(r.status).toBe(1);
+  expect(r.result).toMatchObject({ ok: false, line: 1, speaker: 'Crack' });
+  expect(r.stderr).toMatch(/tts: no model for broken/);
+  expect(calls(root)).toEqual([{ speaker: 'host', text: 'one' }, { speaker: 'broken', text: 'two' }]);
+});
+
+test.skipIf(process.platform === 'win32')('CLI: unknown, voiceless and kokoro-voiced speakers run no command', () => {
+  const root = castProject(CAST);
+  const o = (n) => path.join(root, `${n}.wav`);
+  const cases = [
+    ['Nobody', /unknown speaker "Nobody" \(speakers: Bit, Gran Oak, Pip, Moss, Fern, Crack\)/],
+    ['Moss', /"Moss" has no voice and never speaks lines/],
+    ['fern', /"Fern" has a 'kokoro' voice, not 'command'/],
+  ];
+  for (const [speaker, re] of cases) {
+    const r = runCli(root, [{ text: 'first', out: o('a') }, { text: 'x', out: o('b'), speaker }]);
+    expect(r.status).toBe(1);
+    expect(r.result).toMatchObject({ ok: false, line: 1 });
+    expect(r.stderr).toMatch(re);
+  }
+  const bad = runCli(root, [{ text: 'x', out: o('a'), speaker: '' }]);
+  expect(bad.result).toMatchObject({ ok: false, line: 0, error: expect.stringMatching(/speaker\?/) });
+  expect(calls(root)).toEqual([]);
+});
+
+test('speakLines: a missing character names inspectCharacter\'s reason', () => {
+  const r = speakLines(project(undefined), [{ text: 'x', out: '/tmp/x.wav' }]);
+  expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/no valid saved character in .*: no character saved in/) });
+});

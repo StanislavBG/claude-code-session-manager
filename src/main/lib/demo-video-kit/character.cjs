@@ -259,9 +259,13 @@ function speakWithCommand(voice, text, out, { cwd } = {}) {
 }
 
 /**
- * Speak every narration line with the saved character's command voice, in
- * order, cwd = the project root. No fallback voice: the first failure stops
- * the run. -> {ok: true, outs} | {ok: false, line?, error}
+ * Speak every narration line, in order, cwd = the project root. A line is
+ * { text, out, speaker? }: an absent/null speaker (or the host's name) uses the
+ * host's voice; a cast member's name (case-insensitive, trimmed) uses that
+ * member's voice. Every line's speaker is resolved before any voice runs; only
+ * 'command' voices speak here (Kokoro stays on the persona's recipe). No
+ * fallback voice: the first failure stops the run.
+ * -> {ok: true, outs} | {ok: false, line?, speaker?, error}
  */
 function speakLines(projectRoot, lines) {
   let root;
@@ -270,22 +274,37 @@ function speakLines(projectRoot, lines) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
-  if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: 'lines must be a non-empty array of { text, out }' };
-  const ch = readCharacter(root);
-  if (!ch) return { ok: false, error: `no valid saved character in ${characterDir(root)}` };
-  const voice = ch.json.voice;
-  if (voice.engine !== 'command') {
-    return { ok: false, error: `the saved character's voice.engine is '${voice.engine}', not 'command'` };
-  }
-  const outs = [];
+  if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: 'lines must be a non-empty array of { text, out, speaker? }' };
+  const ch = inspectCharacter(root);
+  if (!ch.ok) return { ok: false, error: `no valid saved character in ${characterDir(root)}: ${ch.error}` };
+  const host = { name: ch.json.name, voice: ch.json.voice };
+  const cast = Array.isArray(ch.json.cast) ? ch.json.cast : [];
+  const speakers = [host, ...cast];
+  const byKey = new Map(speakers.map((m) => [String(m.name).trim().toLowerCase(), m]));
+  const names = speakers.map((m) => String(m.name).trim());
+  const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
+  const resolved = [];
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (!l || typeof l.text !== 'string' || !l.text || typeof l.out !== 'string' || !l.out) {
-      return { ok: false, line: i, error: `line ${i} must be { text, out } with non-empty strings` };
+    const sp = l ? l.speaker : undefined;
+    if (!l || !nonEmpty(l.text) || !nonEmpty(l.out) || !(sp === undefined || sp === null || (nonEmpty(sp) && sp.trim()))) {
+      return { ok: false, line: i, error: `line ${i} must be { text, out, speaker? } with non-empty strings` };
     }
-    const r = speakWithCommand(voice, l.text, l.out, { cwd: root });
-    if (!r.ok) return { ok: false, line: i, error: r.error };
-    outs.push(l.out);
+    const m = sp === undefined || sp === null ? host : byKey.get(sp.trim().toLowerCase());
+    if (!m) return { ok: false, line: i, error: `line ${i}: unknown speaker "${sp}" (speakers: ${names.join(', ')})` };
+    const name = String(m.name).trim();
+    if (!m.voice) return { ok: false, line: i, error: `line ${i}: "${name}" has no voice and never speaks lines` };
+    if (m.voice.engine !== 'command') {
+      return { ok: false, line: i, error: `line ${i}: "${name}" has a '${m.voice.engine}' voice, not 'command'; speak it with the Kokoro recipe` };
+    }
+    resolved.push({ name, voice: m.voice, text: l.text, out: l.out });
+  }
+  const outs = [];
+  for (let i = 0; i < resolved.length; i++) {
+    const { name, voice, text, out } = resolved[i];
+    const r = speakWithCommand(voice, text, out, { cwd: root });
+    if (!r.ok) return { ok: false, line: i, speaker: name, error: `"${name}": ${r.error}` };
+    outs.push(out);
   }
   return { ok: true, outs };
 }
@@ -307,7 +326,7 @@ module.exports = {
   COMMAND_TIMEOUT_MS,
 };
 
-// CLI: node character.cjs speak spec.json   (spec { projectRoot, lines })
+// CLI: node character.cjs speak spec.json   (spec { projectRoot, lines: [{ text, out, speaker? }] })
 if (require.main === module) {
   const [cmdName, specPath] = process.argv.slice(2);
   let result;

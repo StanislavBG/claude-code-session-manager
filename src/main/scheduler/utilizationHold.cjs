@@ -98,4 +98,23 @@ function evaluateAutoDispatchHold({ firePolicy, threshold, reading, now }) {
   };
 }
 
-module.exports = { evaluateAutoDispatchHold };
+const MINUTE_MS = 60_000;
+
+/**
+ * Identity of one auto-dispatch hold: reason + window + reset, for the
+ * once-per-hold audit keys. The usage API returns a different resets_at string
+ * for the same reset on almost every fetch (329 distinct strings for one
+ * weekly reset across 640 heartbeat lines, about ±0.5 s either side of the
+ * minute), so the reset is rounded to the nearest whole minute. An unparseable
+ * resetsAt is used raw ('' when absent) so the key stays stable.
+ * @param {{ reason: string, window?: string | null, resetsAt?: string | null }} hold
+ * @returns {string}
+ */
+function holdIdentityKey(hold) {
+  const raw = hold.resetsAt ?? '';
+  const ms = typeof hold.resetsAt === 'string' ? Date.parse(hold.resetsAt) : NaN;
+  const reset = Number.isFinite(ms) ? new Date(Math.round(ms / MINUTE_MS) * MINUTE_MS).toISOString() : raw;
+  return `${hold.reason}|${hold.window ?? ''}|${reset}`;
+}
+
+module.exports = { evaluateAutoDispatchHold, holdIdentityKey };

@@ -36,7 +36,16 @@ let seq = 0;
 
 function iso(offsetMs) { return new Date(Date.now() + offsetMs).toISOString(); }
 
-function weekly(pct) {
+// The same reset as the usage API reports it fetch to fetch: microsecond
+// strings jittering about ±0.5 s either side of one minute (real offsets
+// recorded 2026-11-23/24), three days out.
+function jitteredResets() {
+  const base = Math.ceil((Date.now() + 3 * DAY) / 60_000) * 60_000;
+  const at = (ms, frac) => `${new Date(ms).toISOString().slice(0, 19)}.${frac}+00:00`;
+  return [at(base, '401695'), at(base, '301873'), at(base - 1000, '973643'), at(base - 1000, '539462')];
+}
+
+function weekly(pct, weeklyResetsAt = iso(3 * DAY)) {
   return {
     kind: 'ok',
     data: {
@@ -44,16 +53,16 @@ function weekly(pct) {
         five_hour: { utilization: 10, resets_at: iso(2 * HOUR) },
         limits: [
           { kind: 'session', percent: 10, resets_at: iso(2 * HOUR), scope: null },
-          { kind: 'weekly_all', percent: pct, resets_at: iso(3 * DAY), scope: null },
+          { kind: 'weekly_all', percent: pct, resets_at: weeklyResetsAt, scope: null },
         ],
       },
     },
   };
 }
 
-async function reading(pct) {
+async function reading(pct, weeklyResetsAt) {
   billing.usageCircuit.recordSuccess({});
-  billing.fetchUsage = async () => weekly(pct);
+  billing.fetchUsage = async () => weekly(pct, weeklyResetsAt);
   await scheduler.refreshNextReset();
 }
 
@@ -201,5 +210,41 @@ test('one resume_recovery_held line per row per hold; a cleared then new hold au
   await reading(97);
   await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
   await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  expect(heldEvents(t.slug)).toHaveLength(2);
+});
+
+test('two deferrals whose holds differ only by jittered resets_at write one resume_recovery_held line', async () => {
+  const [a, b, c, d] = jitteredResets();
+  await reading(96, a);
+  const t = setupRow();
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  await reading(96, b);
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  await reading(96, c);
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  await reading(96, d);
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  expect(spawned).toEqual([]);
+  expect(heldEvents(t.slug)).toHaveLength(1);
+});
+
+test('a row removed from the queue while held loses its key on the next tick', async () => {
+  const [a] = jitteredResets();
+  await reading(96, a);
+  const t = setupRow();
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  expect(heldEvents(t.slug)).toHaveLength(1);
+
+  // The row is cancelled/archived away while the hold stays in force.
+  fs.writeFileSync(t.queueFile, JSON.stringify({ config: { firePolicy: 'when-available', utilizationThreshold: 90 }, jobs: [] }));
+  queueStore.bustCwdCache();
+  const r = await scheduler.tickQueue();
+  expect(r.reason).toBe('utilization-held');
+
+  // Same slug back under the same hold: its key was dropped, so it audits again.
+  fs.writeFileSync(t.queueFile, JSON.stringify({ config: { firePolicy: 'when-available', utilizationThreshold: 90 }, jobs: [t.job] }));
+  queueStore.bustCwdCache();
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  expect(spawned).toEqual([]);
   expect(heldEvents(t.slug)).toHaveLength(2);
 });

@@ -36,7 +36,16 @@ let seq = 0;
 
 function iso(offsetMs) { return new Date(Date.now() + offsetMs).toISOString(); }
 
-function weekly(pct) {
+// The same reset as the usage API reports it fetch to fetch: microsecond
+// strings jittering about ±0.5 s either side of one minute (real offsets
+// recorded 2026-11-23/24), three days out.
+function jitteredResets() {
+  const base = Math.ceil((Date.now() + 3 * DAY) / 60_000) * 60_000;
+  const at = (ms, frac) => `${new Date(ms).toISOString().slice(0, 19)}.${frac}+00:00`;
+  return [at(base, '401695'), at(base, '301873'), at(base - 1000, '973643'), at(base - 1000, '539462')];
+}
+
+function weekly(pct, weeklyResetsAt = iso(3 * DAY)) {
   return {
     kind: 'ok',
     data: {
@@ -44,7 +53,7 @@ function weekly(pct) {
         five_hour: { utilization: 10, resets_at: iso(2 * HOUR) },
         limits: [
           { kind: 'session', percent: 10, resets_at: iso(2 * HOUR), scope: null },
-          { kind: 'weekly_all', percent: pct, resets_at: iso(3 * DAY), scope: null },
+          { kind: 'weekly_all', percent: pct, resets_at: weeklyResetsAt, scope: null },
         ],
       },
     },
@@ -239,4 +248,18 @@ test('(f) hold, a reading under 90, then the same hold again appends a second ev
   expect(spawnsOf(req.slug)).toEqual([]);
   expect(isPending(req)).toBe(true);
   expect(auditEvents('tool_confirmation_resume_held', req.slug)).toHaveLength(2);
+});
+
+test('(g) two deferrals whose holds differ only by jittered resets_at write one held line', async () => {
+  const [a, b, c, d] = jitteredResets();
+  await goodReading(weekly(96, a));
+  const req = await parkedRequest('Approve');
+  await scheduler.tickQueue();
+  for (const r of [b, c, d]) {
+    await goodReading(weekly(96, r));
+    await scheduler.tickQueue();
+  }
+  expect(spawnsOf(req.slug)).toEqual([]);
+  expect(isPending(req)).toBe(true);
+  expect(auditEvents('tool_confirmation_resume_held', req.slug)).toHaveLength(1);
 });

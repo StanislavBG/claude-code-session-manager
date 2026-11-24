@@ -178,3 +178,38 @@ test('windows take precedence over the top-level single reading', () => {
   const reading = { ...single(99), windows: [{ window: 'weekly_all', percent: 40, resetsAt: LATER }] };
   expect(evalHold({ reading })).toBeNull();
 });
+
+// Real usage-API resets_at strings for the Thu 2026-11-26 17:00Z weekly reset
+// (recorded 2026-11-23/24): the same reset jitters about ±0.5 s per fetch.
+const JITTERED = [
+  '2026-11-26T17:00:00.401695+00:00',
+  '2026-11-26T17:00:00.301873+00:00',
+  '2026-11-26T16:59:59.973643+00:00',
+  '2026-11-26T16:59:59.539462+00:00',
+];
+function heldAt(resetsAt, window = 'weekly_all', reason = 'utilization-held') {
+  return { reason, window, percent: 96, threshold: 90, resetsAt, detail: 'x' };
+}
+
+test('holdIdentityKey: jittered resets_at strings for one reset give one key', () => {
+  const keys = new Set(JITTERED.map((r) => utilizationHold.holdIdentityKey(heldAt(r))));
+  expect(keys.size).toBe(1);
+  expect([...keys][0]).toBe('utilization-held|weekly_all|2026-11-26T17:00:00.000Z');
+});
+
+test('holdIdentityKey: a reset a minute away, another window or another reason differ', () => {
+  const base = utilizationHold.holdIdentityKey(heldAt(JITTERED[0]));
+  expect(utilizationHold.holdIdentityKey(heldAt('2026-11-26T17:01:00.401695+00:00'))).not.toBe(base);
+  expect(utilizationHold.holdIdentityKey(heldAt('2026-11-26T16:59:00.000000+00:00'))).not.toBe(base);
+  expect(utilizationHold.holdIdentityKey(heldAt(JITTERED[0], 'five_hour'))).not.toBe(base);
+  expect(utilizationHold.holdIdentityKey(heldAt(JITTERED[0], 'weekly_all', 'manual-fire-policy'))).not.toBe(base);
+});
+
+test('holdIdentityKey: null and unparseable resetsAt give stable keys', () => {
+  const manual = { reason: 'manual-fire-policy', window: null, resetsAt: null };
+  expect(utilizationHold.holdIdentityKey(manual)).toBe('manual-fire-policy||');
+  expect(utilizationHold.holdIdentityKey({ ...manual })).toBe(utilizationHold.holdIdentityKey(manual));
+  expect(utilizationHold.holdIdentityKey(heldAt('not a date'))).toBe('utilization-held|weekly_all|not a date');
+  expect(utilizationHold.holdIdentityKey(heldAt('not a date'))).toBe(utilizationHold.holdIdentityKey(heldAt('not a date')));
+  expect(utilizationHold.holdIdentityKey({ reason: 'utilization-held' })).toBe('utilization-held||');
+});

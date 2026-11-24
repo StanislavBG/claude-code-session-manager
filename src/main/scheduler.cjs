@@ -9612,13 +9612,40 @@ const toolConfirmationHeldKeys = new Map();
 // slug -> hold key under which its 'investigation_held' / 'resume_recovery_held'
 // audit event was already appended (one event per row per hold). A row's key
 // is removed when no hold is in force for it (it launches), so a later hold
-// audits it once again.
+// audits it once again; every tick also clears both Maps when no hold is in
+// force and drops slugs no longer in the queue (pruneRowHeldKeys).
 const investigationHeldKeys = new Map();
 const resumeRecoveryHeldKeys = new Map();
 
-/** Identity of one auto-dispatch hold: reason + window + resetsAt. */
+/**
+ * Identity of one auto-dispatch hold: reason + window + reset rounded to the
+ * minute (utilizationHold.holdIdentityKey — the usage API jitters resets_at
+ * by about ±0.5 s from fetch to fetch).
+ */
 function autoDispatchHoldKey(hold) {
-  return `${hold.reason}|${hold.window ?? ''}|${hold.resetsAt ?? ''}`;
+  return autoDispatchHold.holdIdentityKey(hold);
+}
+
+/**
+ * Tick-level bound on the per-row held-key Maps. No hold in force → clear
+ * both (a later hold audits every row once again); a hold in force → drop
+ * slugs that are no longer a queue row (cancelled or archived while held).
+ * `rawHold` is the tick's own hold decision, before any human bypass.
+ * @param {any[] | undefined} jobs
+ * @param {any} rawHold
+ */
+function pruneRowHeldKeys(jobs, rawHold) {
+  if (!rawHold) {
+    investigationHeldKeys.clear();
+    resumeRecoveryHeldKeys.clear();
+    return;
+  }
+  const liveSlugs = new Set((jobs || []).map((j) => j.slug));
+  for (const keys of [investigationHeldKeys, resumeRecoveryHeldKeys]) {
+    for (const slug of keys.keys()) {
+      if (!liveSlugs.has(slug)) keys.delete(slug);
+    }
+  }
 }
 
 /**
@@ -9661,6 +9688,8 @@ async function processToolConfirmationAnswers(state, { human = false } = {}) {
     // tick that bypasses a hold in force does not count as the hold clearing.
     const rawHold = currentAutoDispatchHold(state.config);
     if (!rawHold) toolConfirmationHeldKeys.clear();
+    // Same bound for the per-row investigation / resume-recovery held keys.
+    pruneRowHeldKeys(state.jobs, rawHold);
     if (!pending.length) return;
     // Same hold decision as the tick running this pass: an approval starts a
     // `claude -p --resume`, so an automatic tick under the hold leaves it

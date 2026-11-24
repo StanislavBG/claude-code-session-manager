@@ -341,3 +341,47 @@ describe('buildPlans validate-defined groups', () => {
     expect(ps.every((p) => p.validateSlug === null)).toBe(true)
   })
 })
+
+describe('cancelled rows (main sets cancelled: true)', () => {
+  const mixed = () => [
+    job('1-a'),
+    job('2-cancelled', { status: 'failed', cancelled: true, dependsOn: ['1-a'] }),
+    job('3-parked-cancelled', { status: 'needs_review', cancelled: true, dependsOn: ['1-a'] }),
+    job('4-broke', { status: 'failed', dependsOn: ['2-cancelled'] }),
+  ]
+  it('summarizeQueue counts cancelled jobs in none of failedCount / needsReviewCount / needsYou', () => {
+    expect(summarizeQueue(mixed(), NOW)).toMatchObject({ failedCount: 1, needsReviewCount: 0, needsYou: 1, needsYouStage: 3 })
+    const onlyCancelled = [
+      job('1-a', { status: 'failed', cancelled: true }),
+      job('2-b', { status: 'needs_review', cancelled: true }),
+    ]
+    expect(summarizeQueue(onlyCancelled, NOW)).toMatchObject({ failedCount: 0, needsReviewCount: 0, needsYou: 0, needsYouStage: null })
+  })
+  it('needsYouStage skips a stage whose only failed row is cancelled', () => {
+    const js = [job('1-a', { status: 'failed', cancelled: true }), job('2-b', { status: 'failed', dependsOn: ['1-a'] })]
+    expect(summarizeQueue(js, NOW).needsYouStage).toBe(2)
+  })
+  it('classifies a cancelled job as kind cancelled with trailing cancelled, and flags the PlanRow', () => {
+    const js = mixed()
+    expect(row(js, '2-cancelled')).toMatchObject({ rowKind: 'cancelled', rowTrailing: 'cancelled', cancelled: true })
+    expect(row(js, '3-parked-cancelled')).toMatchObject({ rowKind: 'cancelled', rowTrailing: 'cancelled', cancelled: true })
+    expect(row(js, '4-broke')).toMatchObject({ rowKind: 'failed', rowTrailing: 'failed' })
+    expect(row(js, '4-broke').cancelled).toBeUndefined()
+  })
+  it('a cancelled row is neither attention nor a stuck blocker', () => {
+    const js = [
+      job('1-a', { status: 'completed' }),
+      job('2-cancelled', { status: 'failed', cancelled: true, dependsOn: ['1-a'] }),
+      job('3-wait', { dependsOn: ['2-cancelled'] }),
+    ]
+    const p = p1(js)
+    expect(p.stages[1].state).toBe('done')
+    expect(row(js, '3-wait')).toMatchObject({ rowKind: 'dep' })
+    expect(p.stages[2].state).toBe('held')
+    expect(p.stages[2].blockedCount).toBe(0)
+    // Contrast: a real failure as the blocker makes it stuck.
+    const real = [job('1-a', { status: 'completed' }), job('2-broke', { status: 'failed', dependsOn: ['1-a'] }), job('3-wait', { dependsOn: ['2-broke'] })]
+    expect(p1(real).stages[1].state).toBe('blocked')
+    expect(p1(real).stages[2].state).toBe('blocked')
+  })
+})

@@ -228,3 +228,20 @@ describe('buildNeedsYouRows', () => {
     })
   })
 })
+
+describe('buildNeedsYouRows — cancelled rows (main sets cancelled: true)', () => {
+  const cwd = '/home/bilko/Projects/session-manager'
+  it('emits no job-failed row for a cancelled failed job, but still one for a real failure next to it', () => {
+    const jobs = [
+      { slug: '900-cancelled', title: 'Cancelled', cwd, status: 'failed', error: 'cancelled by user', cancelled: true },
+      { slug: '901-parked-cancelled', title: 'Parked cancelled', cwd, status: 'needs_review', error: 'cancelled', cancelled: true },
+      { slug: '902-broke', title: 'Broke', cwd, status: 'failed', error: 'exit 1' },
+    ]
+    const rows = buildNeedsYouRows({}, {}, jobs)
+    expect(rows.map((r) => [r.kind, r.jobSlug])).toEqual([['job-failed', '902-broke']])
+  })
+  it('a failed job with cancelled: false still surfaces', () => {
+    const jobs = [{ slug: '903-x', title: 'X', cwd, status: 'failed', error: 'exit 1', cancelled: false }]
+    expect(buildNeedsYouRows({}, {}, jobs).map((r) => r.kind)).toEqual(['job-failed'])
+  })
+})

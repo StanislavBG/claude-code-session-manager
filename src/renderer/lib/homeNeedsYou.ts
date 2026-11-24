@@ -47,6 +47,8 @@ export interface ScheduleJobLite {
   statusHistory?: { to: string; at: string }[]
   /** Set by findOverrunningJobs' escalation stamp while status is 'running'; cleared on finish/reap/reset. */
   overrun?: { ratio: number; ranMs: number; estimateMinutes: number; at: string }
+  /** True when a human cancelled this row — set only by main (cancelledRow.cjs); never re-derived here. */
+  cancelled?: boolean
 }
 
 /** Structural subset of preload's NeedsYouItem — kept local so this module stays dependency-free. */
@@ -230,7 +232,8 @@ export function buildNeedsYouRows(
     }
     // needs_review is deliberately absent: a parked PRD self-heals (scheduler
     // ladder), so it is the scheduler's work, not a request for the human.
-    if (job.status !== 'failed') continue
+    // A cancelled row was a human's decision, not a failure to act on.
+    if (job.status !== 'failed' || job.cancelled === true) continue
     rows.push({
       id: `job:${job.slug}`,
       kind: 'job-failed',

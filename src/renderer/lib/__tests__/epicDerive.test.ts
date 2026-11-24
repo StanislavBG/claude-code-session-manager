@@ -417,3 +417,59 @@ describe('epicDerive.epicStats', () => {
     expect(at(EPIC_CONTEXT_WARN_TOKENS + 1)?.contextLarge).toBe(true)
   })
 })
+
+describe('epicDerive — cancelled jobs (main sets cancelled: true)', () => {
+  const session = { 'epic-1': makeSession() }
+  it('a cancelled failed or needs_review job never makes the Epic failed/attention', () => {
+    const snapshots = makeSnapshots({
+      sessions: session,
+      jobs: [
+        makeJob({ slug: '100-cancelled', status: 'failed', cancelled: true }),
+        makeJob({ slug: '101-parked-cancelled', status: 'needs_review', cancelled: true }),
+      ],
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('active')
+    expect(epicQueuedDetail('epic-1', snapshots)).toBeUndefined()
+  })
+  it('a real failure next to cancelled rows still paints failed and names the real slug', () => {
+    const snapshots = makeSnapshots({
+      sessions: session,
+      jobs: [
+        makeJob({ slug: '100-cancelled', status: 'failed', cancelled: true }),
+        makeJob({ slug: '101-parked-cancelled', status: 'needs_review', cancelled: true }),
+        makeJob({ slug: '102-broke', status: 'failed' }),
+      ],
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('failed')
+    expect(epicQueuedDetail('epic-1', snapshots)).toBe('failed — PRD 102-broke did not complete')
+  })
+  it('a real park next to a cancelled failure paints attention, not failed', () => {
+    const snapshots = makeSnapshots({
+      sessions: session,
+      jobs: [
+        makeJob({ slug: '100-cancelled', status: 'failed', cancelled: true }),
+        makeJob({ slug: '103-parked', status: 'needs_review' }),
+      ],
+    })
+    expect(epicDisplayStatus('epic-1', snapshots)).toBe('attention')
+    expect(epicQueuedDetail('epic-1', snapshots)).not.toMatch(/100-cancelled/)
+  })
+  it('epicPrds carries cancelled: true only when its job does', () => {
+    const prd = (slug: string): PrdListItem => ({
+      slug, parallelGroup: 1, title: slug, cwd: '/proj', estimateMinutes: 1, mtimeMs: 1, sourcePromptId: 'epic-1',
+    })
+    const snapshots = makeSnapshots({
+      prds: [prd('100-cancelled'), prd('101-parked-cancelled'), prd('102-broke')],
+      jobs: [
+        makeJob({ slug: '100-cancelled', status: 'failed', cancelled: true }),
+        makeJob({ slug: '101-parked-cancelled', status: 'needs_review', cancelled: true }),
+        makeJob({ slug: '102-broke', status: 'failed' }),
+      ],
+    })
+    const bySlug = new Map(epicPrds('epic-1', snapshots).map((p) => [p.slug, p]))
+    expect(bySlug.get('100-cancelled')?.cancelled).toBe(true)
+    expect(bySlug.get('101-parked-cancelled')?.cancelled).toBe(true)
+    expect(bySlug.get('102-broke')?.cancelled).toBeUndefined()
+    expect(bySlug.get('102-broke')?.status).toBe('failed')
+  })
+})

@@ -88,8 +88,9 @@ export function epicDisplayStatus(epicId: string, snapshots: EpicSnapshots): Epi
   if (hasRefutedPrd) return 'refuted'
 
   const epicJobs = snapshots.jobs.filter((j) => j.sourcePromptId === epicId)
-  if (epicJobs.some((j) => j.status === 'failed')) return 'failed'
-  if (epicJobs.some((j) => j.status === 'needs_review')) return 'attention'
+  // A cancelled row (main's cancelled: true) was a human's decision — never a failure or a park.
+  if (epicJobs.some((j) => j.status === 'failed' && j.cancelled !== true)) return 'failed'
+  if (epicJobs.some((j) => j.status === 'needs_review' && j.cancelled !== true)) return 'attention'
 
   const chatQueuedPosition = chat?.queuedPosition ?? 0
   const chatRunning = chat?.running === true && chatQueuedPosition === 0
@@ -126,11 +127,11 @@ export function epicQueuedDetail(epicId: string, snapshots: EpicSnapshots): stri
   // whose chat is ALSO queued behind the session-slot pool could show a
   // "failed" chip next to a "queued — waiting on a session slot" tooltip.
   const epicJobs = snapshots.jobs.filter((j) => j.sourcePromptId === epicId)
-  const failedJob = epicJobs.find((j) => j.status === 'failed')
+  const failedJob = epicJobs.find((j) => j.status === 'failed' && j.cancelled !== true)
   if (failedJob) {
     return `failed — PRD ${failedJob.slug} did not complete`
   }
-  const needsReviewJob = epicJobs.find((j) => j.status === 'needs_review')
+  const needsReviewJob = epicJobs.find((j) => j.status === 'needs_review' && j.cancelled !== true)
   if (needsReviewJob) {
     // A park is the scheduler's own self-heal, never a question for the human.
     return parkedJobLine(needsReviewJob)
@@ -163,6 +164,8 @@ export interface EpicPrd {
    *  job already ran to completion (or failure) and the file was moved out
    *  of the live `prds/` dir. See PrdListItem.archived. */
   archived: boolean
+  /** True when the joined job carries main's cancelled: true (cancelledRow.cjs) — a human cancelled it. */
+  cancelled?: boolean
   job: ScheduleJob | null
 }
 
@@ -193,6 +196,7 @@ export function epicPrds(epicId: string, snapshots: EpicSnapshots): EpicPrd[] {
         parallelGroup: p.parallelGroup,
         status,
         archived,
+        ...(job?.cancelled === true ? { cancelled: true } : {}),
         job,
       }
     })

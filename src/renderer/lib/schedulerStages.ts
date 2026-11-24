@@ -26,7 +26,7 @@ import { prdNumber } from '../components/tabs/scheduler/sched-primitives'
 export type PlanStatus = 'active' | 'queued' | 'done' | 'draft'
 export type StageState = 'done' | 'running' | 'held' | 'blocked' | 'pending'
 export type RowKind =
-  | 'done' | 'running' | 'next' | 'eta' | 'retry' | 'dep' | 'failed' | 'review' | 'gate' | 'quarantined'
+  | 'done' | 'running' | 'next' | 'eta' | 'retry' | 'dep' | 'failed' | 'review' | 'gate' | 'quarantined' | 'cancelled'
 
 export interface PlanOpts {
   /** promptSessions store's sessions — Epic labels. */
@@ -57,6 +57,8 @@ export interface PlanRow {
   /** dependsOn entries in OTHER Epics — ignored for staging, still reported. */
   crossEpicDeps: string[]
   blockers: BacklogBlocker[]
+  /** True when the job carries main's cancelled: true (cancelledRow.cjs) — a human cancelled it. */
+  cancelled?: boolean
   job: ScheduleJob
 }
 
@@ -118,6 +120,10 @@ const isDone = (s: string) => s === 'completed' || s === 'skipped'
 const isRunning = (s: string) => s === 'running' || s === 'investigating'
 const isAttention = (s: string) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
 const isStuckBlocker = (s: string | null) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
+/** Main's flag only (cancelledRow.cjs) — never re-derived from cancelledAt/error/statusHistory here. */
+const isCancelled = (j: { cancelled?: boolean } | undefined | null) => j?.cancelled === true
+/** A cancelled row is terminal: a human's decision, never attention, never awaiting work. */
+const isSettled = (r: PlanRow) => isDone(r.status) || isCancelled(r)
 
 /** '~now' / '~42s' / '~2m' / '~3h18m'. */
 export function formatEta(ms: number): string {
@@ -169,7 +175,7 @@ interface Classified { kind: RowKind; trailing: string; held: boolean; blocked: 
 
 function planStatusOf(rows: PlanRow[]): PlanStatus {
   if (rows.some((r) => isRunning(r.status))) return 'active'
-  if (rows.every((r) => isDone(r.status))) return 'done'
+  if (rows.every(isSettled)) return 'done'
   const nonQuarantined = rows.filter((r) => r.status !== 'quarantined').length
   // "every row quarantined" — which also covers "zero edges AND zero non-quarantined rows".
   if (nonQuarantined === 0) return 'draft'
@@ -387,6 +393,7 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
           deps,
           crossEpicDeps: (j.dependsOn ?? []).filter((d) => !inEpic.has(d)),
           blockers: n.blockers,
+          ...(isCancelled(j) ? { cancelled: true } : {}),
           job: j,
         }
       })
@@ -406,13 +413,14 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
         } else if (isRunning(s)) {
           const el = j.startedAt ? Math.max(0, now - Date.parse(j.startedAt)) : null
           c = { kind: 'running', trailing: el === null ? '' : runningTrailing(j, el), held: false, blocked: false }
-        } else if (s === 'failed') c = { kind: 'failed', trailing: 'failed', held: false, blocked: false }
+        } else if (isCancelled(j)) c = { kind: 'cancelled', trailing: 'cancelled', held: false, blocked: false }
+        else if (s === 'failed') c = { kind: 'failed', trailing: 'failed', held: false, blocked: false }
         else if (s === 'needs_review') c = { kind: 'review', trailing: 'review', held: false, blocked: false }
         else if (s === 'quarantined') c = { kind: 'quarantined', trailing: 'quarantined', held: false, blocked: false }
         else {
           const unmet = node.blockers.filter((b) => !b.missing && b.status !== 'completed')
           if (unmet.length > 0) {
-            const stuck = unmet.some((b) => isStuckBlocker(b.status))
+            const stuck = unmet.some((b) => isStuckBlocker(b.status) && !isCancelled(bySlug.get(b.slug)))
             const first = unmet[0].slug
             c = { kind: 'dep', trailing: `←${prdNumber(first) ?? first}`, held: !stuck, blocked: stuck }
           } else if (j.heldReason) {
@@ -437,12 +445,13 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
           return r.status === 'pending' && (k === 'eta' || k === 'retry')
         })
         if (next) { const c = cls.get(next.slug)!; c.kind = 'next'; c.trailing = 'next' }
-        let doneCount = 0, runningCount = 0, heldCount = 0, blockedCount = 0, pendingCount = 0, attention = 0
+        let doneCount = 0, runningCount = 0, heldCount = 0, blockedCount = 0, pendingCount = 0, attention = 0, cancelledCount = 0
         for (const r of srows) {
           const c = cls.get(r.slug)!
           r.rowKind = c.kind
           r.rowTrailing = c.trailing
-          if (isDone(r.status)) doneCount++
+          if (isCancelled(r)) cancelledCount++
+          else if (isDone(r.status)) doneCount++
           else if (isRunning(r.status)) runningCount++
           else if (r.status === 'pending') {
             pendingCount++
@@ -451,7 +460,7 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
           } else if (isAttention(r.status)) attention++
         }
         const state: StageState =
-          doneCount === srows.length ? 'done'
+          doneCount + cancelledCount === srows.length ? 'done'
             : runningCount > 0 ? 'running'
               : blockedCount + attention > 0 ? 'blocked'
                 : heldCount > 0 ? 'held'
@@ -534,6 +543,8 @@ export function summarizeQueue(jobs: ScheduleJob[], now: number = Date.now()): Q
       const d = j.dependsOn ?? []
       if (d.every((s) => bySlug.get(s) === undefined || bySlug.get(s)!.status === 'completed')) readyNow++
     } else if (isRunning(j.status)) inFlight++
+    // A cancelled row was a human's decision — none of failed / needs-review / needs-you.
+    else if (isCancelled(j)) continue
     else if (j.status === 'failed') failedCount++
     else if (j.status === 'needs_review') needsReviewCount++
     else if (j.status === 'quarantined') quarantined++
@@ -546,7 +557,7 @@ export function summarizeQueue(jobs: ScheduleJob[], now: number = Date.now()): Q
   if (needsYou > 0) {
     for (const p of buildPlans(cj, { sessions: {}, now })) {
       for (const s of p.stages) {
-        if (s.rows.some((r) => r.status === 'failed' || r.status === 'quarantined')) {
+        if (s.rows.some((r) => !isCancelled(r) && (r.status === 'failed' || r.status === 'quarantined'))) {
           if (needsYouStage === null || s.n < needsYouStage) needsYouStage = s.n
           break
         }

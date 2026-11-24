@@ -265,6 +265,31 @@ async function parsePrd(filePath) {
 }
 
 /** Test-only: drop both cache layers so successive runs see fresh disk state. */
+/**
+ * Drop every dir-cache and file-cache entry whose folder is not in `dirs`.
+ * listPrdFiles prunes only within the folder it lists, so a folder the
+ * scheduler stopped scanning altogether (a removed Epic's prds/) would keep
+ * its entries for the life of the process. scheduler.cjs calls this once per
+ * pass with the full candidate folder list.
+ * @param {Iterable<string>} dirs
+ */
+function retainPrdDirs(dirs) {
+  const norm = (d) => path.dirname(path.join(d, 'x')); // normalized, no trailing sep
+  const live = new Set();
+  for (const d of dirs) live.add(norm(d));
+  for (const k of prdDirCache.keys()) {
+    if (!live.has(norm(k))) prdDirCache.delete(k);
+  }
+  for (const k of prdFileCache.keys()) {
+    if (!live.has(path.dirname(k))) prdFileCache.delete(k);
+  }
+}
+
+/** Test-only: current cache keys. */
+function _cacheKeys() {
+  return { dirs: [...prdDirCache.keys()], files: [...prdFileCache.keys()] };
+}
+
 function _resetCache() {
   prdDirCache.clear();
   prdFileCache.clear();
@@ -467,5 +492,7 @@ module.exports = {
   pruneStaleReservations,
   maxParallelGroupInUse,
   PRD_READ_MAX_BYTES,
+  retainPrdDirs,
   _resetCache,
+  _cacheKeys,
 };

@@ -73,3 +73,48 @@ describe('prdParser.listPrdFiles per-dir cache', () => {
     expect(readSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('prdParser.retainPrdDirs', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-prd-retain-'));
+  let a;
+  let b;
+
+  beforeEach(() => {
+    prdParser._resetCache();
+    a = fs.mkdtempSync(path.join(root, 'a-'));
+    b = fs.mkdtempSync(path.join(root, 'b-'));
+    fs.writeFileSync(path.join(a, '9401-a-one.md'), '---\ntitle: A1\n---\n\n# Goal\na\n');
+    fs.writeFileSync(path.join(b, '9501-b-one.md'), '---\ntitle: B1\n---\n\n# Goal\nb\n');
+  });
+
+  afterEach(() => { vi.restoreAllMocks(); });
+  afterAll(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+  test('drops a folder no longer scanned; the kept folder still hits its cache', async () => {
+    const lists = await Promise.all([prdParser.listPrdFiles(a), prdParser.listPrdFiles(b)]);
+    await Promise.all(lists.flat().map((f) => prdParser.parsePrd(f)));
+    const before = prdParser._cacheKeys();
+    expect(before.dirs.sort()).toEqual([a, b].sort());
+    expect(before.files.sort()).toEqual([path.join(a, '9401-a-one.md'), path.join(b, '9501-b-one.md')].sort());
+
+    prdParser.retainPrdDirs([a]);
+
+    const after = prdParser._cacheKeys();
+    expect(after.dirs).toEqual([a]);
+    expect(after.files).toEqual([path.join(a, '9401-a-one.md')]);
+
+    const readSpy = vi.spyOn(fsp, 'readFile');
+    const readdirSpy = vi.spyOn(fsp, 'readdir');
+    expect(await prdParser.listPrdFiles(a)).toEqual([path.join(a, '9401-a-one.md')]);
+    expect((await prdParser.parsePrd(path.join(a, '9401-a-one.md'))).title).toBe('A1');
+    expect(readSpy).not.toHaveBeenCalled();
+    expect(readdirSpy).not.toHaveBeenCalled();
+  });
+
+  test('a trailing separator on a retained dir still keeps it', async () => {
+    await prdParser.listPrdFiles(a);
+    await prdParser.parsePrd(path.join(a, '9401-a-one.md'));
+    prdParser.retainPrdDirs([a + path.sep]);
+    expect(prdParser._cacheKeys().files).toEqual([path.join(a, '9401-a-one.md')]);
+  });
+});

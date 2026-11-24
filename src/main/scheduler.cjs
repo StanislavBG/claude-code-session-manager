@@ -1723,6 +1723,8 @@ async function listPrdFiles(skipCwds) {
   ensureDirs();
   const dirs = prdPaths.candidatePrdsDirs();
   const perDir = await Promise.all(dirs.map((dir) => prdParser.listPrdFiles(dir)));
+  // Forget cached folders this pass no longer scans (e.g. a removed Epic's prds/).
+  prdParser.retainPrdDirs(dirs);
   let files = perDir.flat();
   // A quarantined project has no job rows this pass; scanning its PRDs would
   // mint fresh `pending` rows for work that may already be running.

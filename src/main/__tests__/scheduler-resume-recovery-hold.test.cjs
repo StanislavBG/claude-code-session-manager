@@ -182,3 +182,24 @@ test('the periodic pass defers while held, then resumes the job once the hold cl
   expect(spawned).toEqual([{ slug: t.slug, resume: t.job.sessionId }]);
   expect(heldEvents(t.slug)).toHaveLength(1);
 });
+
+test('one resume_recovery_held line per row per hold; a cleared then new hold audits once more', async () => {
+  await reading(96);
+  const t = setupRow();
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  expect(spawned).toEqual([]);
+  expect(heldEvents(t.slug)).toHaveLength(1);
+
+  // Hold clears: the row is launched and its key removed.
+  await reading(40);
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  expect(spawned).toEqual([{ slug: t.slug, resume: t.job.sessionId }]);
+  expect(heldEvents(t.slug)).toHaveLength(1);
+
+  // A new hold audits exactly once more.
+  await reading(97);
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  await scheduler.spawnResumeRecovery(rowOf(t), target(t.job));
+  expect(heldEvents(t.slug)).toHaveLength(2);
+});

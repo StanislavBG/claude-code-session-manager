@@ -171,3 +171,27 @@ test('the periodic auto-fix pass defers while held, then launches once the hold 
   expect(row.autoFixAttempted).toBe(true);
   expect(heldEvents(t.slug)).toHaveLength(1);
 });
+
+test('one investigation_held line per row per hold; a cleared then new hold audits once more', async () => {
+  await reading(96);
+  const t = setupRow();
+  await scheduler.spawnInvestigation(rowOf(t), t.runDir);
+  await scheduler.spawnInvestigation(rowOf(t), t.runDir);
+  expect(heldEvents(t.slug)).toHaveLength(1);
+  // Still the same hold on the periodic pass: no new line.
+  await scheduler.reverifyNeedsReview();
+  expect(launched).toEqual([]);
+  expect(heldEvents(t.slug)).toHaveLength(1);
+
+  // Hold clears: the pass launches the row (clearing its key).
+  await reading(40);
+  await scheduler.reverifyNeedsReview();
+  expect(launched).toEqual([t.slug]);
+  expect(heldEvents(t.slug)).toHaveLength(1);
+
+  // A new hold on the same row audits exactly once more.
+  await reading(97);
+  await scheduler.spawnInvestigation(rowOf(t), t.runDir);
+  await scheduler.spawnInvestigation(rowOf(t), t.runDir);
+  expect(heldEvents(t.slug)).toHaveLength(2);
+});

@@ -2657,15 +2657,21 @@ function currentAutoDispatchHold(config) {
  * The auto-fix investigation probe is an automatic `claude -p` too, but it is
  * launched from spawnJob's failure path and the periodic auto-fix pass, never
  * through tickBody — so it checks the same hold itself. Returns the hold (and
- * appends one 'investigation_held' audit event for this deferral) or null.
+ * appends one 'investigation_held' audit event per row per hold) or null.
  * A deferral stamps nothing on the row: it stays eligible for the periodic
  * auto-fix pass (selectAutoFixTargets), which launches it once the hold clears.
  */
 function investigationHold(slug, config) {
   const hold = currentAutoDispatchHold(config);
-  if (!hold) return null;
-  console.log(`[scheduler] investigation held for ${slug}: ${hold.reason} — ${hold.detail ?? ''}`);
-  appendAuditEvent('investigation_held', { slug, reason: hold.reason });
+  if (!hold) {
+    // No hold: the row launches now, so a later hold audits it once again.
+    investigationHeldKeys.delete(slug);
+    return null;
+  }
+  if (noteHeldOnce(investigationHeldKeys, slug, hold)) {
+    console.log(`[scheduler] investigation held for ${slug}: ${hold.reason} — ${hold.detail ?? ''}`);
+    appendAuditEvent('investigation_held', { slug, reason: hold.reason });
+  }
   return hold;
 }
 
@@ -9491,12 +9497,16 @@ async function spawnResumeRecovery(job, resumeTarget) {
   // stamps nothing (spawnJob stamps resumeRecoveryAttempted only when it
   // runs): the row stays needs_review and the periodic reverifyNeedsReview
   // pass (selectResumeRecoveryBatch) resumes it once the hold clears.
+  // One 'resume_recovery_held' line per row per hold (resumeRecoveryHeldKeys).
   const hold = currentAutoDispatchHold(state.config);
   if (hold) {
-    console.log(`[scheduler] resume-recovery held for ${job.slug}: ${hold.reason} — ${hold.detail ?? ''}`);
-    appendAuditEvent('resume_recovery_held', { slug: job.slug, reason: hold.reason });
+    if (noteHeldOnce(resumeRecoveryHeldKeys, job.slug, hold)) {
+      console.log(`[scheduler] resume-recovery held for ${job.slug}: ${hold.reason} — ${hold.detail ?? ''}`);
+      appendAuditEvent('resume_recovery_held', { slug: job.slug, reason: hold.reason });
+    }
     return;
   }
+  resumeRecoveryHeldKeys.delete(job.slug);
   const { runId, dir: runDir } = pickRunDir();
   const siblingJobs = state.jobs || [];
   await dispatchSpawnJob(job, runId, runDir, job.cwd || DEFAULT_PROJECT_CWD, resumeTarget, siblingJobs);
@@ -9507,6 +9517,28 @@ const CONFIRM_BUSY = new Set(['running', 'investigating']);
 // record key -> hold key under which its 'tool_confirmation_resume_held'
 // audit event was already appended (one event per record per hold).
 const toolConfirmationHeldKeys = new Map();
+// slug -> hold key under which its 'investigation_held' / 'resume_recovery_held'
+// audit event was already appended (one event per row per hold). A row's key
+// is removed when no hold is in force for it (it launches), so a later hold
+// audits it once again.
+const investigationHeldKeys = new Map();
+const resumeRecoveryHeldKeys = new Map();
+
+/** Identity of one auto-dispatch hold: reason + window + resetsAt. */
+function autoDispatchHoldKey(hold) {
+  return `${hold.reason}|${hold.window ?? ''}|${hold.resetsAt ?? ''}`;
+}
+
+/**
+ * Record `hold` as `slug`'s current hold in `keys`. true = this is a new hold
+ * for the row (audit it); false = already audited under this same hold.
+ */
+function noteHeldOnce(keys, slug, hold) {
+  const key = autoDispatchHoldKey(hold);
+  if (keys.get(slug) === key) return false;
+  keys.set(slug, key);
+  return true;
+}
 
 /**
  * Apply answered tool-risk confirmation items (needsYouStore app 'tool-risk')

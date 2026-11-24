@@ -41,6 +41,15 @@ new work. **report** = your final message to the human.
    the reasons behind the run rules. Interactive work uses the built-in `/code-review` for
    review (and `test-driven-development` / `systematic-debugging` skills when installed). Why:
    one copy never goes stale.
+6. **No residue.** A report hands back nothing an agent could do. Give every follow-up, gap,
+   finding (any severity) and open choice one outcome in the same turn: **queued** (its PRD
+   slug), **decided** (what you chose and a one-line revert), **scheduled** (what fires it
+   later: a `dependsOn`, a `preflight` hold or a date) or **closed** (a one-line reason). Only
+   a step that needs the human's own hands or authority goes under Needs you, as one exact
+   action: sudo, a vendor agreement, a 2FA code, a public publish nobody approved, or a switch
+   the project laws reserve for a human. Never write "deferred", "follow-up for later", "needs
+   a new Epic from you" or "say the word". Why: a list nobody owns becomes debt the human has
+   to chase.
 
 ## Phase 1 — plan and queue
 
@@ -254,8 +263,9 @@ Rules:
       Never relay a question to the human: resolve every PRD through cases 1-4, making the
       safest reasonable choice, and report it. Why: queued work runs with no questions asked.
    2. **A PLAN SETTLED digest.** Read the validator records it names. A `REFUTED` PRD, or a
-      Critical or Important finding, means a fix wave: one `behavior` or `wire` PRD per finding
-      plus a new validate PRD. Never fix inline. Every fix PRD sets `fixes: [{ prd, missKind, reason }]`,
+      finding at any severity (Critical, Important or Minor), means a fix wave: one `behavior`
+      or `wire` PRD per finding plus a new validate PRD. A finding with nothing to fix gets a
+      one-line close reason in the report instead. Never fix inline. Every fix PRD sets `fixes: [{ prd, missKind, reason }]`,
       one entry per PRD it repairs, including a PRD a validator `VERIFIED` whose bug was found later
       (an escape). Why: escapes are counted from `fixes`. The new validate PRD has one criterion per fix
       PRD and one per PRD the earlier validator marked `REFUTED`, each cited by slug. Why: a
@@ -269,19 +279,21 @@ Rules:
       reset, no edit, no fix PRD; the scheduler re-checks the preflight on its own. State the
       missing precondition in the report. Why: only a person can supply it.
 4. **Done** = the latest validator marked every PRD `VERIFIED`, including each PRD an earlier
-   validator refuted, no Critical or Important finding is open, and its record exists in the main checkout's
+   validator refuted, every finding at every severity is fixed or closed with a reason, and its record exists in the main checkout's
    `session-manager-operations/plan-records/<epic-id>/`.
    Never "done with caveats": a REFUTED PRD gets a fix wave, or after its second refutation an
    open entry in the final report for the human to decide.
 
 ### Final report
 
-1. What landed: each PRD slug and its commit.
-2. The validation record path; the record exists in the main checkout's
-   `session-manager-operations/plan-records/<epic-id>/`.
-3. Minor findings deferred.
-4. Anything still open.
-5. Any warning kept or validator skipped.
+1. **Landed:** each PRD slug and its commit; the validation record path (it exists in the main
+   checkout's `session-manager-operations/plan-records/<epic-id>/`).
+2. **Decided:** each choice you made instead of asking, with a one-line revert.
+3. **Queued:** side plans and later waves still to run, by slug. They finish without the human.
+4. **Scheduled:** what fires on its own later, and its trigger.
+5. **Needs you:** only steps rule 6 allows, one exact action each. Omit it when empty.
+
+Expected API warnings and skipped optional steps are not reported.
 
 ## Never
 

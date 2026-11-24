@@ -75,3 +75,37 @@ test('batch create, validated update fields and files-overlap are documented', (
   expect(a).toMatch(/--path/);
   expect(a).toMatch(/worktree setup:/);
 });
+
+test('rule 6 No residue names the four outcomes and limits Needs you', () => {
+  const s = flat(skill());
+  const rules = s.slice(s.indexOf('## Rules that always apply'), s.indexOf('## Phase 1'));
+  expect(rules).toMatch(/6\. \*\*No residue\.\*\*/);
+  expect(rules).toMatch(/\*\*queued\*\* \(its PRD slug\)/);
+  expect(rules).toMatch(/\*\*decided\*\* \(what you chose and a one-line revert\)/);
+  expect(rules).toMatch(/\*\*scheduled\*\* \(what fires it later/);
+  expect(rules).toMatch(/\*\*closed\*\* \(a one-line reason\)/);
+  expect(rules).toMatch(/needs the human's own hands or authority/);
+  for (const w of ['sudo', 'a vendor agreement', 'a 2FA code', 'a public publish nobody approved', 'a switch the project laws reserve for a human']) {
+    expect(rules).toContain(w);
+  }
+  expect(rules).toMatch(/Never write "deferred", "follow-up for later", "needs a new Epic from you" or "say the word"/);
+  expect(rules).toMatch(/Why: a list nobody owns becomes debt/);
+});
+
+test('PLAN SETTLED fix wave and Done cover every severity', () => {
+  const s = flat(skill());
+  expect(s).toMatch(/a finding at any severity \(Critical, Important or Minor\), means a fix wave/);
+  expect(s).toMatch(/A finding with nothing to fix gets a one-line close reason in the report instead\./);
+  expect(s).toMatch(/every finding at every severity is fixed or closed with a reason/);
+  expect(s).not.toMatch(/no Critical or Important finding is open/);
+  expect(s).toMatch(/Never "done with caveats"/);
+});
+
+test('Final report has exactly Landed, Decided, Queued, Scheduled, Needs you', () => {
+  const raw = skill();
+  const sec = raw.slice(raw.indexOf('### Final report'), raw.indexOf('## Never'));
+  const items = sec.split('\n').filter((l) => /^\d+\. /.test(l)).map((l) => l.match(/^\d+\. \*\*([^:*]+):/)?.[1]);
+  expect(items).toEqual(['Landed', 'Decided', 'Queued', 'Scheduled', 'Needs you']);
+  expect(sec).not.toMatch(/Minor findings deferred|Anything still open|Any warning kept/);
+  expect(flat(sec)).toMatch(/Expected API warnings and skipped optional steps are not reported\./);
+});

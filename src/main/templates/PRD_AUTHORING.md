@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v24 -->
+<!-- PRD_AUTHORING.md v25 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -121,6 +121,8 @@ Both fields are required in every `scheduler_create_prd` call.
 Optional. One read-only command in gate syntax (every §6 gate rule applies; one line, at most 500 chars, never `none`), run without a shell for at most 60 s. Exit 0 = the precondition holds.
 Rule: declare it on a PRD whose work needs an external state a person controls — a store agreement, billing, DNS, OAuth consent, a device. While it exits non-zero the scheduler holds the PRD `pending` and re-checks on its own; the hold is described in Session Manager's `session-manager-operations/architecture/scheduler-operations.md` §4b.
 Rule: the executor still ends `SCHEDULER_VERDICT: FAIL` naming what is missing when it meets the missing state; a red preflight at that point reroutes the run to the hold instead of a park.
+Rule: no shell runs it, so it cannot `source` a file, and Node's `--env-file` expands no variables (`$HOME` stays literal). Write absolute paths, or put `NAME=value` words before `timeout`; an environment variable wins over the file's value.
+Rule: a blocker no API can read (an agreement accepted only in a web console) can still be held: check a marker file the person creates once the step is done, e.g. `test -f /abs/path/<step>-done`. The PRECONDITION HOLD notice then names that one action.
 Why: a human-only blocker used to park `needs_review` and spend the recovery ladder on work no model can do.
 
 ### What the API writes

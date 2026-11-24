@@ -245,15 +245,16 @@ and every bed without a `command` is file-backed: its WAV is sent in the same
 `project_character_write` call via `soundPaths` (`{name: absolute .wav path}`, sent as `sounds`
 base64), saved as `videos/_character/sounds/<name>.wav`. The WAVs are checked before any write —
 exactly one per declared name, a readable PCM or float WAV, an effect at most 1 MiB, a bed at most
-12 MiB, 32 MiB in all — and WAVs no longer declared are removed after the write. Every refusal of
+12 MiB, 32 MiB in all — and WAVs no longer declared are removed after the write; a failed removal
+is reported as `pruneError` on the 200 answer while the new persona stays saved. Every refusal of
 the json or its sounds is `character.json invalid: <reason>`.
 
 Mixing (`mix` in `demo-video-kit/sound.cjs`, given `projectRoot`): a cue name is looked up in the
 built-in effects first, then the persona's `sounds.sfx`. `bed` names a built-in style or a persona
 bed (absent = the style's built-in bed). A file bed is looped to length with the built-in 1 s
 fades; a command bed runs its argv (placeholders `{name}`, `{lengthS}`, `{seed}`, `{out}`; no
-shell, cwd the project root, 300 s limit), must write at least `lengthS` seconds of WAV, and is
-used as rendered (cut to length, no fades added). Project sounds keep their own level and get the
+shell, cwd the project root, 300 s limit), must write at least `lengthS` - 0.05 s of WAV (a
+shorter tail inside that tolerance is padded with silence), and is used as rendered (cut to length, no fades added). Project sounds keep their own level and get the
 built-in gains — effects -10 dB, beds -16 dB ducked 4 dB under speech; the built-in effects and
 beds peak at 0.7 and 0.8 before those gains. Unknown names, missing or bad WAVs and failing
 commands fail the run; there is no fallback sound.

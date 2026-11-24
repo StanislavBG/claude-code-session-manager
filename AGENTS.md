@@ -75,7 +75,7 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   `<namespace>/` has ONE owning writer; others read; an undeclared writer throws. New namespace/writer =
   deliberate edit there; build paths only via `opsPath()`. Owners + retention: [ops AGENTS.md](session-manager-operations/AGENTS.md).
 - **Open-core: the APP and the Field Manual are both free, and stay free.** Nothing is gated, nagged or paywalled.
-- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Phone remote. Never
+- **The bilko.run relay stays live** — bridge `src/main/webRemote.cjs`, UI App Settings → Web remote. Never
   remove the relay, its routes, or the product-page copy in `~/Projects/Bilko/`.
 
 ## Scheduler

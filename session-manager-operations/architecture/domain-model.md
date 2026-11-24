@@ -390,7 +390,7 @@ by skipping the same-PR registration of a new folder.
 - **Neither the APP nor the Field Manual costs anything.** There is no license check, entitlement gate, trial limit, nag, or
   "pro" tier, and no feature or chapter moves behind a purchase; the open-core pricing rule lives in the
   manual's own README.
-- **The bilko.run relay is kept running** — its bridge is `src/main/webRemote.cjs`, its UI is App Settings → Phone remote. The relay,
+- **The bilko.run relay is kept running** — its bridge is `src/main/webRemote.cjs`, its UI is App Settings → Web remote (which also pairs services). The relay,
   its routes, and the product-page copy in `~/Projects/Bilko/` are not decommissioned.
 
 ## Plain sessions

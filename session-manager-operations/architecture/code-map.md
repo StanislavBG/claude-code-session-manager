@@ -20,7 +20,7 @@
 - `supervisor.cjs` — every 15 min, Opus probe per running job; SIGTERMs descendant bash on stuck poll-loops without killing the agent. Cost-gated by `SM_SUPERVISOR_DISABLE`.
 - `lib/scheduler/dodDrainHook.cjs` — definition-of-done gate, fired fire-and-forget at queue-drain: re-verifies each completed PRD's AC, flags risky surfaces, writes `runs/<ts>/definition-of-done-<key>.md`. Idempotent per completed set (`batchKey` + `reportExists`). Skipped when paused or cancelled. Kill-switch: `SM_DOD_DISABLE=1`.
 - `scripts/scheduler-watchdog.cjs` + `scripts/scheduler-watchdog.sh` — external check-and-exit watchdog (systemd user timer or cron): heartbeat-gated liveness check, then relaunch if stale-and-dead. Queue reconciliation lives in `scheduler.cjs`, not here. Install via `scripts/install-scheduler-watchdog.sh` (`SM_WATCHDOG_DRYRUN=1` previews).
-- `webRemote.cjs` — desktop half of Web Remote (bridge to the bilko.run relay for the phone app); UI is App Settings → Phone remote.
+- `webRemote.cjs` — desktop half of Web Remote (bridge to the bilko.run relay for the phone app); UI is App Settings → Web remote, which also pairs services.
 - `pty.cjs` — node-pty per tab, keyed by renderer-generated UUID = claudeSessionId.
 - `ipcSchemas.cjs` — zod schemas validate IPC payloads at the main-process boundary.
 - `lib/telemetry/telemetrySettings.cjs` / `lib/machineProfile.cjs` / `lib/telemetry/telemetryClient.cjs` / `lib/telemetry/telemetryBacklog.cjs` — anonymous, on-by-default telemetry to bilko.run: consent + identity, machine-class profile, egress client, error-log backlog drainer. Detail: [`telemetry.md`](telemetry.md).

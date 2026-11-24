@@ -71,6 +71,32 @@ function isAbsoluteDir(p) {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
 }
 
+const MAX_TOOL_RULES = 50;
+const MAX_TOOL_RULE_CHARS = 500;
+
+/**
+ * A permission rule the CLI's --disallowedTools list parser reads as ONE rule:
+ * trimmed-non-empty, <= 500 chars, no control characters, and when it has '('
+ * a tool name before it, a trailing ')' and balanced parentheses. An unbalanced
+ * '(' would make the CLI swallow later text into one broken rule — a deny that
+ * silently never applies — so it is refused, never passed on.
+ * @param {unknown} s
+ */
+function isValidToolRule(s) {
+  if (typeof s !== 'string') return false;
+  if (s.trim() === '' || s.length > MAX_TOOL_RULE_CHARS) return false;
+  if (/[\u0000-\u001f\u007f]/.test(s)) return false;
+  if (!s.includes('(') && !s.includes(')')) return true;
+  const open = s.indexOf('(');
+  if (open <= 0 || s.slice(0, open).trim() === '' || !s.endsWith(')')) return false;
+  let depth = 0;
+  for (const ch of s) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') { depth -= 1; if (depth < 0) return false; }
+  }
+  return depth === 0;
+}
+
 const runtimeSchema = z.object({
   outputFormat: z.enum(['json', 'text', 'stream-json']).default('json'),
   settingSources: z.string().optional(),
@@ -83,6 +109,11 @@ const runtimeSchema = z.object({
   systemPrompt: z.string()
     .refine((s) => Buffer.byteLength(s, 'utf8') <= MAX_SYSTEM_PROMPT_BYTES, { message: `systemPrompt exceeds ${MAX_SYSTEM_PROMPT_BYTES} bytes` })
     .optional(),
+  appendSystemPrompt: z.string()
+    .refine((s) => Buffer.byteLength(s, 'utf8') <= MAX_SYSTEM_PROMPT_BYTES, { message: `appendSystemPrompt exceeds ${MAX_SYSTEM_PROMPT_BYTES} bytes` })
+    .optional(),
+  // Permission deny rules ('WebFetch(domain:localhost)'); each reaches the CLI as its own argv element.
+  disallowedTools: z.array(z.string().refine(isValidToolRule, { message: 'invalid tool rule' })).max(MAX_TOOL_RULES).optional(),
   skipPermissions: z.boolean().optional(),
   disableAutoMemory: z.boolean().optional(),
   sessionId: z.string().uuid().optional(),

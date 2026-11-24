@@ -62,6 +62,66 @@ describe('buildTaskArgs', () => {
     expect(env).toEqual({ A: '1', SM_KG_INTERNAL: '1', SM_PROC_ROLE: 'aux', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' });
   });
 
+  test('disallowedTools: each rule its own argv element, after --tools, before --output-format', () => {
+    const args = buildTaskArgs({
+      model: 'm', effort: 'e', projectCwd: PROJ,
+      runtime: { tools: ['WebFetch', 'Read'], disallowedTools: ['WebFetch(domain:localhost)', 'WebFetch(domain:127.0.0.1)', 'Bash'] },
+    });
+    expect(args).toEqual([
+      '-p', '--model', 'm', '--effort', 'e',
+      '--no-session-persistence',
+      '--strict-mcp-config',
+      '--tools', 'WebFetch,Read',
+      '--disallowedTools', 'WebFetch(domain:localhost)', 'WebFetch(domain:127.0.0.1)', 'Bash',
+      '--output-format', 'json',
+    ]);
+  });
+
+  test('disallowedTools: an empty array sends no flag', () => {
+    const args = buildTaskArgs({ model: 'm', effort: 'e', projectCwd: PROJ, runtime: { disallowedTools: [] } });
+    expect(args).not.toContain('--disallowedTools');
+  });
+
+  test('appendSystemPrompt alone sits where --system-prompt would', () => {
+    const args = buildTaskArgs({
+      model: 'm', effort: 'e', projectCwd: PROJ,
+      runtime: { maxTurns: 3, appendSystemPrompt: 'APP', dangerouslySkipPermissions: true, tools: ['Read'] },
+    });
+    expect(args).toEqual([
+      '-p', '--model', 'm', '--effort', 'e',
+      '--no-session-persistence',
+      '--strict-mcp-config',
+      '--max-turns', '3',
+      '--append-system-prompt', 'APP',
+      '--dangerously-skip-permissions',
+      '--settings', expect.any(String),
+      '--tools', 'Read',
+      '--output-format', 'json',
+    ]);
+    expect(args).not.toContain('--system-prompt');
+  });
+
+  test('appendSystemPrompt with systemPrompt: directly after the --system-prompt pair', () => {
+    const args = buildTaskArgs({
+      model: 'm', effort: 'e', projectCwd: PROJ,
+      runtime: { systemPrompt: 'SYS', appendSystemPrompt: 'APP', disallowedTools: ['Bash(rm:*)'] },
+    });
+    expect(args).toEqual([
+      '-p', '--model', 'm', '--effort', 'e',
+      '--no-session-persistence',
+      '--strict-mcp-config',
+      '--system-prompt', 'SYS',
+      '--append-system-prompt', 'APP',
+      '--disallowedTools', 'Bash(rm:*)',
+      '--output-format', 'json',
+    ]);
+  });
+
+  test('appendSystemPrompt over MAX_ARG_BYTES throws argv_too_large', () => {
+    expect(() => buildTaskArgs({ model: 'm', effort: 'e', runtime: { appendSystemPrompt: 'x'.repeat(100 * 1024 + 1) } }))
+      .toThrow(/exceeds/);
+  });
+
   test('dangerouslySkipPermissions: tool-rules level denies home secrets', () => {
     const args = buildTaskArgs({ model: 'm', effort: 'e', projectCwd: PROJ, runtime: { dangerouslySkipPermissions: true } });
     const i = args.indexOf('--dangerously-skip-permissions');

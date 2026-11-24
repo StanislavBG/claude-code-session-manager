@@ -10,8 +10,9 @@
  *
  * Deliberately NOT here:
  *  - slot acquisition (lib/scheduler/sessionSlots.cjs) — the route holds the slot;
- *  - a persona body — `--system-prompt` is passed only when the caller gives one,
- *    and it REPLACES the system prompt (never --append-system-prompt);
+ *  - a persona body — never added. `--system-prompt` is passed only when the
+ *    caller gives one, and it REPLACES the system prompt; `--append-system-prompt`
+ *    carries only the caller's runtime.appendSystemPrompt;
  *  - ledger writes / HTTP.
  *
  * Spawn pattern mirrors lib/claude/runClaudeP.cjs (resolveClaudeBin,
@@ -54,6 +55,13 @@ function nonEmptyString(v) {
  * widens to every server. The caller's explicit `runtime.mcpConfig` files are
  * still appended to the same --mcp-config list.
  *
+ * runtime.appendSystemPrompt → '--append-system-prompt', <text> right after the
+ * --system-prompt pair (single-valued, so never in the variadic block).
+ * runtime.disallowedTools (non-empty) → '--disallowedTools' then each rule as
+ * its OWN argv element, after --tools: the CLI splits one element on commas and
+ * spaces outside parentheses, so joining rules would let one bad rule swallow
+ * the rest. The route has already refused unbalanced rules.
+ *
  * @param {{ model: string, effort: string, runtime?: Record<string, any>, projectCwd?: string,
  *   declaredMcpServers?: readonly string[], knownMcpServers?: Record<string, object> }} o
  * @returns {string[]}
@@ -72,6 +80,7 @@ function buildTaskArgs({ model, effort, runtime, projectCwd, declaredMcpServers 
   args.push('--strict-mcp-config');
   if (rt.maxTurns !== undefined && rt.maxTurns !== null) args.push('--max-turns', String(rt.maxTurns));
   if (typeof rt.systemPrompt === 'string') args.push('--system-prompt', rt.systemPrompt);
+  if (typeof rt.appendSystemPrompt === 'string') args.push('--append-system-prompt', rt.appendSystemPrompt);
   if (rt.dangerouslySkipPermissions === true) {
     // Tool-rules level of the job sandbox policy: bypass kept, home secrets denied.
     // '--settings' takes one value, so it sits here, not in the variadic block below.
@@ -99,6 +108,7 @@ function buildTaskArgs({ model, effort, runtime, projectCwd, declaredMcpServers 
   if (mcpList.length) args.push('--mcp-config', ...mcpList);
   if (Array.isArray(rt.allowedTools)) args.push('--allowedTools', rt.allowedTools.join(','));
   if (Array.isArray(rt.tools)) args.push('--tools', rt.tools.join(','));
+  if (Array.isArray(rt.disallowedTools) && rt.disallowedTools.length) args.push('--disallowedTools', ...rt.disallowedTools.map(String));
 
   if (rt.outputFormat === 'stream-json') args.push('--output-format', 'stream-json', '--verbose');
   else args.push('--output-format', 'json');

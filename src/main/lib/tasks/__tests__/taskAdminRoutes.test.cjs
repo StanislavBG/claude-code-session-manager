@@ -115,6 +115,17 @@ describe('POST /admin/tasks', () => {
       base({ runtime: { cwd: 'relative' } }),
       base({ runtime: { systemPrompt: 'x'.repeat(100 * 1024 + 1) } }),
       base({ missionId: 'x'.repeat(201) }),
+      base({ runtime: { disallowedTools: ['WebFetch(domain:localhost'] } }),
+      base({ runtime: { disallowedTools: [''] } }),
+      base({ runtime: { disallowedTools: ['   '] } }),
+      base({ runtime: { disallowedTools: ['a\nb'] } }),
+      base({ runtime: { disallowedTools: ['WebFetch)x('] } }),
+      base({ runtime: { disallowedTools: ['(domain:x)'] } }),
+      base({ runtime: { disallowedTools: ['WebFetch(a)b'] } }),
+      base({ runtime: { disallowedTools: ['x'.repeat(501)] } }),
+      base({ runtime: { disallowedTools: Array.from({ length: 51 }, (_, i) => `Tool${i}`) } }),
+      base({ runtime: { disallowedTools: 'Bash' } }),
+      base({ runtime: { appendSystemPrompt: 'x'.repeat(100 * 1024 + 1) } }),
     ]) {
       const res = await s.call(body);
       expect(res.status).toBe(400);
@@ -208,6 +219,26 @@ describe('POST /admin/tasks', () => {
     expect(a.runtime.tools).toEqual([]);
     expect(a.runtime.dangerouslySkipPermissions).toBe(true);
     expect(a).toMatchObject({ model: 'claude-haiku-4-5', effort: 'low', projectCwd: PROJ });
+  });
+
+  test('disallowedTools + appendSystemPrompt reach buildTaskArgs unchanged', async () => {
+    const disallowedTools = ['WebFetch(domain:localhost)', 'WebFetch(domain:127.0.0.1)', 'Bash(git push:*)', 'Write'];
+    const appendSystemPrompt = 'Never fetch localhost.\nBe brief.';
+    const res = await s.call(base({ runtime: { disallowedTools, appendSystemPrompt, systemPrompt: 'SYS' } }));
+    expect(res.status).toBe(200);
+    const a = s.calls.args[0];
+    expect(a.runtime.disallowedTools).toEqual(disallowedTools);
+    expect(a.runtime.appendSystemPrompt).toBe(appendSystemPrompt);
+    expect(a.runtime.systemPrompt).toBe('SYS');
+  });
+
+  test('an unbalanced deny rule answers 400 with no ledger start line', async () => {
+    const res = await s.call(base({ runtime: { disallowedTools: ['Bash', 'WebFetch(domain:localhost'] } }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_request');
+    expect(s.calls.starts).toHaveLength(0);
+    expect(s.calls.args).toHaveLength(0);
+    expect(s.calls.runs).toHaveLength(0);
   });
 
   test('persistSession without a sessionId records persisted true with sessionId = taskId', async () => {

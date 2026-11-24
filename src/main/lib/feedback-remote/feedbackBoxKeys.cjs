@@ -7,11 +7,17 @@
  * 0600 file outside every project tree: <schedulerHome>/feedback-boxes.json. Writes go through
  * util/atomicFs.cjs inside a serialized read-modify-write queue; a missing or corrupt file reads as
  * empty. listBoxes() never returns a private key — only getPrivateKey(boxId) does.
+ *
+ * Each box may also hold an identitySecret (32 random bytes, base64url): the HMAC key the site's
+ * backend signs the reporter with (site-feedback.md#verified-reporter). It is minted on the first
+ * getIdentitySecret(boxId), replaced by rotateIdentitySecret(boxId), and — like the private key —
+ * never returned by listBoxes() and never sent to the relay or the widget.
  */
 'use strict';
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
+const crypto = require('node:crypto');
 const atomicFs = require('../util/atomicFs.cjs');
 const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
 
@@ -22,7 +28,7 @@ const FILE_MODE = 0o600;
  * @typedef {Record<string, unknown>} PrivateKeyJwk
  * @typedef {{ boxId: string, projectCwd: string, label: string, publicKey: string,
  *   fingerprint: string, createdAt: number }} BoxRecord
- * @typedef {BoxRecord & { privateKeyJwk: PrivateKeyJwk }} StoredBox
+ * @typedef {BoxRecord & { privateKeyJwk: PrivateKeyJwk, identitySecret?: string }} StoredBox
  * @typedef {{ boxId: string, projectCwd: string, label?: string, publicKey: string,
  *   fingerprint: string, privateKeyJwk: PrivateKeyJwk, createdAt?: number }} AddBoxInput
  */
@@ -136,6 +142,53 @@ async function getPrivateKey(boxId) {
   return hit ? hit.privateKeyJwk : null;
 }
 
+/** @returns {string} 32 random bytes, base64url (43 chars, no padding) */
+function newIdentitySecret() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+/**
+ * Serialized write of one box's identity secret. `replace` false keeps an existing secret.
+ * @param {string} boxId
+ * @param {boolean} replace
+ * @returns {Promise<string|null>} the box's secret, or null when no such box exists
+ */
+function writeIdentitySecret(boxId, replace) {
+  if (!nonEmptyString(boxId)) return Promise.resolve(null);
+  return mutateStore((boxes) => {
+    const hit = boxes.find((b) => b.boxId === boxId);
+    if (!hit) return { boxes, result: /** @type {string|null} */ (null) };
+    if (!replace && nonEmptyString(hit.identitySecret)) return { boxes, result: hit.identitySecret };
+    const identitySecret = newIdentitySecret();
+    return {
+      boxes: boxes.map((b) => (b === hit ? { ...b, identitySecret } : b)),
+      result: identitySecret,
+    };
+  });
+}
+
+/**
+ * The box's identity signing secret, minted on first request.
+ * @param {string} boxId
+ * @returns {Promise<string|null>} null when no such box exists
+ */
+async function getIdentitySecret(boxId) {
+  if (!nonEmptyString(boxId)) return null;
+  const hit = (await readBoxes(storeFile())).find((b) => b.boxId === boxId);
+  if (!hit) return null;
+  if (nonEmptyString(hit.identitySecret)) return hit.identitySecret;
+  return writeIdentitySecret(boxId, false);
+}
+
+/**
+ * Replaces the box's identity signing secret; signatures made with the old one stop verifying.
+ * @param {string} boxId
+ * @returns {Promise<string|null>} the new secret, or null when no such box exists
+ */
+function rotateIdentitySecret(boxId) {
+  return writeIdentitySecret(boxId, true);
+}
+
 /**
  * @param {string} boxId
  * @returns {Promise<boolean>} true when a box was removed
@@ -147,4 +200,6 @@ function removeBox(boxId) {
   });
 }
 
-module.exports = { storeFile, addBox, listBoxes, getPrivateKey, removeBox };
+module.exports = {
+  storeFile, addBox, listBoxes, getPrivateKey, getIdentitySecret, rotateIdentitySecret, removeBox,
+};

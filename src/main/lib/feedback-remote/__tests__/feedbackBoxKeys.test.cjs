@@ -106,3 +106,44 @@ test('listBoxes never contains a private key', async () => {
     for (const b of list) expect(Object.prototype.hasOwnProperty.call(b, 'privateKeyJwk')).toBe(false);
   }
 });
+
+test('identitySecret: created on first request, stable, 32 random bytes base64url', async () => {
+  await store.addBox(rec('b1'));
+  await store.addBox(rec('b2'));
+  const s1 = await store.getIdentitySecret('b1');
+  expect(s1).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(Buffer.from(/** @type {string} */ (s1), 'base64url').length).toBe(32);
+  expect(await store.getIdentitySecret('b1')).toBe(s1);
+  const s2 = await store.getIdentitySecret('b2');
+  expect(s2).not.toBe(s1);
+  expect(await store.getIdentitySecret('nope')).toBeNull();
+  expect(await store.getIdentitySecret('')).toBeNull();
+  // private key untouched by the secret write
+  expect((await store.getPrivateKey('b1'))?.d).toBe('secret-b1');
+});
+
+test('rotateIdentitySecret replaces the secret; unknown box is null', async () => {
+  await store.addBox(rec('b1'));
+  const before = await store.getIdentitySecret('b1');
+  const rotated = await store.rotateIdentitySecret('b1');
+  expect(rotated).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(rotated).not.toBe(before);
+  expect(await store.getIdentitySecret('b1')).toBe(rotated);
+  expect(await store.rotateIdentitySecret('nope')).toBeNull();
+  // rotate on a box with no secret yet creates one
+  await store.addBox(rec('b2'));
+  const fresh = await store.rotateIdentitySecret('b2');
+  expect(await store.getIdentitySecret('b2')).toBe(fresh);
+});
+
+test('listBoxes never contains the identity secret', async () => {
+  await store.addBox(rec('b1', '/proj/a'));
+  const secret = /** @type {string} */ (await store.getIdentitySecret('b1'));
+  const rotated = /** @type {string} */ (await store.rotateIdentitySecret('b1'));
+  for (const list of [await store.listBoxes(), await store.listBoxes({ projectCwd: '/proj/a' })]) {
+    const text = JSON.stringify(list);
+    expect(text).not.toContain('identitySecret');
+    expect(text).not.toContain(secret);
+    expect(text).not.toContain(rotated);
+  }
+});

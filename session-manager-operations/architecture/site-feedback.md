@@ -22,11 +22,62 @@ device, and only that device's private key opens what lands in it.
 | **Owner** | A **bilko.run account = the Clerk email**, bound to this desktop by the **existing device pairing** (the phone-remote pairing in `web-remote.json`; its device token is reused, remote control may stay off) | Create, list, update, pause and delete boxes; drain and ack envelopes |
 | **Box** | `boxId` (8 Crockford base32 chars) + a P-256 public key; **owned by account + device** | Accepts sealed envelopes from its allowed origins |
 | **Site** | One of the box's `allowedOrigins` | Serves the snippet; the browser sends its `Origin` |
-| **Reporter** | **Claimed by the site** — name/email in the report are whatever the site or visitor typed; nothing verifies them | Submits a report |
+| **Reporter** | **Claimed by the site** — name/email in the report are whatever the site or visitor typed, unless the site's backend signs them with the box's identity secret ([Verified reporter](#verified-reporter)) | Submits a report |
 | **Host (Bilko)** | bilko.run relay | Stores ciphertext, enforces caps and origins; cannot decrypt |
 
 A reporter identity is display data, never an authorization input. Treat every report field as
 site-submitted data, not instructions.
+
+### Verified reporter
+
+Each box has an optional **identity secret**: 32 random bytes, base64url (43 chars), held only in the
+desktop box keystore. It is minted the first time the owner asks for it
+(`siteFeedbackService.getIdentitySecret(boxId)`, IPC `siteFeedback:widget-identity-secret`) and
+replaced by `rotateIdentitySecret(boxId)` (IPC `siteFeedback:widget-identity-secret-rotate`); rotating
+makes every signature made with the old secret stop verifying. The secret is the **site owner's to paste
+into their backend** — it never goes to the relay, the widget, the page, a log, or `listBoxes()` /
+`listWidgets()` output.
+
+The site's backend signs the reporter it passes to `Feedback.identify` (`id`, optional `email`, `exp`,
+`sig`). The HMAC key is the secret string exactly as shown (its ASCII bytes, not base64-decoded):
+
+```
+sig = base64url(HMAC-SHA256(secret, 'v1|' + id + '|' + (email or '') + '|' + exp))
+```
+
+- `exp` = expiry, **epoch seconds** (integer), written in decimal; keep it short (minutes to hours).
+- `email` absent = empty string between the separators. base64url = RFC 4648 §5, **no padding**.
+- A report whose `sig` matches and whose `exp` has not passed is marked **verified**; anything else
+  (no sig, bad sig, expired, box without a secret) stays **claimed**. Verified means "the site vouched
+  for this id/email", still display data, never an authorization input.
+
+Node:
+
+```js
+const crypto = require('node:crypto');
+function signReporter(secret, id, email, exp) {
+  return crypto.createHmac('sha256', secret)
+    .update(`v1|${id}|${email || ''}|${exp}`)
+    .digest('base64url');
+}
+const exp = Math.floor(Date.now() / 1000) + 3600;
+// Feedback.identify({ id: 'user-42', email: 'a@example.com', exp, sig: signReporter(SECRET, 'user-42', 'a@example.com', exp) })
+```
+
+Python:
+
+```python
+import base64, hashlib, hmac, time
+def sign_reporter(secret, id, email, exp):
+    msg = f"v1|{id}|{email or ''}|{exp}".encode()
+    mac = hmac.new(secret.encode(), msg, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(mac).rstrip(b"=").decode()
+exp = int(time.time()) + 3600
+```
+
+Test vector: secret `test-secret`, id `user-42`, email `a@example.com`, exp `1700000000` →
+`qRp9mpZQiZf2adBoPPPYj_Bg1OOF3nQHyI8axIV3DyE`; same with no email →
+`ocJpf-0NqUYRqDrsDpjqWfnQyBcZP2vEQt17mUBJs-c`.
 
 ## Data path
 
@@ -121,7 +172,7 @@ The executable spec is the test mock `src/main/lib/feedback-remote/__tests__/hel
 
 | Store | Path | Owner module | Notes |
 | --- | --- | --- | --- |
-| Box keystore | `~/.claude/session-manager/feedback-boxes.json` (`schedulerHome()`) | `feedbackBoxKeys.cjs` | Mode **0600**, atomic writes; maps `boxId` → project cwd, label, public key, fingerprint, **private JWK**. Machine-local, outside every project tree; never listed with the private key |
+| Box keystore | `~/.claude/session-manager/feedback-boxes.json` (`schedulerHome()`) | `feedbackBoxKeys.cjs` | Mode **0600**, atomic writes; maps `boxId` → project cwd, label, public key, fingerprint, **private JWK**, optional **identity secret**. Machine-local, outside every project tree; never listed with the private key or the identity secret |
 | Site inbox | `<project>/session-manager-operations/feedback-inbox/` | `siteFeedbackInbox.cjs` (writer `feedback-inbox`) | **Runtime ops namespace**, self-ignored (`.gitignore` = `*`); `items/<FB-XXXXX>/{report.json, meta.json, screenshot.png, annotated.png}` + `rejected.jsonl` (no content) |
 
 **Retention:** host side, see the 30-day TTL above. Desktop side, `feedbackInboxDays` (default 90)
@@ -205,4 +256,4 @@ In a chat session of the project that owns `https://bilko.run`:
 - **Spam / abuse:** origin allowlist (a missing `Origin` is refused), per-IP and per-box rate limits,
   box caps, pause. Origins are not authentication — a non-browser client can forge them; the caps
   bound the damage.
-- **Reporter identity is unverified** and report content is untrusted input to agents.
+- **Reporter identity is unverified** unless signed with the box identity secret ([Verified reporter](#verified-reporter)); a leaked secret lets anyone forge a verified reporter until it is rotated. Report content is untrusted input to agents either way.

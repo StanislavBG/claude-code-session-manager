@@ -8,10 +8,12 @@
  * implementation shared with the Feedback MCP admin routes. Results come back unchanged
  * except that secret-named fields are stripped, so no channel can ever hand the renderer a
  * box private key or the paired device token even if a lower layer starts returning one.
+ * The box identity secret is redacted too, everywhere except the two identity-secret channels,
+ * which hand it to the renderer only when the user explicitly asks to see or rotate it.
  */
 
 /** Field names that must never cross the bridge. Matched case-insensitively. */
-const SECRET_KEYS = new Set(['privatekeyjwk', 'privatekey', 'devicetoken', 'token', 'secret']);
+const SECRET_KEYS = new Set(['privatekeyjwk', 'privatekey', 'devicetoken', 'token', 'secret', 'identitysecret']);
 
 /**
  * Deep copy of `value` without any secret-named field.
@@ -54,6 +56,23 @@ function registerSiteFeedbackHandlers(deps = {}) {
   handle('siteFeedback:widget-update', s.siteFeedbackWidgetUpdate, (p) => service.updateWidget(p));
   handle('siteFeedback:widget-delete', s.siteFeedbackWidgetBox, (p) => service.deleteWidget(p));
   handle('siteFeedback:widget-snippet', s.siteFeedbackWidgetBox, (p) => service.getSnippet(p));
+  /**
+   * Explicit-request only: the one place the identity secret crosses the bridge. Everything else
+   * in the result is still redacted; only a string `identitySecret` is passed back.
+   * @param {string} channel
+   * @param {(p: any) => Promise<any>} call
+   */
+  const handleIdentitySecret = (channel, call) => {
+    ipcMain.handle(channel, v(s.siteFeedbackWidgetBox, async (/** @type {any} */ p) => {
+      const r = await call(p);
+      const out = redactSecrets(r);
+      if (r && r.ok === true && typeof r.identitySecret === 'string') out.identitySecret = r.identitySecret;
+      return out;
+    }));
+  };
+  // Never log these results: they carry the site owner's HMAC signing secret.
+  handleIdentitySecret('siteFeedback:widget-identity-secret', (p) => service.getIdentitySecret(p));
+  handleIdentitySecret('siteFeedback:widget-identity-secret-rotate', (p) => service.rotateIdentitySecret(p));
   handle('siteFeedback:inbox-list', s.siteFeedbackInboxList, (p) => service.listItems(p));
   handle('siteFeedback:inbox-get', s.siteFeedbackInboxGet, (p) => service.getItem(p));
   // Returns a PNG data URL to the renderer only — never log it.

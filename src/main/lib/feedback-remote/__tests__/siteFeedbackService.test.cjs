@@ -308,3 +308,32 @@ test('drainNow runs a real pass against the relay mock', async () => {
   expect(a.ok).toBe(true);
   expect(await svc.drainNow()).toEqual({ ok: true, stored: 0, duplicates: 0, rejected: 0, goneBoxes: [], heldBoxes: [] });
 });
+
+test('getIdentitySecret creates once, rotateIdentitySecret replaces, list output never carries it', async () => {
+  expect(typeof svcMod.getIdentitySecret).toBe('function');
+  expect(typeof svcMod.rotateIdentitySecret).toBe('function');
+  const svc = await makeService();
+  const a = await svc.createWidget({ cwd, label: 'A', allowedOrigins: ['https://a.example'] });
+  if (!a.ok) throw new Error('create failed');
+  const g1 = await svc.getIdentitySecret(a.boxId);
+  expect(g1.ok).toBe(true);
+  if (!g1.ok) return;
+  expect(g1.boxId).toBe(a.boxId);
+  expect(g1.identitySecret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  const g2 = await svc.getIdentitySecret({ boxId: a.boxId });
+  expect(g2).toEqual(g1);
+  const r = await svc.rotateIdentitySecret(a.boxId);
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(r.identitySecret).not.toBe(g1.identitySecret);
+  expect(await svc.getIdentitySecret(a.boxId)).toEqual(r);
+  expect(await svc.getIdentitySecret('NOPE0000')).toMatchObject({ ok: false, error: 'not_found' });
+  expect(await svc.rotateIdentitySecret('NOPE0000')).toMatchObject({ ok: false, error: 'not_found' });
+  expect(await svc.getIdentitySecret('')).toMatchObject({ ok: false, error: 'invalid_input' });
+  const listed = JSON.stringify([await svc.listWidgets({ cwd }), await svc.getSnippet({ boxId: a.boxId }), await keystore.listBoxes()]);
+  for (const s of [g1.identitySecret, r.identitySecret]) expect(listed).not.toContain(s);
+  expect(listed).not.toContain('identitySecret');
+  // the secret never reaches the relay
+  const relayText = JSON.stringify([...mock.state.boxes.values()]);
+  for (const s of [g1.identitySecret, r.identitySecret]) expect(relayText).not.toContain(s);
+});

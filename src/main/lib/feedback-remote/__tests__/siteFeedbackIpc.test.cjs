@@ -23,6 +23,10 @@ const CASES = {
     [{}, { boxId: '' }, { boxId: BOX, cwd: CWD }]],
   'siteFeedback:widget-snippet': ['getSnippet', { boxId: BOX }, { boxId: BOX },
     [{}, { boxId: 1 }, { boxId: 'x'.repeat(201) }]],
+  'siteFeedback:widget-identity-secret': ['getIdentitySecret', { boxId: BOX }, { boxId: BOX },
+    [{}, { boxId: '' }, { boxId: BOX, rotate: true }]],
+  'siteFeedback:widget-identity-secret-rotate': ['rotateIdentitySecret', { boxId: BOX }, { boxId: BOX },
+    [{}, { boxId: 1 }, { boxId: BOX, cwd: CWD }]],
   'siteFeedback:inbox-list': ['listItems', { cwd: CWD, status: 'open' }, { cwd: CWD, status: 'open' },
     [{}, { cwd: CWD, status: 'nope' }, { cwd: CWD, all: true }]],
   'siteFeedback:inbox-get': ['getItem', { cwd: CWD, hostId: HOST }, { cwd: CWD, hostId: HOST },
@@ -55,7 +59,7 @@ function setup(overrides = {}) {
 }
 
 describe('siteFeedbackIpc', () => {
-  it('registers exactly the twelve siteFeedback:* channels', () => {
+  it('registers exactly the fourteen siteFeedback:* channels', () => {
     const { handlers } = setup();
     expect([...handlers.keys()].sort()).toEqual(Object.keys(CASES).sort());
   });
@@ -102,6 +106,31 @@ describe('siteFeedbackIpc', () => {
       expect(JSON.stringify(r), channel).not.toContain('SECRET');
       expect(r.widgets[0]).toEqual({ boxId: BOX, snippet: 's' });
     }
+  });
+
+  it('only the identity-secret channels return the identity secret, and only that field', async () => {
+    const leak = {
+      ok: true, boxId: BOX, identitySecret: 'IDSECRET',
+      privateKeyJwk: { d: 'PRIVKEY' }, widgets: [{ boxId: BOX, identitySecret: 'IDSECRET', snippet: 's' }],
+    };
+    const overrides = {};
+    for (const [method] of Object.values(CASES)) overrides[method] = vi.fn(async () => leak);
+    const { handlers } = setup(overrides);
+    const explicit = new Set(['siteFeedback:widget-identity-secret', 'siteFeedback:widget-identity-secret-rotate']);
+    for (const [channel, [, valid]] of Object.entries(CASES)) {
+      const r = await handlers.get(channel)({}, valid);
+      const text = JSON.stringify(r);
+      expect(text, channel).not.toContain('PRIVKEY');
+      expect(r.widgets[0], channel).toEqual({ boxId: BOX, snippet: 's' });
+      if (explicit.has(channel)) expect(r.identitySecret, channel).toBe('IDSECRET');
+      else expect(text, channel).not.toContain('IDSECRET');
+    }
+  });
+
+  it('identity-secret channel passes a failure through without a secret', async () => {
+    const { handlers } = setup({ getIdentitySecret: vi.fn(async () => ({ ok: false, error: 'not_found', message: 'm' })) });
+    expect(await handlers.get('siteFeedback:widget-identity-secret')({}, { boxId: BOX }))
+      .toEqual({ ok: false, error: 'not_found', message: 'm' });
   });
 
   it('redactSecrets leaves image data URLs and ordinary fields intact', () => {

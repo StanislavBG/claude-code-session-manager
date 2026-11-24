@@ -10,6 +10,8 @@
  *   - createWidget generates the box key pair (feedbackSeal), registers the box on the relay
  *     (feedbackRelayClient) and only then stores the private key (feedbackBoxKeys).
  *   - Relay error codes are passed through verbatim as `error`, with a one-line `message`.
+ *   getIdentitySecret / rotateIdentitySecret — the box's reporter-signing HMAC secret, local
+ *   keystore only (never the relay, never the widget); the site owner pastes it into their backend.
  * Inbox (decrypted reports in <project>/session-manager-operations/feedback-inbox/):
  *   listItems / getItem / getImage / setStatus / linkEpic delegate to siteFeedbackInbox;
  *   drainNow / startDrainLoop delegate to feedbackBoxDrain.
@@ -314,6 +316,38 @@ function createSiteFeedbackService(deps = {}) {
     }
   }
 
+  /**
+   * @param {string | { boxId: string }} p
+   * @param {boolean} rotate
+   */
+  async function identitySecret(p, rotate) {
+    const boxId = typeof p === 'string' ? p : p && p.boxId;
+    if (!nonEmpty(boxId)) return failure('invalid_input', 'boxId is required');
+    try {
+      if (!(await localBox(boxId))) return failure('not_found', `No widget ${boxId} on this desktop`);
+      const ks = keystore();
+      const secret = rotate ? await ks.rotateIdentitySecret(boxId) : await ks.getIdentitySecret(boxId);
+      if (!secret) return failure('not_found', `No widget ${boxId} on this desktop`);
+      return { ok: /** @type {const} */ (true), boxId, identitySecret: secret };
+    } catch (e) {
+      return failure('internal', errMessage(e));
+    }
+  }
+
+  /**
+   * The box's reporter-signing secret, created on first request. Never logged, never sent to
+   * the relay; only the desktop UI asks for it, on an explicit user action.
+   * @param {string | { boxId: string }} p
+   */
+  function getIdentitySecret(p) {
+    return identitySecret(p, false);
+  }
+
+  /** Replace the box's reporter-signing secret. @param {string | { boxId: string }} p */
+  function rotateIdentitySecret(p) {
+    return identitySecret(p, true);
+  }
+
   /** @param {{ cwd: string, status?: InboxStatus }} p */
   async function listItems(p) {
     const { cwd, status } = p || /** @type {any} */ ({});
@@ -424,6 +458,7 @@ function createSiteFeedbackService(deps = {}) {
 
   return {
     createWidget, listWidgets, updateWidget, deleteWidget, getSnippet,
+    getIdentitySecret, rotateIdentitySecret,
     listItems, getItem, getImage, setStatus, linkEpic, removeItem, drainNow,
     startDrainLoop, stopDrainLoop,
   };

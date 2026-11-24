@@ -38,6 +38,7 @@ test('read returns DEFAULTS when the file is missing', () => {
     reservedMarkersKeep: 100,
     tasksDays: 30,
     planRecordsDays: 14,
+    feedbackInboxDays: 90,
   });
   expect(settings.DEFAULTS).not.toHaveProperty('archivedTranscripts');
   expect(settings.storePath()).toBe(path.join(home, '.claude', 'session-manager', 'ops-retention.json'));
@@ -145,6 +146,21 @@ test('preview reports eligible bytes and deletes nothing', () => {
   expect(r.tmp.bytes).toBe(20);
   expect(r.runLogs).toEqual({ files: expect.any(Number), bytes: expect.any(Number) });
   expect(snapshot(home)).toEqual(before);
+});
+
+test('feedbackInboxDays: default 90, clamps to [1, 3650], validates, sanitizes stored', () => {
+  expect(settings.DEFAULTS.feedbackInboxDays).toBe(90);
+  expect(settings.BOUNDS.feedbackInboxDays).toEqual([1, 3650]);
+  expect(settings.validatePatch({ feedbackInboxDays: 0 })).toEqual({ feedbackInboxDays: 1 });
+  expect(settings.validatePatch({ feedbackInboxDays: 99999 })).toEqual({ feedbackInboxDays: 3650 });
+  expect(() => settings.validatePatch({ feedbackInboxDays: 'x' })).toThrow(/feedbackInboxDays/);
+  expect(settings.write({ feedbackInboxDays: 30.4 }).feedbackInboxDays).toBe(30);
+  expect(settings.read().feedbackInboxDays).toBe(30);
+  writeRaw(JSON.stringify({ feedbackInboxDays: 'bad', tasksDays: 9 }));
+  expect(settings.read().feedbackInboxDays).toBe(90);
+  expect(settings.read().tasksDays).toBe(9);
+  writeRaw(JSON.stringify({ feedbackInboxDays: -5 }));
+  expect(settings.read().feedbackInboxDays).toBe(1);
 });
 
 test('planRecordsDays: default 14, clamps to [1, 3650], validates, sanitizes stored', () => {

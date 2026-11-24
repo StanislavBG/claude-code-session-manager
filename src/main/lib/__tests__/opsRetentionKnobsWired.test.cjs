@@ -100,3 +100,10 @@ test('planRecordsDays defaults to 14 on a corrupt settings file', () => {
   runPlanRecordSweep({ cwds: [path.join(home, 'p')], prune: (o) => { calls.push(o); return { removed: [], kept: 0 }; } });
   expect(calls[0].days).toBe(14);
 });
+
+test('feedbackInboxDays is read from ops-retention.json and defaults to 90 on corruption', () => {
+  writeRaw(JSON.stringify({ feedbackInboxDays: 21 }));
+  expect(settings.read().feedbackInboxDays).toBe(21);
+  writeRaw('{not json');
+  expect(settings.read().feedbackInboxDays).toBe(90);
+});

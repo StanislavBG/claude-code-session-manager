@@ -3,10 +3,11 @@
  *
  * Storage: ~/.claude/session-manager/ops-retention.json
  * Shape (DEFAULTS): { runLogs:{maxAgeDays,keepPerSlug}, runsArchiveDays, auditLogMonths,
- *   reservedMarkersKeep, tasksDays, planRecordsDays }
+ *   reservedMarkersKeep, tasksDays, planRecordsDays, feedbackInboxDays }
  * tasksDays: Task ledger day files + bodies (lib/tasks/taskLedger.cjs pruneOld).
  * planRecordsDays: plan-records/<epic-id>/ folders of completed/orphan Epics
  *   (lib/scheduler/planRecordRetention.cjs prunePlanRecords).
+ * feedbackInboxDays: delete resolved or wontfix feedback-inbox/ items older than this.
  * Archived transcripts are kept forever (fixed policy, not a setting).
  *
  * Top-level in lib/ (no domain fits: read by scheduler, telemetry and epic sweeps alike).
@@ -27,6 +28,7 @@ const DEFAULTS = Object.freeze({
   reservedMarkersKeep: 100,
   tasksDays: 30,
   planRecordsDays: 14,
+  feedbackInboxDays: 90,
 });
 
 // [min, max] per integer field; out-of-range values clamp, non-integers round.
@@ -38,6 +40,7 @@ const BOUNDS = Object.freeze({
   reservedMarkersKeep: [1, 100000],
   tasksDays: [1, 3650],
   planRecordsDays: [1, 3650],
+  feedbackInboxDays: [1, 3650],
 });
 
 function storePath() {
@@ -71,7 +74,7 @@ function validatePatch(patch) {
         if (rk !== 'maxAgeDays' && rk !== 'keepPerSlug') throw new Error(`Invalid ops retention config: runLogs.${rk}`);
         out.runLogs[rk] = num(`runLogs.${rk}`, rv);
       }
-    } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep' || k === 'tasksDays' || k === 'planRecordsDays') {
+    } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep' || k === 'tasksDays' || k === 'planRecordsDays' || k === 'feedbackInboxDays') {
       out[k] = num(k, v);
     } else {
       throw new Error(`Invalid ops retention config: unknown key ${k}`);
@@ -95,7 +98,7 @@ function sanitizeStored(data) {
       };
     }
   }
-  for (const key of ['runsArchiveDays', 'auditLogMonths', 'reservedMarkersKeep', 'tasksDays', 'planRecordsDays']) {
+  for (const key of ['runsArchiveDays', 'auditLogMonths', 'reservedMarkersKeep', 'tasksDays', 'planRecordsDays', 'feedbackInboxDays']) {
     const v = int(key, data[key]);
     if (v !== undefined) out[key] = v;
   }
@@ -122,6 +125,7 @@ function withDefaults(stored) {
     reservedMarkersKeep: s.reservedMarkersKeep ?? DEFAULTS.reservedMarkersKeep,
     tasksDays: s.tasksDays ?? DEFAULTS.tasksDays,
     planRecordsDays: s.planRecordsDays ?? DEFAULTS.planRecordsDays,
+    feedbackInboxDays: s.feedbackInboxDays ?? DEFAULTS.feedbackInboxDays,
   };
 }
 

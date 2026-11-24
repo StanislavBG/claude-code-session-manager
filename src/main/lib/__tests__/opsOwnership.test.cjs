@@ -132,6 +132,24 @@ test("webhooks/ is owned by 'webhooks' (webhookRegistry.cjs) and is a runtime na
   assert.equal(checkOpsWrite(`${P}/webhooks/.gitignore`, 'runtime-ignore').ok, true);
 });
 
+test("feedback-inbox/ is owned by 'feedback-inbox' and is a self-ignored runtime namespace", () => {
+  const { RUNTIME_NAMESPACES, ensureRuntimeIgnores } = require('../opsOwnership.cjs');
+  assert.equal(OWNERS['feedback-inbox'], 'feedback-inbox');
+  assert.ok(RUNTIME_NAMESPACES.includes('feedback-inbox'));
+  assert.equal(checkOpsWrite(`${P}/feedback-inbox/item-1.json`, 'feedback-inbox').ok, true);
+  assert.equal(checkOpsWrite(`${P}/feedback-inbox/item-1.json`, 'scheduler').ok, false);
+  assert.equal(checkOpsWrite(`${P}/feedback-inbox/.gitignore`, 'runtime-ignore').ok, true);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-fbinbox-'));
+  try {
+    fs.mkdirSync(path.join(root, 'session-manager-operations', 'feedback-inbox'), { recursive: true });
+    ensureRuntimeIgnores(root);
+    const gi = path.join(root, 'session-manager-operations', 'feedback-inbox', '.gitignore');
+    assert.equal(fs.readFileSync(gi, 'utf8').trim(), '*');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // The root .gitignore mirrors RUNTIME_NAMESPACES: each namespace's contents are
 // ignored with its README kept tracked (feedback/ is retired: whole dir ignored).
 test('root .gitignore mirrors every runtime namespace', () => {

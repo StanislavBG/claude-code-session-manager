@@ -98,6 +98,11 @@ const OWNERS = Object.freeze({
   // webhooks/subscriptions.json, mode 0600. lib/telemetry/webhookRegistry.cjs
   // is the ONLY writer. Runtime (holds secrets — never committed).
   'webhooks': 'webhooks',
+  // Per-project website feedback inbox: reports from the embedded feedback
+  // widget, which carry screenshots and reporter emails. Written only as the
+  // 'feedback-inbox' writer. Runtime (personal data — never committed);
+  // resolved/wontfix items pruned after feedbackInboxDays (opsRetentionSettings).
+  'feedback-inbox': 'feedback-inbox',
 });
 
 /**
@@ -109,7 +114,7 @@ const OWNERS = Object.freeze({
  */
 const RUNTIME_NAMESPACES = Object.freeze([
   'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
-  'plan-records', 'events', 'agents', 'webhooks',
+  'plan-records', 'events', 'agents', 'webhooks', 'feedback-inbox',
 ]);
 
 /** Writer id for the per-namespace self-ignore file. */

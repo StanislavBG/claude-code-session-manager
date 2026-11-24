@@ -5,7 +5,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-18 namespaces, no top-level files. Ownership rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
+19 namespaces, no top-level files. Ownership + ops-path rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 
 - **Owned** (in `OWNERS`, app-owned state): each `OWNERS →` row below;
   `project-pages` covers the admin render route only (a Builder Epic's own
@@ -18,9 +18,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 Bare root: no owner, writes refused. Retention exception: human-only purge (`lib/epic/epicPurge.cjs`).
 
-Epic lifecycle is specified exactly once, at
-[`prompt-sessions/README.md#lifecycle`](prompt-sessions/README.md#lifecycle)
-— not restated here.
+Epic lifecycle: only at [`prompt-sessions/README.md#lifecycle`](prompt-sessions/README.md#lifecycle).
 
 | Namespace | Governance | Purpose | Retention | README |
 | --- | --- | --- | --- | --- |
@@ -29,6 +27,7 @@ Epic lifecycle is specified exactly once, at
 | `design-mocks` | not owned | design mock artifacts | keep | [link](design-mocks/README.md) |
 | `events` | OWNERS → event-log | per-Epic event log `<epic-id>/events.jsonl`; runtime, self-ignored | keep forever | none |
 | `feedback` | retired 2026-08-02 | former intake | n/a | none |
+| `feedback-inbox` | OWNERS → feedback-inbox | per-project website feedback inbox; runtime, self-ignored | `feedbackInboxDays`, resolved/wontfix (default 90d) | none |
 | `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep | [link](HUMAN_LEARN/README.md) |
 | `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | authoring source for the free Field Manual | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
@@ -45,10 +44,9 @@ Epic lifecycle is specified exactly once, at
 
 ## Who consumes this
 
-The main process (owned namespaces, via `opsPath()`); skills/humans write
-the unowned ones. Each README is the layout contract; the table says who owns it.
+The main process (owned, via `opsPath()`); skills/humans write the unowned
+ones. Each README is the layout contract.
 
 ## What must NOT be assumed
 
-- Owned-namespace writes and ops-path building: see [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 - Do not link out with a `file://` URL — it only resolves on one machine.

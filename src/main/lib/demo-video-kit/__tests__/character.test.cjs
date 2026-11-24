@@ -420,3 +420,112 @@ test('speakWithCommand refuses a batch voice and spawns nothing', () => {
   expect(r).toEqual({ ok: false, status: null, error: 'a {lines} voice is spoken by speakLines in one call per speaker, not per line' });
   expect(fs.existsSync(marker)).toBe(false);
 });
+
+// Batch speakers: a stub at <root>/bin/tts-batch reads the {lines} manifest and writes every out in one call.
+const TTS_BATCH_STUB = [
+  '#!/usr/bin/env node',
+  "const fs = require('fs');",
+  "const a = process.argv.slice(2);",
+  "const get = (k) => a[a.indexOf(k) + 1];",
+  "const speaker = get('--speaker');",
+  "const manifest = JSON.parse(fs.readFileSync(get('--lines'), 'utf8'));",
+  "fs.appendFileSync('calls.jsonl', JSON.stringify({ speaker, manifest }) + '\\n');",
+  "if (speaker === 'broken') { process.stderr.write('tts: no model for broken'); process.exit(1); }",
+  "const todo = speaker === 'lazy' ? manifest.slice(0, -1) : manifest;",
+  "for (const l of todo) fs.writeFileSync(l.out, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60), Buffer.from(l.text)]));",
+].join('\n');
+const ttsBatchVoice = (key) => ({ engine: 'command', command: ['bin/tts-batch', '--speaker', key, '--lines', '{lines}'] });
+
+function batchProject(hostKey, cast = []) {
+  const root = castProject(cast, ttsBatchVoice(hostKey));
+  fs.writeFileSync(path.join(root, 'bin', 'tts-batch'), TTS_BATCH_STUB);
+  fs.chmodSync(path.join(root, 'bin', 'tts-batch'), 0o755);
+  return root;
+}
+
+test.skipIf(process.platform === 'win32')('speakLines: a batch host runs once with an absolute-out manifest; per-line cast calls run in order', () => {
+  const root = batchProject('host', [{ name: 'Pip', voice: ttsVoice('pip') }]);
+  const r = charMod.speakLines(root, [
+    { text: 'hello', out: 'a.wav' },
+    { text: 'squeak', out: path.join(root, 'b.wav'), speaker: 'Pip' },
+    { text: 'again', out: 'c.WAV' },
+    { text: 'more', out: path.join(root, 'd.wav'), speaker: 'pip' },
+    { text: 'bye', out: 'e.wav', speaker: 'Bit' },
+  ]);
+  expect(r).toEqual({ ok: true, outs: ['a.wav', path.join(root, 'b.wav'), 'c.WAV', path.join(root, 'd.wav'), 'e.wav'] });
+  expect(calls(root)).toEqual([
+    { speaker: 'host', manifest: [
+      { text: 'hello', out: path.join(root, 'a.wav') },
+      { text: 'again', out: path.join(root, 'c.WAV') },
+      { text: 'bye', out: path.join(root, 'e.wav') },
+    ] },
+    { speaker: 'pip', text: 'squeak' },
+    { speaker: 'pip', text: 'more' },
+  ]);
+  expect(fs.readFileSync(path.join(root, 'c.WAV')).subarray(64).toString()).toBe('again');
+});
+
+test.skipIf(process.platform === 'win32')('speakLines: a batch voice exiting 1 fails with its stderr and runs no later call', () => {
+  const root = batchProject('broken', [{ name: 'Pip', voice: ttsVoice('pip') }]);
+  const r = charMod.speakLines(root, [
+    { text: 'one', out: 'a.wav' },
+    { text: 'two', out: 'b.wav', speaker: 'Pip' },
+    { text: 'three', out: 'c.wav' },
+  ]);
+  expect(r).toMatchObject({ ok: false, line: 0, lines: [0, 2], speaker: 'Bit' });
+  expect(r.error).toMatch(/exit 1/);
+  expect(r.error).toMatch(/tts: no model for broken/);
+  expect(calls(root).map((c) => c.speaker)).toEqual(['broken']);
+});
+
+test.skipIf(process.platform === 'win32')('speakLines: a batch voice skipping its last out fails even with a stale WAV there', () => {
+  const root = batchProject('lazy');
+  const stale = path.join(root, 'c.wav');
+  fs.writeFileSync(stale, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60)]));
+  const r = charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }, { text: 'two', out: 'b.wav' }, { text: 'three', out: 'c.wav' }]);
+  expect(r).toMatchObject({ ok: false, line: 0, lines: [0, 1, 2], speaker: 'Bit' });
+  expect(r.error).toMatch(/1 of 3 outs missing/);
+  expect(r.error).toContain(stale);
+  expect(fs.existsSync(stale)).toBe(false);
+});
+
+test('speakLines: batch outs must end in .wav and be distinct; nothing runs', () => {
+  const root = batchProject('host', [{ name: 'Pip', voice: ttsVoice('pip') }]);
+  const notWav = charMod.speakLines(root, [{ text: 'one', out: 'a.wav', speaker: 'Pip' }, { text: 'two', out: 'b.mp3' }]);
+  expect(notWav).toMatchObject({ ok: false, line: 1, error: "line 1: a {lines} voice's out must end in .wav" });
+  const dup = charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }, { text: 'two', out: path.join(root, 'a.wav') }]);
+  expect(dup).toMatchObject({ ok: false, line: 1, error: `line 1: out ${path.join(root, 'a.wav')} repeats line 0's out` });
+  expect(calls(root)).toEqual([]);
+});
+
+test('batchTimeoutMs: scales per line, caps at the ceiling and the job deadline, refuses too little time', () => {
+  const { batchTimeoutMs, COMMAND_TIMEOUT_MS: per, BATCH_TIMEOUT_CEILING_MS, SPEAK_DEADLINE_MARGIN_MS, MIN_BATCH_TIMEOUT_MS } = charMod;
+  expect(BATCH_TIMEOUT_CEILING_MS).toBe(180 * 60000);
+  expect(SPEAK_DEADLINE_MARGIN_MS).toBe(45 * 60000);
+  expect(MIN_BATCH_TIMEOUT_MS).toBe(60000);
+  expect(batchTimeoutMs(1, { now: 0, env: {} })).toEqual({ ok: true, ms: per });
+  expect(batchTimeoutMs(3, { now: 0, env: {} })).toEqual({ ok: true, ms: 3 * per });
+  expect(batchTimeoutMs(40, { now: 0, env: {} })).toEqual({ ok: true, ms: BATCH_TIMEOUT_CEILING_MS });
+  expect(batchTimeoutMs(40, { now: 0, env: { SM_SCHEDULER_JOB_DEADLINE_MS: 'soon' } })).toEqual({ ok: true, ms: BATCH_TIMEOUT_CEILING_MS });
+  const now = 1_000_000;
+  const deadline = String(now + SPEAK_DEADLINE_MARGIN_MS + 20 * 60000);
+  expect(batchTimeoutMs(40, { now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: deadline } })).toEqual({ ok: true, ms: 20 * 60000 });
+  const tight = String(now + SPEAK_DEADLINE_MARGIN_MS + 30000);
+  const r = batchTimeoutMs(5, { now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: tight } });
+  expect(r.ok).toBe(false);
+  expect(r.error).toMatch(/30s/);
+  expect(r.error).toMatch(/5 lines/);
+});
+
+test.skipIf(process.platform === 'win32')('speakLines: too little time before the job deadline runs no batch call', () => {
+  const root = batchProject('host');
+  const prev = process.env.SM_SCHEDULER_JOB_DEADLINE_MS;
+  process.env.SM_SCHEDULER_JOB_DEADLINE_MS = String(Date.now() + charMod.SPEAK_DEADLINE_MARGIN_MS + 1000);
+  try {
+    const r = charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }]);
+    expect(r).toMatchObject({ ok: false, line: 0, lines: [0], speaker: 'Bit' });
+  } finally {
+    if (prev === undefined) delete process.env.SM_SCHEDULER_JOB_DEADLINE_MS; else process.env.SM_SCHEDULER_JOB_DEADLINE_MS = prev;
+  }
+  expect(calls(root)).toEqual([]);
+});

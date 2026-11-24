@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 17 (batch {lines} voices must reach installed kits)', () => {
-  expect(KIT_VERSION).toBe('17');
+test('KIT_VERSION is bumped to 18 (batch speakers speak in one call per run)', () => {
+  expect(KIT_VERSION).toBe('18');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

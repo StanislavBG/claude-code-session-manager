@@ -4,7 +4,10 @@
 // Reading is plain file reading; writing goes only through the
 // POST /admin/project-home/character/write route (writer 'project-home').
 // speakWithCommand spawns the user's TTS argv directly — never through a shell.
+// speakLines runs a {lines} (batch) voice once per speaker with a JSON manifest
+// of { text, out } and a time limit capped by SM_SCHEDULER_JOB_DEADLINE_MS.
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 // Kit files are seeded to ~/.claude/session-manager/demo-video-kit/ and must
@@ -17,6 +20,9 @@ const MAX_JSON_BYTES = 16 * 1024;
 // Per narration line: slow CPU voices can take minutes for one sentence.
 const COMMAND_TIMEOUT_MS = 900000;
 const STDERR_TAIL = 500;
+const BATCH_TIMEOUT_CEILING_MS = 180 * 60 * 1000;
+const SPEAK_DEADLINE_MARGIN_MS = 45 * 60 * 1000;
+const MIN_BATCH_TIMEOUT_MS = 60 * 1000;
 const WAV_HEADER_BYTES = 44;
 
 const PERSONALITY_TEXT = Object.freeze({ who: 400, speech: 400, readingLevel: 40 });
@@ -280,13 +286,93 @@ function speakWithCommand(voice, text, out, { cwd } = {}) {
 }
 
 /**
+ * Time limit for one batch voice call over `lineCount` lines -> {ok: true, ms} | {ok: false, error}.
+ * ms = min(lineCount * COMMAND_TIMEOUT_MS, BATCH_TIMEOUT_CEILING_MS), capped at the scheduler's
+ * job deadline (env.SM_SCHEDULER_JOB_DEADLINE_MS) minus SPEAK_DEADLINE_MARGIN_MS when that is a
+ * finite number: the voice runs first, so the whole video is still to be built after it.
+ */
+function batchTimeoutMs(lineCount, { now = Date.now(), env = process.env } = {}) {
+  let ms = Math.min(lineCount * COMMAND_TIMEOUT_MS, BATCH_TIMEOUT_CEILING_MS);
+  const deadline = Number(env && env.SM_SCHEDULER_JOB_DEADLINE_MS);
+  const raw = env && env.SM_SCHEDULER_JOB_DEADLINE_MS;
+  if (raw !== undefined && raw !== null && raw !== '' && Number.isFinite(deadline)) {
+    ms = Math.min(ms, deadline - now - SPEAK_DEADLINE_MARGIN_MS);
+  }
+  if (ms < MIN_BATCH_TIMEOUT_MS) {
+    const left = Math.max(0, Math.floor(ms / 1000));
+    return {
+      ok: false,
+      error: `only ${left}s left before the job deadline (minus a ${SPEAK_DEADLINE_MARGIN_MS / 60000} min margin) for ${lineCount} lines; need at least ${MIN_BATCH_TIMEOUT_MS / 1000}s`,
+    };
+  }
+  return { ok: true, ms };
+}
+
+/**
+ * Run one batch ({lines}) voice over `items` ([{ text, out }], out absolute), cwd = root.
+ * -> {ok: true} | {ok: false, error}. Old files at the outs are removed first; stderr goes
+ * to a file (never a pipe) so a long run cannot overflow spawnSync's maxBuffer.
+ */
+function speakBatch(voice, items, root) {
+  const limit = batchTimeoutMs(items.length);
+  if (!limit.ok) return limit;
+  for (const it of items) {
+    try {
+      fs.rmSync(it.out, { force: true });
+    } catch (e) {
+      return { ok: false, error: `cannot clear ${it.out}: ${e.message}` };
+    }
+  }
+  let dir;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-voice-'));
+    const manifest = path.join(dir, 'lines.json');
+    fs.writeFileSync(manifest, JSON.stringify(items.map(({ text, out }) => ({ text, out }))));
+    const errPath = path.join(dir, 'stderr.log');
+    const errFd = fs.openSync(errPath, 'w');
+    let r;
+    try {
+      const [bin, ...args] = buildBatchArgv(voice, manifest);
+      r = spawnSync(bin, args, { shell: false, stdio: ['ignore', 'ignore', errFd], timeout: limit.ms, cwd: root });
+    } finally {
+      fs.closeSync(errFd);
+    }
+    let stderr = '';
+    try { stderr = fs.readFileSync(errPath, 'utf8').trim().slice(-STDERR_TAIL); } catch { /* none */ }
+    const withStderr = (msg) => (stderr ? `${msg}: ${stderr}` : msg);
+    const mins = Math.round((limit.ms / 60000) * 10) / 10;
+    if (r.error && r.error.code === 'ETIMEDOUT') {
+      return { ok: false, error: withStderr(`voice command killed by ${r.signal || 'SIGTERM'} at its ${mins} min limit`) };
+    }
+    if (r.error) return { ok: false, error: withStderr(r.error.message) };
+    if (r.status !== 0) {
+      const why = r.signal ? `killed by ${r.signal} (limit ${mins} min)` : `exit ${r.status}`;
+      return { ok: false, error: withStderr(`voice command failed (${why})`) };
+    }
+    const missing = items.filter((it) => !isWav(it.out)).map((it) => it.out);
+    if (missing.length) {
+      return { ok: false, error: withStderr(`the voice command left ${missing.length} of ${items.length} outs missing (no WAV at ${missing[0]})`) };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  } finally {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Speak every narration line, in order, cwd = the project root. A line is
  * { text, out, speaker? }: an absent/null speaker (or the host's name) uses the
  * host's voice; a cast member's name (case-insensitive, trimmed) uses that
  * member's voice. Every line's speaker is resolved before any voice runs; only
- * 'command' voices speak here (Kokoro stays on the persona's recipe). No
- * fallback voice: the first failure stops the run.
- * -> {ok: true, outs} | {ok: false, line?, speaker?, error}
+ * 'command' voices speak here (Kokoro stays on the persona's recipe). A per-line
+ * ({text}/{out}) voice runs once per line. A batch ({lines}) voice runs ONCE, at
+ * its speaker's first line, over a JSON manifest [{ text, out }] of all its lines
+ * (outs absolute, each ending in .wav and distinct), within batchTimeoutMs; it
+ * succeeds only when every out is a WAV. No fallback voice: the first failure
+ * stops the run.
+ * -> {ok: true, outs} | {ok: false, line?, lines?, speaker?, error}
  */
 function speakLines(projectRoot, lines) {
   let root;
@@ -305,6 +391,7 @@ function speakLines(projectRoot, lines) {
   const names = speakers.map((m) => String(m.name).trim());
   const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
   const resolved = [];
+  const batches = new Map(); // speaker name -> { voice, indices, seen: Map<absOut, lineIndex> }
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     const sp = l ? l.speaker : undefined;
@@ -318,13 +405,33 @@ function speakLines(projectRoot, lines) {
     if (m.voice.engine !== 'command') {
       return { ok: false, line: i, error: `line ${i}: "${name}" has a '${m.voice.engine}' voice, not 'command'; speak it with the Kokoro recipe` };
     }
+    if (isBatchVoice(m.voice)) {
+      if (!l.out.toLowerCase().endsWith('.wav')) return { ok: false, line: i, error: `line ${i}: a {lines} voice's out must end in .wav` };
+      const abs = path.resolve(root, l.out);
+      let b = batches.get(name);
+      if (!b) { b = { voice: m.voice, indices: [], seen: new Map() }; batches.set(name, b); }
+      if (b.seen.has(abs)) return { ok: false, line: i, error: `line ${i}: out ${abs} repeats line ${b.seen.get(abs)}'s out` };
+      b.seen.set(abs, i);
+      b.indices.push(i);
+    }
     resolved.push({ name, voice: m.voice, text: l.text, out: l.out });
   }
   const outs = [];
+  const spoken = new Set();
   for (let i = 0; i < resolved.length; i++) {
     const { name, voice, text, out } = resolved[i];
-    const r = speakWithCommand(voice, text, out, { cwd: root });
-    if (!r.ok) return { ok: false, line: i, speaker: name, error: `"${name}": ${r.error}` };
+    const b = batches.get(name);
+    if (b) {
+      if (!spoken.has(name)) {
+        spoken.add(name);
+        const items = b.indices.map((j) => ({ text: resolved[j].text, out: path.resolve(root, resolved[j].out) }));
+        const r = speakBatch(b.voice, items, root);
+        if (!r.ok) return { ok: false, line: b.indices[0], lines: b.indices.slice(), speaker: name, error: `"${name}": ${r.error}` };
+      }
+    } else {
+      const r = speakWithCommand(voice, text, out, { cwd: root });
+      if (!r.ok) return { ok: false, line: i, speaker: name, error: `"${name}": ${r.error}` };
+    }
     outs.push(out);
   }
   return { ok: true, outs };
@@ -347,6 +454,10 @@ module.exports = {
   MAX_JSON_BYTES,
   MAX_CAST_MEMBERS,
   COMMAND_TIMEOUT_MS,
+  batchTimeoutMs,
+  BATCH_TIMEOUT_CEILING_MS,
+  SPEAK_DEADLINE_MARGIN_MS,
+  MIN_BATCH_TIMEOUT_MS,
 };
 
 // CLI: node character.cjs speak spec.json   (spec { projectRoot, lines: [{ text, out, speaker? }] })

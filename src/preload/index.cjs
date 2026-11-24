@@ -577,6 +577,8 @@ contextBridge.exposeInMainWorld('api', {
     servicePairStart: (input) => ipcRenderer.invoke('webRemote:service-pair-start', input),
     /** Confirm a pending service's 6-digit SAS; pins its key. */
     serviceConfirmSas: (pairingId, sas) => ipcRenderer.invoke('webRemote:service-confirm-sas', { pairingId, sas }),
+    /** Cancel a pending pairing; drops its waiting service client. */
+    servicePairCancel: (pairingId) => ipcRenderer.invoke('webRemote:service-pair-cancel', { pairingId }),
     /** Revoke a paired service locally and at the relay. */
     serviceRevoke: (serviceId) => ipcRenderer.invoke('webRemote:service-revoke', { serviceId }),
     /** Revoke a relay client no local service owns (an orphan). */

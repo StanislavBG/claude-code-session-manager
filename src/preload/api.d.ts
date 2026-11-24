@@ -2966,6 +2966,11 @@ export type WebRemoteServiceConfirmSasResult =
   | { ok: true; service: WebRemoteService }
   | { ok: false; error: string };
 
+/** webRemote.cjs servicePairCancel: `cancelled` = a pending pairing was dropped; `dropped` = waiting clients torn down. */
+export type WebRemoteServicePairCancelResult =
+  | { ok: true; cancelled: boolean; dropped: number }
+  | { ok: false; error: string };
+
 export type WebRemoteServiceRevokeResult =
   | { ok: true; relayRevoked: boolean }
   | { ok: false; error: string };
@@ -3680,6 +3685,8 @@ export interface SessionManagerAPI {
     servicePairStart: (input: WebRemoteServicePairStartInput) => Promise<WebRemoteServicePairStartResult>;
     /** Confirm a pending service's 6-digit SAS. */
     serviceConfirmSas: (pairingId: string, sas: string) => Promise<WebRemoteServiceConfirmSasResult>;
+    /** Cancel a pending pairing and drop its waiting service client. */
+    servicePairCancel: (pairingId: string) => Promise<WebRemoteServicePairCancelResult>;
     /** Revoke a paired service locally and at the relay (relay failure still revokes locally). */
     serviceRevoke: (serviceId: string) => Promise<WebRemoteServiceRevokeResult>;
     /** Revoke an orphaned relay client. */

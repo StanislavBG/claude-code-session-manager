@@ -264,7 +264,6 @@ async function parsePrd(filePath) {
   return parsed;
 }
 
-/** Test-only: drop both cache layers so successive runs see fresh disk state. */
 /**
  * Drop every dir-cache and file-cache entry whose folder is not in `dirs`.
  * listPrdFiles prunes only within the folder it lists, so a folder the
@@ -290,6 +289,7 @@ function _cacheKeys() {
   return { dirs: [...prdDirCache.keys()], files: [...prdFileCache.keys()] };
 }
 
+/** Test-only: drop both cache layers so successive runs see fresh disk state. */
 function _resetCache() {
   prdDirCache.clear();
   prdFileCache.clear();

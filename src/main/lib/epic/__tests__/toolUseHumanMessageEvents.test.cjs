@@ -306,12 +306,16 @@ test('a relay tag is keyed by tab + prompt and expires after its TTL', async () 
   }
 });
 
-test('the relay note TTL is the ack timeout plus a bounded run-start window', () => {
+test('the relay note TTL is the ack timeout plus the kill ceiling', () => {
   const cr = require('../../../chatRunner.cjs');
-  expect(cr.RELAY_PROMPT_TTL_MS).toBe(cr.EXTERNAL_SEND_ACK_TIMEOUT_MS + cr.RELAY_RUN_START_WINDOW_MS);
   // A queued send starts once the in-flight turn ends, which the kill ceiling bounds.
-  expect(cr.RELAY_RUN_START_WINDOW_MS).toBeGreaterThan(0);
-  expect(cr.RELAY_RUN_START_WINDOW_MS).toBeLessThanOrEqual(cr.KILL_CEILING_MS);
+  expect(cr.RELAY_PROMPT_TTL_MS).toBe(cr.EXTERNAL_SEND_ACK_TIMEOUT_MS + cr.KILL_CEILING_MS);
+  expect(cr.RELAY_RUN_START_WINDOW_MS).toBe(cr.KILL_CEILING_MS);
+  // Equal values could still be a copied literal that drifts when the ceiling moves:
+  // the window must be defined by reference to the constant.
+  const src = require('fs').readFileSync(require.resolve('../../../chatRunner.cjs'), 'utf8');
+  expect(src).toMatch(/^const RELAY_RUN_START_WINDOW_MS = KILL_CEILING_MS;/m);
+  expect(src.indexOf('const KILL_CEILING_MS')).toBeLessThan(src.indexOf('const RELAY_RUN_START_WINDOW_MS'));
   expect(cr.RELAY_PROMPT_TTL_MS).toBeLessThan(6 * 60 * 60 * 1000);
 });
 

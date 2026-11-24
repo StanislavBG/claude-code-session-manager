@@ -325,6 +325,18 @@ function consumeSchedulerPrompt(tabId, prompt) {
   return true;
 }
 
+// ─── Hard wall-clock kill ceiling ────────────────────────────────────────
+// Defined here (ahead of the relay-note TTL and CHAT_MODE_TRUTH_INSTRUCTION) so
+// the relay TTL and the prompt's stated budget are always derived from this
+// single constant — never a hand-written duplicate that could drift from the
+// real timer below.
+const KILL_CEILING_MS = 30 * 60 * 1000; // 30 minutes
+const KILL_CEILING_MIN = KILL_CEILING_MS / 60_000;
+// 80% warning point — gives the model a turn-visible nudge to wrap up before
+// the hard kill fires at 100%. Not configurable; see PRD out-of-scope note
+// re: making KILL_CEILING_MS itself configurable.
+const WARN_CEILING_MS = Math.floor(KILL_CEILING_MS * 0.8);
+
 // tab+prompt keys of relayed external sends (Web Remote phone / admin API) awaiting
 // their run(): each entry is a FIFO of relay names, consumed once per EXTERNAL run.
 // A note only lives as long as its send can still produce a run: the ack window,
@@ -333,7 +345,7 @@ function consumeSchedulerPrompt(tabId, prompt) {
 const EXTERNAL_RELAYS = new Set(['web-remote', 'admin-api']);
 const relayPrompts = new Map();
 const EXTERNAL_SEND_ACK_TIMEOUT_MS = 8000;
-const RELAY_RUN_START_WINDOW_MS = 30 * 60 * 1000; // = KILL_CEILING_MS (defined below)
+const RELAY_RUN_START_WINDOW_MS = KILL_CEILING_MS;
 const RELAY_PROMPT_TTL_MS = EXTERNAL_SEND_ACK_TIMEOUT_MS + RELAY_RUN_START_WINDOW_MS;
 function noteRelayPrompt(tabId, prompt, relay) {
   if (!EXTERNAL_RELAYS.has(relay)) return null;
@@ -375,17 +387,6 @@ function consumeRelayPrompt(tabId, prompt) {
   if (!list.length) relayPrompts.delete(key);
   return hit;
 }
-
-// ─── Hard wall-clock kill ceiling ────────────────────────────────────────
-// Defined here (ahead of CHAT_MODE_TRUTH_INSTRUCTION) so the prompt's stated
-// budget is always derived from this single constant — never a hand-written
-// duplicate that could drift from the real timer below.
-const KILL_CEILING_MS = 30 * 60 * 1000; // 30 minutes
-const KILL_CEILING_MIN = KILL_CEILING_MS / 60_000;
-// 80% warning point — gives the model a turn-visible nudge to wrap up before
-// the hard kill fires at 100%. Not configurable; see PRD out-of-scope note
-// re: making KILL_CEILING_MS itself configurable.
-const WARN_CEILING_MS = Math.floor(KILL_CEILING_MS * 0.8);
 
 // Instruction prepended to every prompt. Tells the agent the truth about this
 // execution mode: this Chat tab is a one-shot headless `claude -p` run — no

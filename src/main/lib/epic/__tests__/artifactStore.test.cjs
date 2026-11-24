@@ -349,9 +349,39 @@ test('listArtifacts keeps a regular file and hides a dangling symlink and a syml
   expect(store.listArtifacts(root).map((e) => e.name)).toEqual(['keep.txt']);
 });
 
-test('publishArtifact and ingestDir have no fsImpl seam: writes use the real fs', () => {
-  // Reads are injectable (listArtifacts above); the write paths take no fsImpl at all.
-  for (const fn of [store.publishArtifact, store.ingestDir]) {
-    expect(fn.toString()).not.toMatch(/fsImpl/);
-  }
+test('publishArtifact and ingestDir ignore an fsImpl option: writes land on the real disk', async () => {
+  // Reads are injectable (listArtifacts above); the write paths must never touch an fsImpl.
+  const accesses = [];
+  const record = (trap) => (_t, key) => { accesses.push(`${trap}:${String(key)}`); return undefined; };
+  const spyFs = new Proxy({}, {
+    get: record('get'), has: (_t, k) => { accesses.push(`has:${String(k)}`); return false; },
+    set: (_t, k) => { accesses.push(`set:${String(k)}`); return true; },
+    ownKeys: () => { accesses.push('ownKeys'); return []; },
+    getOwnPropertyDescriptor: record('getOwnPropertyDescriptor'),
+    getPrototypeOf: () => { accesses.push('getPrototypeOf'); return null; },
+    defineProperty: (_t, k) => { accesses.push(`defineProperty:${String(k)}`); return true; },
+    deleteProperty: (_t, k) => { accesses.push(`deleteProperty:${String(k)}`); return true; },
+  });
+  const opts = /** @type {any} */ ({ fsImpl: spyFs });
+
+  const pubRes = await store.publishArtifact({
+    projectRoot: root, epicId: EPIC, allowedRoots: [src], srcPath: mk('seam-pub.txt', 'pub-bytes'), ...opts,
+  });
+  expect(pubRes.ok).toBe(true);
+  expect(fs.readFileSync(pubRes.storedPath, 'utf8')).toBe('pub-bytes');
+
+  const staging = path.join(wtRoot, 'staging');
+  fs.mkdirSync(staging);
+  fs.writeFileSync(path.join(staging, 'seam-ingest.txt'), 'ingest-bytes');
+  const ingRes = await store.ingestDir({ projectRoot: root, epicId: EPIC, srcDir: staging, ...opts });
+  expect(ingRes.skipped).toEqual([]);
+  expect(ingRes.published).toHaveLength(1);
+  const ingStored = ingRes.published[0].storedPath;
+  expect(ingStored).toBe(path.join(ns(), EPIC, 'seam-ingest.txt'));
+  expect(fs.readFileSync(ingStored, 'utf8')).toBe('ingest-bytes');
+  expect(fs.existsSync(path.join(staging, 'seam-ingest.txt'))).toBe(false);
+
+  const ledger = JSON.parse(fs.readFileSync(path.join(ns(), EPIC, 'index.json'), 'utf8'));
+  expect(ledger.entries.map((e) => e.name).sort()).toEqual(['seam-ingest.txt', 'seam-pub.txt']);
+  expect(accesses).toEqual([]);
 });

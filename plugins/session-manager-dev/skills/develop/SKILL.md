@@ -47,7 +47,8 @@ new work. **report** = your final message to the human.
    later: a `dependsOn`, a `preflight` hold or a date) or **closed** (a one-line reason). Only
    a step that needs the human's own hands or authority goes under Needs you, as one exact
    action: sudo, a vendor agreement, a 2FA code, a public publish nobody approved, or a switch
-   the project laws reserve for a human. Never write "deferred", "follow-up for later", "needs
+   the project laws reserve for a human, or a PRD refuted twice on the same criterion (one
+   decision: re-plan it or drop that criterion). Never write "deferred", "follow-up for later", "needs
    a new Epic from you" or "say the word". Why: a list nobody owns becomes debt the human has
    to chase.
 
@@ -283,9 +284,8 @@ Rules:
       (an escape). Why: escapes are counted from `fixes`. The new validate PRD has one criterion per fix
       PRD and one per PRD the earlier validator marked `REFUTED`, each cited by slug. Why: a
       refuted PRD keeps its Epic blocked until a validator verifies that same PRD. A PRD marked
-      `REFUTED` again after its fix wave, on the same criterion, gets no third fix wave: list it
-      as open in the final report with the validator's reason and what was tried, for the human
-      to decide. Why: a second miss on the same criterion means the plan is wrong, and another
+      `REFUTED` again after its fix wave, on the same criterion, gets no third fix wave: put it
+      under Needs you (rule 6) with the validator's reason and what was tried. Why: a second miss on the same criterion means the plan is wrong, and another
       wave would repeat it. A Not validated list means validate exactly those PRDs here. All
       `VERIFIED` with nothing open means Done: write the final report.
    3. **A `PRECONDITION HOLD` notice** is not a park and not a fix-wave trigger. Do nothing — no
@@ -294,8 +294,8 @@ Rules:
 4. **Done** = the latest validator marked every PRD `VERIFIED`, including each PRD an earlier
    validator refuted, every finding at every severity is fixed or closed with a reason, and its record exists in the main checkout's
    `session-manager-operations/plan-records/<epic-id>/`.
-   Never "done with caveats": a REFUTED PRD gets a fix wave, or after its second refutation an
-   open entry in the final report for the human to decide.
+   Never "done with caveats": a REFUTED PRD gets a fix wave, or after its second refutation a
+   Needs you entry for the human to decide.
 
 ### Final report
 
@@ -304,7 +304,7 @@ Rules:
 2. **Decided:** each choice you made instead of asking, with a one-line revert.
 3. **Queued:** side plans and later waves still to run, by slug. They finish without the human.
 4. **Scheduled:** what fires on its own later, and its trigger.
-5. **Needs you:** only steps rule 6 allows, one exact action each. Omit it when empty.
+5. **Needs you:** only steps rule 6 allows, including a PRD refuted twice, one exact action each. Omit it when empty.
 
 Expected API warnings and skipped optional steps are not reported.
 

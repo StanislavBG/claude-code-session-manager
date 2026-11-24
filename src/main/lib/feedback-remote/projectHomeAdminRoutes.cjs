@@ -37,7 +37,7 @@ const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { opsPath, OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 const config = require('../../config.cjs');
 const { schemas, ENTRY_ID_RE } = require('../../ipcSchemas.cjs');
-const { validateCharacterJson, validateCharacterJs, readCharacter, characterDir, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
+const { validateCharacterJson, validateCharacterJs, inspectCharacter, characterDir, MAX_JSON_BYTES: MAX_CHARACTER_JSON_BYTES, MAX_JS_BYTES: MAX_CHARACTER_JS_BYTES } = require('../demo-video-kit/character.cjs');
 const { checkHtmlLimits, checkPostCaption, TIKTOK_CHECK_IDS } = require('../demo-video-kit/checks.cjs');
 const { injectPlayerBridge } = require('../project-pages/playerBridge.cjs');
 const { readMatrix, matrixJsonSchema, MAX_MATRIX_BYTES } = require('../project-pages/competitiveMatrix.cjs');
@@ -671,14 +671,27 @@ async function characterWriteHandler(req, res) {
     sendJson(res, 400, { ok: false, error: `character.json invalid: ${jsonErr}` });
     return;
   }
+  const jsonText = JSON.stringify(jsonObj, null, 2) + '\n';
+  const jsonBytes = Buffer.byteLength(jsonText, 'utf8');
+  if (jsonBytes > MAX_CHARACTER_JSON_BYTES) {
+    sendJson(res, 400, { ok: false, error: `character.json exceeds the ${MAX_CHARACTER_JSON_BYTES}-byte limit (${jsonBytes} bytes as saved)` });
+    return;
+  }
   const jsErr = validateCharacterJs(body.js, [...REMOTE_REFERENCE_CHECKS, ...NETWORK_CHECKS]);
   if (jsErr) {
     sendJson(res, 400, { ok: false, error: jsErr });
     return;
   }
-  if (!body.replace && readCharacter(resolved.cwd)) {
-    sendJson(res, 409, { ok: false, error: 'a character already exists — pass replace: true to overwrite it' });
-    return;
+  if (!body.replace) {
+    const existing = inspectCharacter(resolved.cwd);
+    if (existing.ok) {
+      sendJson(res, 409, { ok: false, error: 'a character already exists — pass replace: true to overwrite it' });
+      return;
+    }
+    if (existing.exists) {
+      sendJson(res, 409, { ok: false, error: `a character already exists but cannot be used (${existing.error}) — fix it, or pass replace: true to overwrite it` });
+      return;
+    }
   }
   config.addAllowedRoot(resolved.cwd);
   try {
@@ -686,7 +699,7 @@ async function characterWriteHandler(req, res) {
     await fs.promises.mkdir(dir, { recursive: true });
     const jsPath = path.join(dir, 'character.js');
     await config.writeTextAtomic(jsPath, body.js, { writer: 'project-home' });
-    await config.writeTextAtomic(path.join(dir, 'character.json'), JSON.stringify(jsonObj, null, 2) + '\n', { writer: 'project-home' });
+    await config.writeTextAtomic(path.join(dir, 'character.json'), jsonText, { writer: 'project-home' });
     sendJson(res, 200, { ok: true, path: dir, bytes: Buffer.byteLength(body.js, 'utf8') });
   } catch (e) {
     sendJson(res, 500, { ok: false, error: e?.message ?? 'write failed' });

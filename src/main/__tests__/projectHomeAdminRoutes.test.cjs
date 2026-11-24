@@ -724,6 +724,111 @@ test('character/write: rejects network js, oversized js and bad json', async () 
   expect(bad.status).toBe(400);
 });
 
+const { MAX_JSON_BYTES: MAX_CHARACTER_JSON_BYTES } = require('../lib/demo-video-kit/character.cjs');
+const CHARACTER_URL = '/admin/project-home/character/write';
+const CAST_COMMAND = ['speak-tool', '--text', '{text}', '--out', '{out}'];
+const GOOD_CAST = [
+  { name: 'Guide', voice: { engine: 'command', command: CAST_COMMAND } },
+  { name: 'Helper', voice: { engine: 'kokoro', id: 'am_adam' } },
+  { name: 'Mascot', note: 'Appears on screen and never speaks.' },
+];
+
+function characterDirOf(cwd) {
+  return path.join(pagesRoot(cwd), 'videos', '_character');
+}
+
+async function characterSetup() {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  return { cwd, adminHttp, dir: characterDirOf(cwd) };
+}
+
+test('character/write: a valid cast (command, kokoro and voiceless members) is saved', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  const json = { ...GOOD_CHARACTER.json, cast: GOOD_CAST };
+  const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json } });
+  expect(r.status).toBe(200);
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8'));
+  expect(saved.cast).toEqual(GOOD_CAST);
+});
+
+test('character/write: an invalid cast is refused with the named reason and nothing is written', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  const cases = [
+    [[{ name: 'Guide' }, { name: 'guide' }], /duplicates cast\[0\]\.name/],
+    [[{ name: 'bit' }], /is the host's name/],
+    [[{ name: 'Guide', voice: { engine: 'robot' } }], /cast\[0\]\.voice\.engine must be 'kokoro' or 'command'/],
+    [[{ name: 'Guide', voice: { engine: 'command', command: ['speak-tool', '{out}'] } }], /\{text\} placeholder/],
+    [[{ name: 'Guide', voice: { engine: 'command', command: ['speak-tool', '{text}'] } }], /\{out\} placeholder/],
+    [Array.from({ length: 9 }, (_, i) => ({ name: `Member ${i}` })), /at most 8 members/],
+  ];
+  for (const [cast, reason] of cases) {
+    const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, cast } } });
+    expect(r.status).toBe(400);
+    expect(r.body.error.startsWith('character.json invalid:')).toBe(true);
+    expect(r.body.error).toMatch(reason);
+  }
+  expect(fs.existsSync(path.join(dir, 'character.json'))).toBe(false);
+  expect(fs.existsSync(path.join(dir, 'character.js'))).toBe(false);
+});
+
+test('character/write: a character.json over MAX_JSON_BYTES as saved is refused and nothing is written', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  const palette = Array.from({ length: 2000 }, (_, i) => `#${String(i).padStart(6, '0')}`);
+  const json = { ...GOOD_CHARACTER.json, palette };
+  const saved = JSON.stringify(json, null, 2) + '\n';
+  expect(Buffer.byteLength(saved)).toBeGreaterThan(MAX_CHARACTER_JSON_BYTES);
+  const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json } });
+  expect(r.status).toBe(400);
+  expect(r.body.error).toContain(`${MAX_CHARACTER_JSON_BYTES}-byte limit`);
+  expect(r.body.error).toContain(`${Buffer.byteLength(saved)} bytes as saved`);
+  expect(fs.existsSync(path.join(dir, 'character.json'))).toBe(false);
+  expect(fs.existsSync(path.join(dir, 'character.js'))).toBe(false);
+});
+
+test('character/write: an unusable existing character is refused without replace and overwritten with it', async () => {
+  const fresh = { ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, name: 'Fresh' } };
+
+  // character.json exists but fails validation
+  {
+    const { cwd, adminHttp, dir } = await characterSetup();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'character.json'), JSON.stringify({ name: 'Old' }));
+    fs.writeFileSync(path.join(dir, 'character.js'), GOOD_CHARACTER.js);
+    const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...fresh } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/^a character already exists but cannot be used \(character\.json invalid: palette must be/);
+    expect(r.body.error).toContain('pass replace: true to overwrite it');
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8')).name).toBe('Old');
+    const ok = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...fresh, js: 'window.character={};', replace: true } });
+    expect(ok.status).toBe(200);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8')).name).toBe('Fresh');
+    expect(fs.readFileSync(path.join(dir, 'character.js'), 'utf8')).toBe('window.character={};');
+  }
+
+  // only character.js exists
+  {
+    const { cwd, adminHttp, dir } = await characterSetup();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'character.js'), 'old();');
+    const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...fresh } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/^a character already exists but cannot be used \(character\.json is missing in /);
+    expect(fs.readFileSync(path.join(dir, 'character.js'), 'utf8')).toBe('old();');
+    expect(fs.existsSync(path.join(dir, 'character.json'))).toBe(false);
+  }
+
+  // a valid existing character keeps the unchanged message
+  {
+    const { cwd, adminHttp } = await characterSetup();
+    expect((await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER } })).status).toBe(200);
+    const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...fresh } });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe('a character already exists — pass replace: true to overwrite it');
+  }
+});
+
 // ── POST /admin/project-home/videos/review/write ─────────────────────────────
 const videoReview = require('../lib/project-pages/videoReview.cjs');
 const { REVIEW_WRITE_BODY_MAX } = require('../lib/feedback-remote/projectHomeAdminRoutes.cjs');

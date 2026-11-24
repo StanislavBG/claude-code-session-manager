@@ -128,6 +128,8 @@ function deriveSlugFromTitle(title) {
  * Engineering standards, in order.
  */
 const MACRO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+// Voice-library id (in-process only); mirrors prdFrontmatter.cjs's VOICE_ID_RE.
+const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 function isValidMacroId(id) {
   return typeof id === 'string' && MACRO_ID_RE.test(id);
 }
@@ -135,7 +137,7 @@ function isValidMacroId(id) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort, riskTools, preflight,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort, voiceId, riskTools, preflight,
     gate, files, budgetExempt, fixes,
   } = input;
   // Structured criteria (prdCriteria.cjs): createPrd() normalizes once and
@@ -198,6 +200,7 @@ function buildPrdBody(input) {
   // prdFrontmatter.cjs's applyKey for the matching "only true opts in" parse.
   if (isValidMacroId(macroId)) fmLines.push(`macroId: ${macroId}`);
   if (PRD_EFFORT_LEVELS.includes(effort)) fmLines.push(`effort: ${effort}`);
+  if (typeof voiceId === 'string' && VOICE_ID_RE.test(voiceId)) fmLines.push(`voiceId: ${voiceId}`);
   // Risky tools this PRD is cleared to call — validated + de-duplicated by createPrd().
   if (Array.isArray(riskTools) && riskTools.length) fmLines.push(`riskTools: ${formatQuotedInlineList(riskTools)}`);
   // Precondition command — validated by createPrd() via normalizePreflightField.
@@ -676,6 +679,11 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // effort (in-process callers only: macroJobDispatch.cjs)
   if (input.effort != null && !PRD_EFFORT_LEVELS.includes(input.effort)) {
     return { ok: false, applied: false, status: 400, error: 'effort must be one of low, medium, high, xhigh, max when given' };
+  }
+  // voiceId (in-process callers only, like effort — the schedulerCreatePrd
+  // schema has no voiceId, so the HTTP/MCP path strips a caller-supplied one).
+  if (input.voiceId != null && !(typeof input.voiceId === 'string' && VOICE_ID_RE.test(input.voiceId))) {
+    return { ok: false, applied: false, status: 400, error: 'voiceId must match /^[a-z0-9][a-z0-9_-]{0,63}$/ when given' };
   }
   // riskTools: tool-risk rule strings (toolRiskMarks.parseRule grammar) this PRD
   // is cleared to call. Refused before NN allocation; de-duplicated in order.

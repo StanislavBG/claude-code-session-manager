@@ -83,11 +83,13 @@ function splitFrontmatter(raw) {
  * JSON array of { id, statement, check: { kind, spec? } } — see parseCriteria.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools', 'preflight', 'criteria']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'riskTools', 'preflight', 'criteria'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'voiceId', 'riskTools', 'preflight', 'criteria']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'voiceId', 'riskTools', 'preflight', 'criteria'];
 // Mirrors modelCatalog.cjs CATALOG_FLOOR.effortLevels. A closed set so the
 // value is always safe as a frontmatter line and as a --effort argv token.
 const PRD_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
+// Voice-library id (in-process only, like effort); same pattern as prdCreate.cjs.
+const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MACRO_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
@@ -324,6 +326,10 @@ function applyKey(fm, key, after) {
     case 'effort':
       // In-process-only per-PRD effort override; anything outside PRD_EFFORT_LEVELS is dropped.
       if (typeof v === 'string' && PRD_EFFORT_LEVELS.includes(v.trim())) fm.effort = v.trim();
+      return;
+    case 'voiceId':
+      // In-process-only per-PRD library voice; anything off VOICE_ID_RE is dropped.
+      if (typeof v === 'string' && VOICE_ID_RE.test(v.trim())) fm.voiceId = v.trim();
       return;
     case 'artifactPaths': {
       // Inline `[a, b]` list, same shape as dependsOn.

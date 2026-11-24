@@ -447,6 +447,7 @@ export function App(props: AppProps) {
           color={color}
           offset={state.toolbarPos}
           flow={state.config.flow}
+          placement={config.toolbar}
           onTool={(tool) => apply({ type: 'setTool', tool })}
           onColor={setColor}
           onUndo={() => marks.undo()}

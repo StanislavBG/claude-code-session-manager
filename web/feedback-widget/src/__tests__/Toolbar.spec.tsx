@@ -298,3 +298,108 @@ describe('Toolbar drag', () => {
     expect(bar().style.top).toBe('16px');
   });
 });
+
+describe('Toolbar rail placement (§5.3)', () => {
+  it('sits at freeArea.x0 + 20, vertically centred, in the column layout', () => {
+    mount(props({ placement: 'rail', viewportWidth: 1280, viewportHeight: 800 }));
+    expect(bar().classList.contains('fw-tb-rail')).toBe(true);
+    expect(bar().getAttribute('aria-orientation')).toBe('vertical');
+    expect(bar().style.left).toBe('20px');
+    expect(bar().style.top).toBe('400px');
+    act(() => render(null, host));
+    mount(props({ placement: 'rail', flow: 'docked', panelSide: 'left', viewportWidth: 1280, viewportHeight: 800 }));
+    expect(bar().style.left).toBe('432px');
+  });
+
+  it('applies the drag offset from its rest position', () => {
+    mount(props({ placement: 'rail', offset: { x: 15, y: -40 }, viewportWidth: 1280, viewportHeight: 800 }));
+    expect(bar().style.left).toBe('35px');
+    expect(bar().style.top).toBe('360px');
+  });
+
+  it('carries the column sizes: rotated grip, 24×1 dividers, 40×24 swatches, 40×40 Describe', () => {
+    const css = toolbarCss();
+    for (const needle of [
+      '.fw-tb-rail{flex-direction:column;transform:translate(0,-50%)}',
+      '.fw-tb-rail.fw-tb-hidden{transform:translate(-12px,-50%)}',
+      '.fw-tb-rail .fw-tb-grip{width:40px;height:18px}',
+      '.fw-tb-rail .fw-tb-grip svg{transform:rotate(90deg)}',
+      '.fw-tb-rail .fw-tb-div{width:24px;height:1px;margin:5px 0}',
+      '.fw-tb-rail .fw-tb-sw{width:40px;height:24px}',
+      '.fw-tb-rail .fw-tb-next{justify-content:center;width:40px;height:40px;margin:4px 0 0;padding:0}',
+      '.fw-tb-rail .fw-tb-tip{left:50px;top:50%;transform:translateY(-50%)}',
+    ]) {
+      expect(css).toContain(needle);
+    }
+  });
+
+  it('renders Describe as an amber square with the → icon', () => {
+    const p = props({ placement: 'rail' });
+    mount(p);
+    const d = $('[data-part="describe"]');
+    expect(d.classList.contains('fw-tb-next')).toBe(true);
+    expect(d.getAttribute('aria-label')).toBe('Describe');
+    expect(d.textContent).toBe('');
+    expect(d.querySelector('svg path')!.getAttribute('d')).toBe(ICONS.next[0]);
+    expect(d.querySelector('.fw-tb-chip')).toBeNull();
+    click(d);
+    expect(p.onDescribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts tooltips to the right and hides with the hidden class', () => {
+    mount(props({ placement: 'rail', visible: false }));
+    expect(bar().classList.contains('fw-tb-hidden')).toBe(true);
+    act(() => render(null, host));
+    mount(props({ placement: 'rail' }));
+    act(() => {
+      $$('[data-part="tool"] button')[0].dispatchEvent(new MouseEvent('mouseenter'));
+    });
+    expect($('.fw-tb-tip').dataset.side).toBe('right');
+  });
+});
+
+describe('Toolbar corner placement (§5.3)', () => {
+  it('puts its right edge at freeArea.x1 − 20 and its bottom at 20, row layout', () => {
+    mount(props({ placement: 'corner', viewportWidth: 1280, viewportHeight: 800 }));
+    expect(bar().classList.contains('fw-tb-corner')).toBe(true);
+    expect(bar().getAttribute('aria-orientation')).toBe('horizontal');
+    expect(bar().style.left).toBe('1260px');
+    expect(bar().style.bottom).toBe('20px');
+    expect(bar().style.top).toBe('');
+    expect(toolbarCss()).toContain('.fw-tb-corner{transform:translate(-100%,0)}');
+    act(() => render(null, host));
+    mount(props({ placement: 'corner', flow: 'docked', panelSide: 'right', viewportWidth: 1280, viewportHeight: 800 }));
+    expect(bar().style.left).toBe('848px');
+  });
+
+  it('applies the drag offset from its rest position', () => {
+    mount(props({ placement: 'corner', offset: { x: -30, y: -50 }, viewportWidth: 1280, viewportHeight: 800 }));
+    expect(bar().style.left).toBe('1230px');
+    expect(bar().style.bottom).toBe('70px');
+  });
+
+  it('keeps the row Describe, puts tooltips above and hides with translateY(12px)', () => {
+    const css = toolbarCss();
+    expect(css).toContain('.fw-tb-corner.fw-tb-hidden{transform:translate(-100%,12px)}');
+    expect(css).toContain('.fw-tb-corner .fw-tb-tip{top:auto;bottom:50px}');
+    mount(props({ placement: 'corner' }));
+    expect($('[data-part="describe"]').textContent).toBe('Describe↵');
+    act(() => {
+      $$('[data-part="tool"] button')[2].dispatchEvent(new MouseEvent('mouseenter'));
+    });
+    expect($('.fw-tb-tip').dataset.side).toBe('above');
+  });
+});
+
+describe('Toolbar dock default (§5.3)', () => {
+  it('defaults to dock with tooltips below', () => {
+    mount(props());
+    expect(bar().dataset.placement).toBe('dock');
+    expect(bar().classList.contains('fw-tb-dock')).toBe(true);
+    expect(toolbarCss()).toContain('.fw-tb-dock.fw-tb-hidden{transform:translate(-50%,-12px)}');
+    act(() => {
+      $$('[data-part="tool"] button')[0].dispatchEvent(new FocusEvent('focus'));
+    });
+    expect($('.fw-tb-tip').dataset.side).toBe('below');
+  });
+});

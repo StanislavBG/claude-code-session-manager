@@ -1,15 +1,17 @@
-// Floating ink toolbar, `dock` variant — handoff README §5.3 "Toolbar" with the §8 icons.
+// Floating ink toolbar — handoff README §5.3 "Toolbar" with the §8 icons, in all three
+// placements: `dock` (default; top 16, centred, row), `rail` (left of the free area, vertically
+// centred, column) and `corner` (bottom-right of the free area, row).
 // Order: grip · Pin · Element · Box · Arrow · Draw · Text · divider · 4 swatches · divider ·
 // Undo · [Describe — flow annotate only] · Close.
 //
 // Strict-CSP rule (DESIGN_SPEC.md "Decided changes" 3): every static style lives in one
 // constructed stylesheet (toolbarSheet(), adopted into the component's own root node on mount);
-// the only per-render style writes are left/top, through CSSOM properties — never a `style`
+// the only per-render style writes are left/top (bottom for `corner`), through CSSOM properties — never a `style`
 // attribute or a <style> element.
 //
 // The drag offset is controlled: the parent passes the machine's `toolbarPos` as `offset` and
 // dispatches `moveToolbar` from `onMove`. The machine resets `toolbarPos` on every open, which
-// is what puts the toolbar back at its dock position.
+// is what puts the toolbar back at its placement's rest position.
 
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Flow, Tool } from './machine';
@@ -60,7 +62,18 @@ export const ICONS = {
   text: ['M5.5 7.5V5h13v2.5M12 5v14M9 19h6'],
   undo: ['M9 14.5L4.5 10 9 5.5', 'M4.5 10h9.5a5.5 5.5 0 0 1 0 11H11'],
   close: ['M6.5 6.5l11 11M17.5 6.5l-11 11'],
+  /** Rail-layout Describe: a → icon. */
+  next: ['M5 12h14M13 6l6 6-6 6'],
 } as const;
+
+/** §5.3 placement — FeedbackConfig.toolbar. */
+export type ToolbarPlacement = 'dock' | 'rail' | 'corner';
+/** Where each placement's tooltip sits relative to its button (§5.3). */
+export const TIP_SIDE: Readonly<Record<ToolbarPlacement, 'below' | 'right' | 'above'>> = {
+  dock: 'below',
+  rail: 'right',
+  corner: 'above',
+};
 
 /** Grip dots (10×16 viewBox, r 1.4). */
 const GRIP_DOTS: readonly [number, number][] = [
@@ -68,6 +81,8 @@ const GRIP_DOTS: readonly [number, number][] = [
 ];
 
 const DOCK_TOP = 16;
+/** rail: left = freeArea.x0 + 20; corner: right edge at freeArea.x1 − 20, bottom 20. */
+const EDGE = 20;
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 
@@ -81,9 +96,16 @@ export function toolbarCss(): string {
     `.fw-tb{position:fixed;z-index:25;display:flex;flex-direction:row;align-items:center;gap:3px;padding:6px;` +
       `background:${ink};border-radius:14px;` +
       `box-shadow:0 18px 40px -14px rgba(26,22,18,.7),inset 0 0 0 1px rgba(245,240,230,.07);` +
-      `transform:translate(-50%,0);opacity:1;visibility:visible;` +
+      `opacity:1;visibility:visible;` +
       `transition:opacity 250ms,transform 350ms ${motion.ease},visibility 350ms}`,
-    `.fw-tb.fw-tb-hidden{transform:translate(-50%,-12px);opacity:0;visibility:hidden}`,
+    `.fw-tb.fw-tb-hidden{opacity:0;visibility:hidden}`,
+    // Placement transforms: dock centred on `left`, rail centred on `top`, corner right-anchored.
+    `.fw-tb-dock{transform:translate(-50%,0)}`,
+    `.fw-tb-dock.fw-tb-hidden{transform:translate(-50%,-12px)}`,
+    `.fw-tb-rail{flex-direction:column;transform:translate(0,-50%)}`,
+    `.fw-tb-rail.fw-tb-hidden{transform:translate(-12px,-50%)}`,
+    `.fw-tb-corner{transform:translate(-100%,0)}`,
+    `.fw-tb-corner.fw-tb-hidden{transform:translate(-100%,12px)}`,
     `.fw-tb svg{display:block}`,
     `.fw-tb-ico{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}`,
     // Grip
@@ -91,6 +113,8 @@ export function toolbarCss(): string {
       `cursor:grab;touch-action:none;color:${colors['ink-4']}}`,
     `.fw-tb-grip:active{cursor:grabbing}`,
     `.fw-tb-grip svg{fill:currentColor}`,
+    `.fw-tb-rail .fw-tb-grip{width:40px;height:18px}`,
+    `.fw-tb-rail .fw-tb-grip svg{transform:rotate(90deg)}`,
     // Tool buttons
     `.fw-tb-slot{position:relative;display:flex}`,
     `.fw-tb-tool{display:flex;align-items:center;justify-content:center;` +
@@ -103,13 +127,17 @@ export function toolbarCss(): string {
       `padding:5px 8px;border-radius:7px;background:${paper};color:${ink};` +
       `font:600 12px ${fonts.sans};white-space:nowrap;` +
       `box-shadow:0 6px 16px -6px rgba(26,22,18,.5);pointer-events:none}`,
+    `.fw-tb-rail .fw-tb-tip{left:50px;top:50%;transform:translateY(-50%)}`,
+    `.fw-tb-corner .fw-tb-tip{top:auto;bottom:50px}`,
     `.fw-tb-key{font:500 10.5px ${fonts.mono};padding:1px 5px;border-radius:4px;background:${colors['paper-3']};color:${colors['ink-3']}}`,
     // Divider
     `.fw-tb-div{flex:none;width:1px;height:24px;background:${PAPER_LINE};margin:0 5px}`,
+    `.fw-tb-rail .fw-tb-div{width:24px;height:1px;margin:5px 0}`,
     // Swatches
     `.fw-tb-sw{display:flex;align-items:center;justify-content:center;width:24px;height:40px;background:transparent;padding:0}`,
     `.fw-tb-dot{display:block;width:16px;height:16px;border-radius:50%;box-shadow:0 0 0 1.5px rgba(245,240,230,.4)}`,
     `.fw-tb-sw.fw-tb-on .fw-tb-dot{box-shadow:0 0 0 2px ${ink},0 0 0 4px ${amber}}`,
+    `.fw-tb-rail .fw-tb-sw{width:40px;height:24px}`,
     ...SWATCHES.map((s, i) => `.fw-tb-sw-${i} .fw-tb-dot{background:${s.color}}`),
     // Undo / Close
     `.fw-tb-undo,.fw-tb-close{display:flex;align-items:center;justify-content:center;` +
@@ -121,13 +149,17 @@ export function toolbarCss(): string {
     `.fw-tb-next{display:flex;align-items:center;gap:8px;` +
       `height:40px;margin-left:4px;padding:0 10px 0 14px;border-radius:9px;background:${amber};` +
       `color:${ink};font:700 13.5px ${fonts.sans};white-space:nowrap}`,
+    // Describe (rail layout): a 40×40 amber square with the → icon.
+    `.fw-tb-rail .fw-tb-next{justify-content:center;width:40px;height:40px;margin:4px 0 0;padding:0}`,
     `.fw-tb-next:hover{background:${colors['amber-hover']}}`,
     `.fw-tb-chip{font:500 11px ${fonts.mono};padding:2px 6px;border-radius:4px;background:rgba(26,22,18,.12)}`,
     `.fw-tb button:focus-visible{outline:2px solid ${amber};outline-offset:2px}`,
     // §4: reduced motion drops translate motion and caps fades at 150 ms.
     `@media (prefers-reduced-motion:reduce){` +
       `.fw-tb{transition:opacity 150ms,visibility 150ms}` +
-      `.fw-tb.fw-tb-hidden{transform:translate(-50%,0)}` +
+      `.fw-tb-dock.fw-tb-hidden{transform:translate(-50%,0)}` +
+      `.fw-tb-rail.fw-tb-hidden{transform:translate(0,-50%)}` +
+      `.fw-tb-corner.fw-tb-hidden{transform:translate(-100%,0)}` +
       `.fw-tb-tool{transition:background 150ms,color 150ms}}`,
   ].join('\n');
 }
@@ -173,8 +205,12 @@ export interface ToolbarProps {
   offset: { x: number; y: number } | null;
   flow?: Flow;
   panelSide?: PanelSide;
+  /** §5.3 placement (FeedbackConfig.toolbar). Default dock. */
+  placement?: ToolbarPlacement;
   /** Viewport width; defaults to window.innerWidth, tracked on resize. */
   viewportWidth?: number;
+  /** Viewport height (rail centring, corner bottom); defaults to window.innerHeight. */
+  viewportHeight?: number;
   onTool(tool: Tool): void;
   onColor(color: MarkColor): void;
   onUndo(): void;
@@ -191,20 +227,31 @@ interface DragStart {
   oy: number;
 }
 
-function useViewportWidth(given: number | undefined): number {
-  const [w, setW] = useState(() => (typeof window === 'undefined' ? 0 : window.innerWidth));
+function useViewportSize(gw: number | undefined, gh: number | undefined): { w: number; h: number } {
+  const read = () =>
+    typeof window === 'undefined' ? { w: 0, h: 0 } : { w: window.innerWidth, h: window.innerHeight };
+  const [size, setSize] = useState(read);
+  const given = gw !== undefined && gh !== undefined;
   useLayoutEffect(() => {
-    if (given !== undefined || typeof window === 'undefined') return;
-    const on = () => setW(window.innerWidth);
+    if (given || typeof window === 'undefined') return;
+    const on = () => setSize(read());
     window.addEventListener('resize', on);
     return () => window.removeEventListener('resize', on);
   }, [given]);
-  return given ?? w;
+  return { w: gw ?? size.w, h: gh ?? size.h };
 }
 
 export function Toolbar(props: ToolbarProps) {
-  const { visible, tool, color = DEFAULT_MARK_COLOR, offset, flow = 'annotate', panelSide = 'right' } = props;
-  const W = useViewportWidth(props.viewportWidth);
+  const {
+    visible,
+    tool,
+    color = DEFAULT_MARK_COLOR,
+    offset,
+    flow = 'annotate',
+    panelSide = 'right',
+    placement = 'dock',
+  } = props;
+  const { w: W, h: H } = useViewportSize(props.viewportWidth, props.viewportHeight);
   const [tip, setTip] = useState<Tool | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<DragStart | null>(null);
@@ -216,8 +263,13 @@ export function Toolbar(props: ToolbarProps) {
   const area = freeArea(W, flow, panelSide);
   const ox = offset?.x ?? 0;
   const oy = offset?.y ?? 0;
-  const left = (area.x0 + area.x1) / 2 + ox;
-  const top = DOCK_TOP + oy;
+  const pos: { left: string; top?: string; bottom?: string } =
+    placement === 'rail'
+      ? { left: `${area.x0 + EDGE + ox}px`, top: `${H / 2 + oy}px` }
+      : placement === 'corner'
+        ? { left: `${area.x1 - EDGE + ox}px`, bottom: `${EDGE - oy}px` }
+        : { left: `${(area.x0 + area.x1) / 2 + ox}px`, top: `${DOCK_TOP + oy}px` };
+  const rail = placement === 'rail';
 
   const gripDown = (e: PointerEvent) => {
     e.stopPropagation();
@@ -252,8 +304,10 @@ export function Toolbar(props: ToolbarProps) {
       role="toolbar"
       aria-label="Markup tools"
       aria-hidden={visible ? undefined : 'true'}
-      class={visible ? 'fw-tb' : 'fw-tb fw-tb-hidden'}
-      style={{ left: `${left}px`, top: `${top}px` }}
+      aria-orientation={rail ? 'vertical' : 'horizontal'}
+      data-placement={placement}
+      class={`fw-tb fw-tb-${placement}${visible ? '' : ' fw-tb-hidden'}`}
+      style={pos}
     >
       <div
         data-part="grip"
@@ -290,7 +344,7 @@ export function Toolbar(props: ToolbarProps) {
               <Icon name={t.id} />
             </button>
             {tip === t.id && (
-              <div class="fw-tb-tip" role="tooltip">
+              <div class="fw-tb-tip" role="tooltip" data-side={TIP_SIDE[placement]}>
                 {t.label}
                 <span class="fw-tb-key">{t.key}</span>
               </div>
@@ -332,9 +386,22 @@ export function Toolbar(props: ToolbarProps) {
       </button>
 
       {flow === 'annotate' && (
-        <button type="button" data-part="describe" class="fw-tb-next" onClick={() => props.onDescribe()}>
-          Describe
-          <span class="fw-tb-chip">↵</span>
+        <button
+          type="button"
+          data-part="describe"
+          class="fw-tb-next"
+          aria-label={rail ? 'Describe' : undefined}
+          title={rail ? 'Describe (↵)' : undefined}
+          onClick={() => props.onDescribe()}
+        >
+          {rail ? (
+            <Icon name="next" />
+          ) : (
+            <>
+              Describe
+              <span class="fw-tb-chip">↵</span>
+            </>
+          )}
         </button>
       )}
 

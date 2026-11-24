@@ -161,6 +161,30 @@ test('the interrupted window counts slotWaitSec: start + (slotWait + timeout) + 
   expect(await at(781)).toBe('interrupted');
 });
 
+test('liveTaskIds: a start past its interrupted window folds running before the status filter', async () => {
+  const started = Date.parse('2026-11-23T12:00:00.000Z');
+  await ledger.appendTaskStart(cwd, startRow('held', { startedAt: new Date(started).toISOString(), timeoutSec: 60 }));
+  const now = started + 3600 * 1000;
+  const liveTaskIds = ['held'];
+  expect((await ledger.listTasks(cwd, { now })).tasks[0].status).toBe('interrupted');
+  const running = await ledger.listTasks(cwd, { now, liveTaskIds, status: 'running' });
+  expect(running.tasks.map((t) => [t.taskId, t.status])).toEqual([['held', 'running']]);
+  expect(running).toMatchObject({ total: 1, hasMore: false });
+  const interrupted = await ledger.listTasks(cwd, { now, liveTaskIds: new Set(liveTaskIds), status: 'interrupted' });
+  expect(interrupted).toMatchObject({ tasks: [], total: 0, hasMore: false });
+  expect((await ledger.getTask(cwd, 'held', { now, liveTaskIds })).status).toBe('running');
+  expect((await ledger.getTask(cwd, 'held', { now })).status).toBe('interrupted');
+});
+
+test('liveTaskIds: an explicit end status still wins', async () => {
+  await ledger.appendTaskStart(cwd, startRow('ended'));
+  await ledger.appendTaskEnd(cwd, { taskId: 'ended', status: 'error' });
+  const liveTaskIds = ['ended'];
+  expect((await ledger.listTasks(cwd, { liveTaskIds })).tasks[0].status).toBe('error');
+  expect((await ledger.listTasks(cwd, { liveTaskIds, status: 'running' })).total).toBe(0);
+  expect((await ledger.getTask(cwd, 'ended', { liveTaskIds })).status).toBe('error');
+});
+
 test('a missing or non-numeric slotWaitSec counts as 0', async () => {
   const started = Date.parse('2026-11-23T12:00:00.000Z');
   await ledger.appendTaskStart(cwd, startRow('nowait', { startedAt: new Date(started).toISOString(), timeoutSec: 60, slotWaitSec: 'x' }));

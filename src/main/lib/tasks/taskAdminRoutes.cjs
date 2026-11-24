@@ -452,6 +452,12 @@ function registerAdminRoute(adminHttp, deps = {}) {
     const lt = liveTasks.get(id);
     return lt && path.resolve(lt.cwd) === path.resolve(root) ? lt : null;
   };
+  /** taskIds in the live registry whose run is under project root `root`. @param {string} root */
+  const liveIdsFor = (root) => {
+    const ids = [];
+    for (const [id, lt] of liveTasks) if (path.resolve(lt.cwd) === path.resolve(root)) ids.push(id);
+    return ids;
+  };
 
   adminHttp.registerRoute('POST', '/admin/tasks', async (/** @type {any} */ req, /** @type {any} */ res) => {
     try { if (typeof res.setTimeout === 'function') res.setTimeout(0); } catch { /* */ }
@@ -602,7 +608,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
         writeLine({ type: 'sm_task_started', taskId, model, effort, sessionId, startedAt });
       }
 
-      const end =(/** @type {Record<string, any>} */ row) => ledger().appendTaskEnd(cwd, {
+      const end = (/** @type {Record<string, any>} */ row) => ledger().appendTaskEnd(cwd, {
         taskId,
         startedAt,
         endedAt: new Date(now()).toISOString(),
@@ -736,9 +742,9 @@ function registerAdminRoute(adminHttp, deps = {}) {
       return;
     }
     try {
-      const r = await ledger().listTasks(cwd, { ...filters, now: now() });
-      // A Task this app is still running reads 'running', never the ledger's timeout-derived 'interrupted'.
-      const tasks = r.tasks.map((/** @type {any} */ t) => publicTask(liveFor(t.taskId, cwd) ? { ...t, status: 'running' } : t));
+      // A Task this app is still running folds 'running' in the ledger, before its status filter and paging.
+      const r = await ledger().listTasks(cwd, { ...filters, now: now(), liveTaskIds: liveIdsFor(cwd) });
+      const tasks = r.tasks.map((/** @type {any} */ t) => publicTask(t));
       sendJson(res, 200, { ok: true, tasks, total: r.total, hasMore: r.hasMore });
     } catch (e) {
       sendJson(res, 500, { ok: false, error: 'ledger_read_failed', details: e instanceof Error ? e.message : String(e) });
@@ -758,7 +764,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
     }
     let t;
     try {
-      t = await ledger().getTask(cwd, parsed.data.id, { now: now() });
+      t = await ledger().getTask(cwd, parsed.data.id, { now: now(), liveTaskIds: liveIdsFor(cwd) });
     } catch (e) {
       sendJson(res, 500, { ok: false, error: 'ledger_read_failed', details: e instanceof Error ? e.message : String(e) });
       return;
@@ -775,7 +781,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
       sendJson(res, 200, {
         ok: true,
         task: {
-          ...publicTask({ ...t, status: 'running' }),
+          ...publicTask(t),
           prompt: typeof body.prompt === 'string' ? body.prompt : null,
           promptTruncated: body.promptTruncated === true,
           output: page.output,

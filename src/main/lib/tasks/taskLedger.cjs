@@ -400,9 +400,12 @@ async function readRows(cwd, range) {
  * the timeout-derived 'interrupted', taken only when TASK_LEGAL_TRANSITIONS
  * allows running → it. startedAt is stamped before the slot wait, so the
  * window includes it; a missing/non-numeric slotWaitSec counts as 0.
+ * A Task in `live` (taskIds this app is still running) with no end status
+ * reads 'running', never the timeout-derived 'interrupted'.
  */
-function foldedStatus(t, now) {
+function foldedStatus(t, now, live) {
   if (t.status) return t.status;
+  if (live && live.has(t.taskId)) return 'running';
   const startedMs = toMs(t.startedAt);
   const slotWaitMs = (Number(t.slotWaitSec) || 0) * 1000;
   const timeoutMs = (Number(t.timeoutSec) || 0) * 1000;
@@ -413,8 +416,8 @@ function foldedStatus(t, now) {
   return 'running';
 }
 
-/** taskId → folded Task (start ⊕ end, or the imported line). */
-function fold(rows, now) {
+/** taskId → folded Task (start ⊕ end, or the imported line). `live`: optional Set of running taskIds. */
+function fold(rows, now, live) {
   const byId = new Map();
   for (const row of rows) {
     const { kind, from: _from, to: _to, ...fields } = row;
@@ -437,10 +440,16 @@ function fold(rows, now) {
   }
   const tasks = [];
   for (const t of byId.values()) {
-    tasks.push({ ...t, ...sessionFields(t), status: foldedStatus(t, now) });
+    tasks.push({ ...t, ...sessionFields(t), status: foldedStatus(t, now, live) });
   }
   tasks.sort((a, b) => (toMs(b.startedAt) ?? 0) - (toMs(a.startedAt) ?? 0));
   return tasks;
+}
+
+/** @param {unknown} ids iterable of taskIds (or nothing) → Set or null. */
+function liveSet(ids) {
+  if (ids == null || typeof ids === 'string' || typeof (/** @type {any} */ (ids))[Symbol.iterator] !== 'function') return null;
+  return new Set(/** @type {Iterable<string>} */ (ids));
 }
 
 function matches(t, f) {
@@ -459,8 +468,10 @@ function matches(t, f) {
 
 /**
  * listTasks(cwd, { since, until, pipeline, runId, step, agent, status, source,
- * limit = 50 (max 200), offset = 0, now }) → { tasks, total, hasMore, skippedLines }.
+ * limit = 50 (max 200), offset = 0, now, liveTaskIds }) → { tasks, total, hasMore, skippedLines }.
  * Newest first by startedAt. `since`/`until` are ISO timestamps (inclusive).
+ * `liveTaskIds` (iterable of taskIds this app is still running) folds those
+ * Tasks as 'running' before the status filter, total and paging.
  */
 async function listTasks(cwd, opts = {}) {
   const o = opts || {};
@@ -472,7 +483,7 @@ async function listTasks(cwd, opts = {}) {
     untilDate: untilMs != null ? localDate(untilMs) : undefined,
   };
   const { rows, skippedLines } = await readRows(cwd, range);
-  const all = fold(rows, now).filter((t) => matches(t, { ...o, sinceMs, untilMs }));
+  const all = fold(rows, now, liveSet(o.liveTaskIds)).filter((t) => matches(t, { ...o, sinceMs, untilMs }));
   const limitRaw = Number.isFinite(Number(o.limit)) && o.limit != null ? Math.floor(Number(o.limit)) : DEFAULT_LIMIT;
   const limit = Math.min(MAX_LIMIT, Math.max(1, limitRaw));
   const offset = Math.max(0, Math.floor(Number(o.offset) || 0));
@@ -480,14 +491,14 @@ async function listTasks(cwd, opts = {}) {
   return { tasks, total: all.length, hasMore: offset + tasks.length < all.length, skippedLines };
 }
 
-/** getTask(cwd, taskId, { now }) → folded Task with `body` (or body:null), or null. */
+/** getTask(cwd, taskId, { now, liveTaskIds }) → folded Task with `body` (or body:null), or null. */
 async function getTask(cwd, taskId, opts = {}) {
   if (typeof taskId !== 'string' || !TASK_ID_RE.test(taskId)) return null;
   const now = typeof (opts && opts.now) === 'number' ? opts.now : Date.now();
   const { rows } = await readRows(cwd);
   const mine = rows.filter((r) => r.taskId === taskId);
   if (mine.length === 0) return null;
-  const [task] = fold(mine, now);
+  const [task] = fold(mine, now, liveSet(opts && opts.liveTaskIds));
   return { ...task, body: await readBody(cwd, taskId) };
 }
 

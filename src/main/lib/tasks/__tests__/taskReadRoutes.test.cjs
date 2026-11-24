@@ -370,19 +370,13 @@ describe('GET /admin/task — live output of a Task this app is running', () => 
     }
   });
 
-  test('a registry Task reads running even when the ledger fold says interrupted', async () => {
-    const stubRow = { taskId: 't-1', status: 'interrupted', startedAt: '2026-11-20T10:00:00.000Z', body: { prompt: 'p' } };
-    const stub = {
-      appendTaskStart: async () => {},
-      appendTaskEnd: async () => {},
-      getTask: async () => ({ ...stubRow }),
-      listTasks: async () => ({ tasks: [{ ...stubRow }, { ...stubRow, taskId: 'gone' }], total: 2, hasMore: false }),
-    };
+  test('a registry Task folds running before the status filter even when the ledger would say interrupted', async () => {
+    let clock = Date.parse('2026-11-23T12:00:00.000Z');
     const h = new Map();
     registerAdminRoute({ registerRoute: (m, u, fn) => { h.set(`${m} ${u}`, fn); } }, liveDeps({
       resolveProjectRoot: (c) => c,
       taskSwitch: { isTaskSwitchOn: () => true },
-      ledger: stub,
+      now: () => clock,
       randomUUID: () => 't-1',
     }));
     const getH = async (route, params) => {
@@ -390,16 +384,20 @@ describe('GET /admin/task — live output of a Task this app is running', () => 
       await h.get(`GET ${route}`)({}, res, new URLSearchParams(params));
       return res;
     };
-    const run = startLive(h);
+    const run = startLive(h, { timeoutSec: 60 });
     await run.running;
+    clock += 2 * 3600 * 1000; // far past start + timeout + grace: the bare fold says interrupted
+    const running = await getH('/admin/tasks', { cwd, status: 'running' });
+    expect(running.body).toMatchObject({ ok: true, total: 1, hasMore: false });
+    expect(running.body.tasks.map((t) => [t.taskId, t.status])).toEqual([['t-1', 'running']]);
+    const interrupted = await getH('/admin/tasks', { cwd, status: 'interrupted' });
+    expect(interrupted.body).toMatchObject({ ok: true, tasks: [], total: 0, hasMore: false });
     const one = await getH('/admin/task', { cwd, id: 't-1' });
     expect(one.body.task).toMatchObject({ status: 'running', phase: 'running' });
     expect(one.body.task.live).not.toBeNull();
-    const list = await getH('/admin/tasks', { cwd });
-    expect(list.body.tasks.map((t) => [t.taskId, t.status])).toEqual([['t-1', 'running'], ['gone', 'interrupted']]);
     await run.finish();
     const after = await getH('/admin/task', { cwd, id: 't-1' });
-    expect(after.body.task).toMatchObject({ status: 'interrupted', live: null });
+    expect(after.body.task).toMatchObject({ status: 'ok', live: null });
   });
 });
 

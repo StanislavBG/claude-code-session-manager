@@ -54,6 +54,7 @@ describe('parseReport accepts', () => {
 const MUTATIONS = [
   ['schemaVersion 2', (v) => { v.schemaVersion = 2; }, 'schemaVersion'],
   ['clientReportId not uuid', (v) => { v.clientReportId = 'not-a-uuid'; }, 'clientReportId'],
+  ['clientReportId non-RFC GUID (version 0, variant 0)', (v) => { v.clientReportId = '01234567-89ab-0def-0123-456789abcdef'; }, 'clientReportId'],
   ['type unknown', (v) => { v.type = 'praise'; }, 'type'],
   ['title too short after trim', (v) => { v.title = '  ab  '; }, 'title'],
   ['title too long', (v) => { v.title = 'x'.repeat(121); }, 'title'],

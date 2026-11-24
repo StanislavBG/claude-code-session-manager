@@ -59,6 +59,19 @@ Implemented by `src/main/lib/feedback-remote/feedbackSeal.cjs` (desktop) and the
   info = `'sm-feedback/1|' + boxId`, 32 bytes). AAD = the magic, length and header bytes.
 - **Open errors:** `bad_envelope` (bad magic, oversized or malformed header), `decrypt_failed` (wrong key,
   wrong boxId, any flipped byte).
+- **Host errors:** the host also answers `400 bad_envelope` to a missing or wrong `X-Sm-Envelope` header
+  (verified live 2026-11-24: `X-Sm-Envelope: 2` → `400 bad_envelope`), and to a wrong `Content-Type`.
+
+## Report v1
+
+The sealed `report.json` part. Schema: `web/feedback-widget/schema/report.v1.json`; desktop validator:
+`feedbackReport.cjs` (parity-tested against the schema).
+
+- **Trimming:** strings with length limits (`title`, `details`, mark `note`) are validated **after
+  trimming**, so `'  ab  '` fails the 3-char title minimum. The widget (`src/report.ts`) always trims
+  before sending.
+- **`clientReportId`:** an RFC 9562 uuid (version and variant checked, `z.uuid()`), as
+  `crypto.randomUUID()` produces; a bare 8-4-4-4-12 hex GUID is rejected by the desktop.
 
 ## Host contract v1
 
@@ -168,7 +181,8 @@ In a chat session of the project that owns `https://bilko.run`:
 
 2. Paste `snippet` into the site's HTML (once, e.g. before `</body>`) and deploy. Lost it? Call
    `feedback_widget_snippet({ "boxId": "<boxId>" })`.
-3. After a visitor sends a report and the drain runs (≤ 5 min, sooner on push), list and read it:
+3. After a visitor sends a report and the drain runs (≤ 5 min, sooner on push), list it, then pass a
+   list item's `id` to the get and status tools:
 
    ```json
    customer_feedback_list({ "source": "site" })

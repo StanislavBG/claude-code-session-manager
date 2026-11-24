@@ -98,8 +98,8 @@ const mark = z.discriminatedUnion('kind', [pin, box, element, arrow, draw, text]
 
 const reportSchema = z.strictObject({
   schemaVersion: z.literal(SCHEMA_VERSION),
-  // JSON Schema `format: uuid` = any 8-4-4-4-12 hex string (no version/variant check), i.e. z.guid().
-  clientReportId: z.guid(),
+  // RFC 9562 uuid (version + variant checked), the shape crypto.randomUUID() always produces.
+  clientReportId: z.uuid(),
   project: z.string(),
   type: z.enum(REPORT_TYPES),
   title: z.string().trim().min(MIN_TITLE).max(MAX_TITLE),

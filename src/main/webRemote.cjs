@@ -276,6 +276,62 @@ async function getDeviceTicket(deviceToken) {
   return result.ticket;
 }
 
+/**
+ * One relay REST call that never throws on an HTTP status: resolves
+ * { status, json } (json = parsed body or {}), or { status: 0, error } on a
+ * network failure. Never logs the request (it carries the device token).
+ */
+function relayRequest(method, url, { body, token } = {}) {
+  return new Promise((resolve) => {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') {
+      resolve({ status: 0, json: {}, error: 'Only https:// allowed for relay API calls' });
+      return;
+    }
+    const payload = body === undefined ? null : JSON.stringify(body);
+    /** @type {Record<string, string | number>} */
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (payload !== null) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = Buffer.byteLength(payload);
+    }
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const req = https.request({
+      hostname: parsed.hostname,
+      port: parsed.port || 443,
+      path: parsed.pathname + (parsed.search || ''),
+      method,
+      headers,
+      rejectUnauthorized: true,
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        let json = {};
+        try { json = JSON.parse(data); } catch { /* non-JSON body */ }
+        done({ status: res.statusCode || 0, json: json && typeof json === 'object' ? json : {} });
+      });
+    });
+    req.on('error', (e) => done({ status: 0, json: {}, error: e?.message || 'relay request failed' }));
+    req.setTimeout(15_000, () => { req.destroy(new Error('timeout')); });
+    if (payload !== null) req.write(payload);
+    req.end();
+  });
+}
+
+/** Map a non-2xx relay reply to the renderer-facing error string. */
+function relayErrorOf(r) {
+  if (r.status === 404 || r.status === 405) return 'relay_unsupported';
+  if (r.status === 401) return 'device_token_invalid';
+  if (r.status === 429) return 'rate_limited';
+  if (r.status === 0) return r.error || 'relay request failed';
+  return typeof r.json?.error === 'string' && r.json.error ? r.json.error.slice(0, 200) : `HTTP ${r.status}`;
+}
+
+const isOk = (r) => r.status >= 200 && r.status < 300;
+
 // Per-client-key time of the last e2e:rekey sent, so a burst of stale boxes yields one rekey.
 const REKEY_THROTTLE_MS = 5000;
 const _lastRekeyMs = new Map();
@@ -1279,6 +1335,127 @@ async function confirmServiceSas(pairingId, sas) {
   return { ok: true, service };
 }
 
+// ─── Paired services: renderer IPC (pair start / list / revoke) ─────────────
+
+const CLIENT_OTP_TTL_MS = 5 * 60 * 1000;
+const CLIENT_OTP_RE = /^[A-Z0-9]{8}$/i;
+
+/** The paired device (first with a token) whose token authorizes relay client calls, or null. */
+async function pairedDevice() {
+  const cfg = await loadConfig();
+  return (Array.isArray(cfg.devices) ? cfg.devices : []).find(
+    (d) => d && typeof d.deviceToken === 'string' && d.deviceToken.length > 0,
+  ) || null;
+}
+
+/** A service as the renderer may see it: no pinned key. */
+function redactService(s) {
+  if (!s) return s;
+  const { pubKey: _omit, ...rest } = s;
+  return rest;
+}
+
+function logRelayFailure(op, r) {
+  logs.writeLine({
+    scope: 'webRemote', level: 'warn', message: `relay ${op} failed`,
+    meta: { status: r.status, error: relayErrorOf(r) },
+  });
+}
+
+async function servicePairStart({ name, homeCwd, scope }) {
+  const device = await pairedDevice();
+  if (!device) return { ok: false, error: 'no_paired_device' };
+  const { SERVICE_TOOL_NAMES } = require('./lib/feedback-remote/servicePairings.cjs');
+  // Refuse bad input before spending one of the account's hourly relay codes.
+  if (!path.isAbsolute(homeCwd)) return { ok: false, error: 'homeCwd must be an absolute path' };
+  const unknown = scope.find((t) => !SERVICE_TOOL_NAMES.includes(t));
+  if (unknown) return { ok: false, error: `scope names an unknown tool: ${unknown}` };
+
+  const r = await relayRequest('POST', `${RELAY_API_BASE}/client-otp`, { body: {}, token: device.deviceToken });
+  if (!isOk(r)) {
+    logRelayFailure('client-otp', r);
+    return { ok: false, error: relayErrorOf(r) };
+  }
+  const code = r.json?.code;
+  if (typeof code !== 'string' || !CLIENT_OTP_RE.test(code)) return { ok: false, error: 'relay returned no code' };
+  const codeExpiresAt = Date.now() + CLIENT_OTP_TTL_MS;
+  let pairingId;
+  try {
+    ({ pairingId } = await getServiceStore().createPending({ name, homeCwd, scope }));
+  } catch (e) {
+    return { ok: false, error: e?.message || 'pending pairing failed' };
+  }
+  await auditLog(new Date().toISOString(), 'service:pair-start', device.deviceId, undefined, 'ok', null);
+  return { ok: true, code, pairingId, codeExpiresAt, deviceId: device.deviceId };
+}
+
+async function servicesList() {
+  const store = getServiceStore();
+  const services = store.list().map(redactService);
+  const pending = store.listPending();
+  const known = new Set(services.map((s) => s.relayClientId).filter(Boolean));
+  const device = await pairedDevice();
+  if (!device) return { ok: true, services, pending, relayOrphans: [], relayError: 'no_paired_device' };
+  const r = await relayRequest('GET', `${RELAY_API_BASE}/clients`, { token: device.deviceToken });
+  if (!isOk(r)) {
+    logRelayFailure('clients list', r);
+    return { ok: true, services, pending, relayOrphans: [], relayError: relayErrorOf(r) };
+  }
+  const raw = Array.isArray(r.json) ? r.json : Array.isArray(r.json?.clients) ? r.json.clients : [];
+  const relayOrphans = raw
+    .filter((c) => c && typeof c.clientId === 'string' && !known.has(c.clientId.toLowerCase()))
+    .map((c) => ({
+      clientId: c.clientId,
+      clientName: typeof c.clientName === 'string' ? c.clientName : '',
+      issuedAt: typeof c.issuedAt === 'string' || typeof c.issuedAt === 'number' ? c.issuedAt : null,
+    }));
+  return { ok: true, services, pending, relayOrphans };
+}
+
+/** DELETE one relay client. 404 client_not_found counts as gone. */
+async function deleteRelayClient(clientId, token) {
+  const r = await relayRequest('DELETE', `${RELAY_API_BASE}/clients/${encodeURIComponent(clientId)}`, { token });
+  if (isOk(r) || (r.status === 404 && r.json?.error === 'client_not_found')) return { ok: true };
+  logRelayFailure('client delete', r);
+  return { ok: false, error: relayErrorOf(r) };
+}
+
+async function serviceRevoke(serviceId) {
+  const store = getServiceStore();
+  const svc = store.list().find((s) => s.serviceId === serviceId);
+  if (!svc) return { ok: false, error: 'no_such_service' };
+  await store.revoke(serviceId);
+  for (const c of _clients.values()) {
+    if (c.role === 'service' && (c.service?.serviceId === serviceId || (c.peerPubKey && c.peerPubKey === svc.pubKey))) {
+      teardownClient(c.key);
+    }
+  }
+  broadcastStatus();
+  let relayRevoked = false;
+  const device = svc.relayClientId ? await pairedDevice() : null;
+  if (svc.relayClientId && device) {
+    relayRevoked = (await deleteRelayClient(svc.relayClientId, device.deviceToken)).ok;
+  }
+  await auditLog(new Date().toISOString(), 'service:revoke', device?.deviceId, undefined, `ok:service=${auditToken(serviceId)}`, null);
+  return { ok: true, relayRevoked };
+}
+
+async function relayClientRevoke(clientId) {
+  const device = await pairedDevice();
+  if (!device) return { ok: false, error: 'no_paired_device' };
+  return deleteRelayClient(clientId, device.deviceToken);
+}
+
+/** Drop every locally paired service (revoke-all). Logs, never throws. */
+async function clearLocalServices() {
+  try {
+    const store = getServiceStore();
+    for (const s of store.list()) await store.revoke(s.serviceId);
+  } catch (e) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'failed to clear paired services', meta: { error: e?.message } });
+  }
+}
+
 /** Encrypt + unicast one boxed mcp:result to a service client (never plaintext). */
 function sendMcpResult(client, msgId, response) {
   if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
@@ -1793,6 +1970,7 @@ async function revokeAllDevices() {
   const cfg = await loadConfig();
   const revokedCount = (cfg.devices || []).length;
   await saveConfig({ ...cfg, remoteEnabled: false, devices: [] });
+  await clearLocalServices(); // a paired service rides the device; it goes too
   await disconnect(); // tears down WS + clears session key
   broadcastStatus();
   sendIfAlive(_window, 'webRemote:revoked-all', { revokedCount });
@@ -1897,6 +2075,26 @@ function registerRemoteHandlers() {
   ipcMain.handle('webRemote:revoke-all', async () => {
     return revokeAllDevices();
   });
+
+  // Paired services: list (no keys/tokens) + relay orphans, start, confirm, revoke.
+  ipcMain.handle('webRemote:services-list', async () => servicesList());
+
+  ipcMain.handle('webRemote:service-pair-start', validated(schemas.webRemoteServicePairStart, async (arg) => {
+    return servicePairStart(arg);
+  }));
+
+  ipcMain.handle('webRemote:service-confirm-sas', validated(schemas.webRemoteServiceConfirmSas, async ({ pairingId, sas }) => {
+    const r = await confirmServiceSas(pairingId, sas);
+    return r.ok ? { ok: true, service: redactService(r.service) } : r;
+  }));
+
+  ipcMain.handle('webRemote:service-revoke', validated(schemas.webRemoteServiceRevoke, async ({ serviceId }) => {
+    return serviceRevoke(serviceId);
+  }));
+
+  ipcMain.handle('webRemote:relay-client-revoke', validated(schemas.webRemoteRelayClientRevoke, async ({ clientId }) => {
+    return relayClientRevoke(clientId);
+  }));
 
   ipcMain.handle('webRemote:audit-tail', validated(schemas.webRemoteAuditTail, async ({ lines }) => {
     const lineCount = lines || 50;

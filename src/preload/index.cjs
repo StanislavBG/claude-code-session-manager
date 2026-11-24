@@ -566,6 +566,16 @@ contextBridge.exposeInMainWorld('api', {
     /** Revoke ALL paired devices and tear down every session immediately. */
     revokeAll: () => ipcRenderer.invoke('webRemote:revoke-all'),
     confirmSas: (clientKey) => ipcRenderer.invoke('webRemote:confirm-sas', clientKey ? { clientKey } : undefined),
+    /** Paired + pending services (no keys or tokens) and relay clients no local service owns. */
+    servicesList: () => ipcRenderer.invoke('webRemote:services-list'),
+    /** Ask the relay for a one-time client code and record a pending pairing. */
+    servicePairStart: (input) => ipcRenderer.invoke('webRemote:service-pair-start', input),
+    /** Confirm a pending service's 6-digit SAS; pins its key. */
+    serviceConfirmSas: (pairingId, sas) => ipcRenderer.invoke('webRemote:service-confirm-sas', { pairingId, sas }),
+    /** Revoke a paired service locally and at the relay. */
+    serviceRevoke: (serviceId) => ipcRenderer.invoke('webRemote:service-revoke', { serviceId }),
+    /** Revoke a relay client no local service owns (an orphan). */
+    relayClientRevoke: (clientId) => ipcRenderer.invoke('webRemote:relay-client-revoke', { clientId }),
     /** Push event when revokeAll completes (main broadcasts webRemote:revoked-all). */
     onRevokedAll: (handler) => {
       const listener = (_e, payload) => handler(payload);

@@ -2860,6 +2860,70 @@ export interface WebRemoteMutationResult {
   error?: string;
 }
 
+/** Tool names a paired service may be scoped to (servicePairings.cjs SERVICE_TOOL_NAMES). */
+export type WebRemoteServiceTool =
+  | 'feedback_list_projects'
+  | 'feedback_open_session'
+  | 'macro_list'
+  | 'macro_run'
+  | 'epic_get'
+  | 'events_read';
+
+/** A paired service as the renderer sees it (its pinned key is never returned). */
+export interface WebRemoteService {
+  serviceId: string;
+  name: string;
+  homeCwd: string;
+  scope: WebRemoteServiceTool[];
+  relayClientId: string | null;
+  pairedAt: number;
+  lastSeenAt: number;
+}
+
+export interface WebRemotePendingService {
+  pairingId: string;
+  name: string;
+  homeCwd: string;
+  scope: WebRemoteServiceTool[];
+  createdAt: number;
+  expiresAt: number;
+}
+
+/** A relay client no local service owns. */
+export interface WebRemoteRelayOrphan {
+  clientId: string;
+  clientName: string;
+  issuedAt: string | number | null;
+}
+
+export interface WebRemoteServicesListResult {
+  ok: true;
+  services: WebRemoteService[];
+  pending: WebRemotePendingService[];
+  relayOrphans: WebRemoteRelayOrphan[];
+  /** Set when the relay client list could not be read (relayOrphans is then []). */
+  relayError?: string;
+}
+
+/** Mirrors zod webRemoteServicePairStart. */
+export interface WebRemoteServicePairStartInput {
+  name: string;
+  homeCwd: string;
+  scope: WebRemoteServiceTool[];
+}
+
+export type WebRemoteServicePairStartResult =
+  | { ok: true; code: string; pairingId: string; codeExpiresAt: number; deviceId: string }
+  | { ok: false; error: 'relay_unsupported' | 'device_token_invalid' | 'rate_limited' | 'no_paired_device' | (string & {}) };
+
+export type WebRemoteServiceConfirmSasResult =
+  | { ok: true; service: WebRemoteService }
+  | { ok: false; error: string };
+
+export type WebRemoteServiceRevokeResult =
+  | { ok: true; relayRevoked: boolean }
+  | { ok: false; error: string };
+
 export interface WebRemoteAuditTailResult {
   ok: boolean;
   lines?: string[];
@@ -3557,6 +3621,16 @@ export interface SessionManagerAPI {
      *  E2E session as authenticated and unblocks MUTATE-tier commands. Pass the
      *  client's `key` when several clients are pending (else `ambiguous_pending_sas`). */
     confirmSas: (clientKey?: string) => Promise<WebRemoteMutationResult>;
+    /** Paired + pending services (no keys or tokens) plus relay orphans. */
+    servicesList: () => Promise<WebRemoteServicesListResult>;
+    /** One-time relay client code (8 chars, 5 minutes) + a pending pairing. */
+    servicePairStart: (input: WebRemoteServicePairStartInput) => Promise<WebRemoteServicePairStartResult>;
+    /** Confirm a pending service's 6-digit SAS. */
+    serviceConfirmSas: (pairingId: string, sas: string) => Promise<WebRemoteServiceConfirmSasResult>;
+    /** Revoke a paired service locally and at the relay (relay failure still revokes locally). */
+    serviceRevoke: (serviceId: string) => Promise<WebRemoteServiceRevokeResult>;
+    /** Revoke an orphaned relay client. */
+    relayClientRevoke: (clientId: string) => Promise<WebRemoteMutationResult>;
   };
   chat: {
     /** Spawn a headless `claude -p` run for a tab. Results arrive via the on* listeners. */

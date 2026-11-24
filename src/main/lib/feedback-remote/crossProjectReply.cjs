@@ -42,6 +42,7 @@ const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { readActiveIndex } = require('../epic/epicMint.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
+const { addPendingReply, countPendingForThread } = require('./pendingReplies.cjs');
 
 /** crossProjectFeedback.cjs is required lazily: its fallback path may require
  *  this module, and a top-level require both ways would hand one side a
@@ -60,6 +61,8 @@ const FALLBACK_NOTICE = 'cross-project-reply-fallback';
 const EVENT_MODE_REASON = 'asker-requested-event';
 const AUDIT_MESSAGE_CHARS = 2000;
 const AUDIT_MAX_REFERENCES = 10;
+const SCHEDULED_AUDIT = 'cross-project-reply-scheduled';
+const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
 /** Per-Y promise chain: cap check → deliver → receipt run one at a time. */
 const threadLocks = new Map();
@@ -130,7 +133,20 @@ function validateReplyInput(input) {
     }
     referencePaths = input.referencePaths.slice();
   }
-  return { ok: true, value: { message, outcome: input.outcome, referencePaths } };
+  let deliverWhen = null;
+  if (input.deliverWhen !== undefined && input.deliverWhen !== null) {
+    const dw = input.deliverWhen;
+    const keys = dw && typeof dw === 'object' && !Array.isArray(dw) ? Object.keys(dw) : null;
+    if (!keys || keys.length !== 1 || keys[0] !== 'appVersionAbove'
+      || typeof dw.appVersionAbove !== 'string' || !SEMVER_RE.test(dw.appVersionAbove)) {
+      return bad(400, 'deliverWhen must be { appVersionAbove: "x.y.z" } — the Session Manager version running now');
+    }
+    deliverWhen = { appVersionAbove: dw.appVersionAbove };
+  }
+  return {
+    ok: true,
+    value: { message, outcome: input.outcome, referencePaths, ...(deliverWhen ? { deliverWhen } : {}) },
+  };
 }
 
 function defaultSendPrompt(tabId, prompt, extra) {
@@ -213,22 +229,23 @@ function earlierDelivery(receipt, { targetCwd, rt, threadField, sent }) {
 /**
  * sendFeedbackReply(input, deps) → Promise<result>
  *
- * input: { message, outcome, referencePaths?, toEpicId?, fromCwd,
+ * input: { message, outcome, referencePaths?, toEpicId?, deliverWhen?, fromCwd,
  *          originProjectRoot?, originClaudeSessionId }
+ *        deliverWhen { appVersionAbove: 'x.y.z' } holds the reply in the
+ *        pending-reply ledger (pendingReplies.cjs) instead of sending it; its
+ *        ledger entry holds a slot under MAX_REPLIES_PER_THREAD like a receipt.
  * deps:  { sendPrompt, appendEvent, resolveEpicId, appendAudit, openFallback }
  *        openFallback defaults to crossProjectFeedback.openReplyFallbackSession;
  *        pass null to get a 409 fallbackNeeded instead.
  */
 async function sendFeedbackReply(input, deps = {}) {
-  const sendPrompt = deps.sendPrompt || defaultSendPrompt;
-  const appendEvent = deps.appendEvent || defaultAppendEvent;
   const resolveEpicId = deps.resolveEpicId || defaultResolveEpicId;
   const audit = deps.appendAudit || appendAuditEvent;
 
   // 1. Validation.
   const valid = validateReplyInput(input);
   if (!valid.ok) return valid;
-  const { message, outcome, referencePaths } = valid.value;
+  const { message, outcome, referencePaths, deliverWhen } = valid.value;
 
   // 2. Identity — Y comes ONLY from the caller's chat session id.
   const originClaudeSessionId = typeof input.originClaudeSessionId === 'string' ? input.originClaudeSessionId : '';
@@ -272,169 +289,230 @@ async function sendFeedbackReply(input, deps = {}) {
   }
 
   return withThreadLock(`${realOr(replierCwd)}\u0000${yId}`, async () => {
-    // 4. Identical retry, then cap.
+    // 4. Identical retry, then cap (receipts + replies still held in the ledger).
     const receipts = readReceipts(replierCwd, yId);
     const sent = receipts.length;
+    const pending = countPendingForThread(replierCwd, yId);
     const hash = replyHash(outcome, message);
     const latest = receipts[sent - 1];
-    if (latest && latest.reply && latest.reply.hash === hash) {
+    if (!deliverWhen && latest && latest.reply && latest.reply.hash === hash) {
       return earlierDelivery(latest, { targetCwd, rt, threadField, sent });
     }
-    if (sent >= MAX_REPLIES_PER_THREAD) {
+    const used = sent + pending;
+    if (used >= MAX_REPLIES_PER_THREAD) {
       return bad(429, `reply limit of ${MAX_REPLIES_PER_THREAD} reached for this thread`);
     }
 
-    if (eventMode) {
-      return replyAsEvent({
-        appendEvent, audit, sent, rt, targetCwd, replierCwd, yId, y,
-        message, outcome, referencePaths, hash,
+    if (deliverWhen) {
+      addPendingReply({
+        replierCwd,
+        yId,
+        goalText: y.goalText,
+        thread: {
+          cwd: rt.cwd, epicId: rt.epicId, claudeSessionId: rt.claudeSessionId,
+          legacy, mode: resolved.mode || null,
+        },
+        targetCwd,
+        outcome,
+        message,
+        referencePaths,
+        appVersionAbove: deliverWhen.appVersionAbove,
       });
-    }
-
-    // The fallback (default: crossProjectFeedback.openReplyFallbackSession,
-    // the only cross-project mint authority) opens a NEW proposed Epic in the
-    // asking project. `openFallback: null` disables it (409 fallbackNeeded).
-    const openFallback = Object.prototype.hasOwnProperty.call(deps, 'openFallback')
-      ? deps.openFallback
-      : (args) => feedbackConduit().openReplyFallbackSession(args);
-    const fallback = async (reason) => {
-      if (typeof openFallback !== 'function') {
-        return bad(409, `the asking Epic cannot take a reply: ${reason}`, { fallbackNeeded: true, reason });
-      }
-      const opened = await openFallback({
-        reason,
-        toCwd: targetCwd,
-        toEpicId: rt.epicId,
+      audit(SCHEDULED_AUDIT, {
+        cwd: targetCwd,
+        epicId: rt.epicId || null,
         fromCwd: replierCwd,
         fromEpicId: yId,
-        message,
         outcome,
-        referencePaths,
-        originClaudeSessionId,
-        original: originalRequest(y),
+        appVersionAbove: deliverWhen.appVersionAbove,
+        ...threadField,
       });
-      if (!opened || !opened.ok || typeof opened.epicId !== 'string') return opened;
-      const project = path.basename(targetCwd);
-      const reused = opened.reused === true;
-      // A reused fallback Epic already carries the first reply in its opening
-      // prompt; this one must land in it too, or its text is lost.
-      let landedInFallback = null;
-      if (reused) {
-        landedInFallback = await deliverIntoReusedFallback({
-          sendPrompt, appendEvent, targetCwd, epicId: opened.epicId,
-          replierCwd, yId, y, outcome, message, referencePaths,
-        });
-      }
-      // Receipt on Y — counts toward the per-thread cap like a delivered reply.
-      const receipt = await appendEvent(replierCwd, yId,
-        reused
-          ? `Reply to ${rt.epicId} in ${project} fell back into the open session ${opened.epicId} in ${project} (${reason}).`
-          : `Reply to ${rt.epicId} in ${project} fell back to a new proposed session ${opened.epicId} in ${project} (${reason}).`,
-        {
-          notice: RECEIPT_NOTICE,
-          allowInactive: true,
-          reply: {
-            fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths, hash,
-            delivery: 'fallback', toEpicId: rt.epicId, fallbackEpicId: opened.epicId, reason,
-            ...(reused ? { reused: true } : {}),
-          },
-        });
-      // Best-effort receipt on X, only while X is still in A's active index.
-      let receiptOnAskingEpic = false;
-      try {
-        if (readActiveIndex(targetCwd).sessions[rt.epicId]) {
-          const r = await appendEvent(targetCwd, rt.epicId,
-            `A reply from ${path.basename(replierCwd)} (${outcome}) could not be delivered here (${reason}); `
-            + (reused ? `it was added to the open session ${opened.epicId}.` : `it opened as a new proposed session ${opened.epicId}.`),
-            { notice: FALLBACK_NOTICE, allowInactive: true, reply: { fromCwd: replierCwd, fromEpicId: yId, outcome, fallbackEpicId: opened.epicId } });
-          receiptOnAskingEpic = !!(r && r.ok);
-        }
-      } catch { receiptOnAskingEpic = false; }
       return {
         ok: true,
-        delivery: 'fallback',
-        reason,
-        toCwd: targetCwd,
-        toEpicId: rt.epicId,
-        fallbackEpicId: opened.epicId,
-        ...(reused ? { reused: true, landedInFallback } : {}),
-        receiptOnAskingEpic,
-        ...threadField,
-        ...receiptFields(receipt),
-        repliesUsed: sent + 1,
-        repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
+        delivery: 'scheduled',
+        deliverWhen,
+        repliesUsed: used + 1,
+        repliesLeft: MAX_REPLIES_PER_THREAD - used - 1,
       };
-    };
-
-    // 5. Deliver.
-    const x = readActiveIndex(targetCwd).sessions[rt.epicId];
-    if (!x) return fallback('missing');
-    if (x.status !== 'active') return fallback('not-active');
-    // Legacy threads carry no session pin; X's own (1:1, life-long) session is the one that asked.
-    if (legacy ? !(typeof x.claudeSessionId === 'string' && x.claudeSessionId) : x.claudeSessionId !== rt.claudeSessionId) {
-      return fallback('session-mismatch');
     }
 
-    const prompt = composeReplyPrompt({
+    return deliverAuthorizedReply({
+      replierCwd, yId, y, rt, legacy, eventMode, threadField, targetCwd,
+      message, outcome, referencePaths, hash, sent: used, originClaudeSessionId,
+    }, deps);
+  });
+}
+
+/**
+ * deliverAuthorizedReply(ctx, deps) → Promise<result>. The send-and-fallback
+ * half of a reply whose identity, thread and cap checks already passed — run
+ * inside the per-Y thread lock. sendFeedbackReply calls it for a live reply;
+ * the pending-reply deliverer reuses it for a held one. ctx.sent = replies
+ * already counted against the cap (this one excluded).
+ *
+ * ctx:  { replierCwd, yId, y, rt, legacy, eventMode, threadField, targetCwd,
+ *         message, outcome, referencePaths, hash, sent, originClaudeSessionId? }
+ * deps: { sendPrompt, appendEvent, appendAudit, openFallback } (see sendFeedbackReply)
+ */
+async function deliverAuthorizedReply(ctx, deps = {}) {
+  const {
+    replierCwd, yId, y, rt, legacy, eventMode, threadField = {}, targetCwd,
+    message, outcome, referencePaths = [], hash, sent, originClaudeSessionId,
+  } = ctx;
+  const sendPrompt = deps.sendPrompt || defaultSendPrompt;
+  const appendEvent = deps.appendEvent || defaultAppendEvent;
+  const audit = deps.appendAudit || appendAuditEvent;
+
+  if (eventMode) {
+    return replyAsEvent({
+      appendEvent, audit, sent, rt, targetCwd, replierCwd, yId, y,
+      message, outcome, referencePaths, hash,
+    });
+  }
+
+  // The fallback (default: crossProjectFeedback.openReplyFallbackSession,
+  // the only cross-project mint authority) opens a NEW proposed Epic in the
+  // asking project. `openFallback: null` disables it (409 fallbackNeeded).
+  const openFallback = Object.prototype.hasOwnProperty.call(deps, 'openFallback')
+    ? deps.openFallback
+    : (args) => feedbackConduit().openReplyFallbackSession(args);
+  const fallback = async (reason) => {
+    if (typeof openFallback !== 'function') {
+      return bad(409, `the asking Epic cannot take a reply: ${reason}`, { fallbackNeeded: true, reason });
+    }
+    const opened = await openFallback({
+      reason,
+      toCwd: targetCwd,
+      toEpicId: rt.epicId,
       fromCwd: replierCwd,
       fromEpicId: yId,
-      fromGoalText: y.goalText,
-      outcome,
       message,
+      outcome,
       referencePaths,
+      originClaudeSessionId,
+      original: originalRequest(y),
     });
-    const appended = await appendEvent(targetCwd, x.id, prompt, {
-      notice: REPLY_NOTICE,
-      reply: { fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths },
-    });
-    if (!appended || !appended.ok) return fallback((appended && appended.reason) || 'append-failed');
-
-    let sendResult;
-    try {
-      sendResult = await sendPrompt(x.id, prompt, { sessionId: x.claudeSessionId, cwd: x.cwd || targetCwd });
-    } catch (e) {
-      sendResult = { disposition: 'unconfirmed', reason: e && e.message ? e.message : 'send-error' };
+    if (!opened || !opened.ok || typeof opened.epicId !== 'string') return opened;
+    const project = path.basename(targetCwd);
+    const reused = opened.reused === true;
+    // A reused fallback Epic already carries the first reply in its opening
+    // prompt; this one must land in it too, or its text is lost.
+    let landedInFallback = null;
+    if (reused) {
+      landedInFallback = await deliverIntoReusedFallback({
+        sendPrompt, appendEvent, targetCwd, epicId: opened.epicId,
+        replierCwd, yId, y, outcome, message, referencePaths,
+      });
     }
-    const disposition = sendResult && sendResult.disposition;
-    if (disposition === 'refused') return fallback(`send-refused:${sendResult.reason || 'unknown'}`);
-    const delivery = disposition === 'sent' || disposition === 'queued' ? 'delivered' : 'event-only';
-
-    // 6. Receipt on Y (counts toward the cap).
+    // Receipt on Y — counts toward the per-thread cap like a delivered reply.
     const receipt = await appendEvent(replierCwd, yId,
-      `Reply sent to ${x.id} in ${path.basename(targetCwd)} (${outcome}, ${delivery}).`,
+      reused
+        ? `Reply to ${rt.epicId} in ${project} fell back into the open session ${opened.epicId} in ${project} (${reason}).`
+        : `Reply to ${rt.epicId} in ${project} fell back to a new proposed session ${opened.epicId} in ${project} (${reason}).`,
       {
         notice: RECEIPT_NOTICE,
         allowInactive: true,
         reply: {
           fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths, hash,
-          delivery, toEpicId: x.id,
-          ...(delivery === 'event-only' && sendResult && sendResult.reason ? { reason: sendResult.reason } : {}),
+          delivery: 'fallback', toEpicId: rt.epicId, fallbackEpicId: opened.epicId, reason,
+          ...(reused ? { reused: true } : {}),
         },
       });
-
-    // 7. Audit.
-    audit('epic_cross_project_reply', {
-      cwd: targetCwd,
-      epicId: x.id,
-      fromCwd: replierCwd,
-      fromEpicId: yId,
-      outcome,
-      delivery,
-      ...threadField,
-    });
-
+    // Best-effort receipt on X, only while X is still in A's active index.
+    let receiptOnAskingEpic = false;
+    try {
+      if (readActiveIndex(targetCwd).sessions[rt.epicId]) {
+        const r = await appendEvent(targetCwd, rt.epicId,
+          `A reply from ${path.basename(replierCwd)} (${outcome}) could not be delivered here (${reason}); `
+          + (reused ? `it was added to the open session ${opened.epicId}.` : `it opened as a new proposed session ${opened.epicId}.`),
+          { notice: FALLBACK_NOTICE, allowInactive: true, reply: { fromCwd: replierCwd, fromEpicId: yId, outcome, fallbackEpicId: opened.epicId } });
+        receiptOnAskingEpic = !!(r && r.ok);
+      }
+    } catch { receiptOnAskingEpic = false; }
     return {
       ok: true,
-      delivery,
+      delivery: 'fallback',
+      reason,
       toCwd: targetCwd,
-      toEpicId: x.id,
+      toEpicId: rt.epicId,
+      fallbackEpicId: opened.epicId,
+      ...(reused ? { reused: true, landedInFallback } : {}),
+      receiptOnAskingEpic,
       ...threadField,
       ...receiptFields(receipt),
       repliesUsed: sent + 1,
       repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
-      ...(delivery === 'event-only' && sendResult && sendResult.reason ? { reason: sendResult.reason } : {}),
     };
+  };
+
+  // 5. Deliver.
+  const x = readActiveIndex(targetCwd).sessions[rt.epicId];
+  if (!x) return fallback('missing');
+  if (x.status !== 'active') return fallback('not-active');
+  // Legacy threads carry no session pin; X's own (1:1, life-long) session is the one that asked.
+  if (legacy ? !(typeof x.claudeSessionId === 'string' && x.claudeSessionId) : x.claudeSessionId !== rt.claudeSessionId) {
+    return fallback('session-mismatch');
+  }
+
+  const prompt = composeReplyPrompt({
+    fromCwd: replierCwd,
+    fromEpicId: yId,
+    fromGoalText: y.goalText,
+    outcome,
+    message,
+    referencePaths,
   });
+  const appended = await appendEvent(targetCwd, x.id, prompt, {
+    notice: REPLY_NOTICE,
+    reply: { fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths },
+  });
+  if (!appended || !appended.ok) return fallback((appended && appended.reason) || 'append-failed');
+
+  let sendResult;
+  try {
+    sendResult = await sendPrompt(x.id, prompt, { sessionId: x.claudeSessionId, cwd: x.cwd || targetCwd });
+  } catch (e) {
+    sendResult = { disposition: 'unconfirmed', reason: e && e.message ? e.message : 'send-error' };
+  }
+  const disposition = sendResult && sendResult.disposition;
+  if (disposition === 'refused') return fallback(`send-refused:${sendResult.reason || 'unknown'}`);
+  const delivery = disposition === 'sent' || disposition === 'queued' ? 'delivered' : 'event-only';
+
+  // 6. Receipt on Y (counts toward the cap).
+  const receipt = await appendEvent(replierCwd, yId,
+    `Reply sent to ${x.id} in ${path.basename(targetCwd)} (${outcome}, ${delivery}).`,
+    {
+      notice: RECEIPT_NOTICE,
+      allowInactive: true,
+      reply: {
+        fromCwd: replierCwd, fromEpicId: yId, outcome, referencePaths, hash,
+        delivery, toEpicId: x.id,
+        ...(delivery === 'event-only' && sendResult && sendResult.reason ? { reason: sendResult.reason } : {}),
+      },
+    });
+
+  // 7. Audit.
+  audit('epic_cross_project_reply', {
+    cwd: targetCwd,
+    epicId: x.id,
+    fromCwd: replierCwd,
+    fromEpicId: yId,
+    outcome,
+    delivery,
+    ...threadField,
+  });
+
+  return {
+    ok: true,
+    delivery,
+    toCwd: targetCwd,
+    toEpicId: x.id,
+    ...threadField,
+    ...receiptFields(receipt),
+    repliesUsed: sent + 1,
+    repliesLeft: MAX_REPLIES_PER_THREAD - sent - 1,
+    ...(delivery === 'event-only' && sendResult && sendResult.reason ? { reason: sendResult.reason } : {}),
+  };
 }
 
 /**
@@ -615,5 +693,6 @@ module.exports = {
   composeReplyPrompt,
   validateReplyInput,
   sendFeedbackReply,
+  deliverAuthorizedReply,
   registerAdminRoute,
 };

@@ -844,6 +844,16 @@ const TOOLS = [
           description: 'Optional absolute paths worth reading, appended as Reference lines',
         },
         toEpicId: { type: 'string', description: 'Optional: the asking Epic id. May only restate the thread\'s own target — any other id is refused.' },
+        deliverWhen: {
+          type: 'object',
+          properties: {
+            appVersionAbove: { type: 'string', description: 'x.y.z — the Session Manager version running now.' },
+          },
+          required: ['appVersionAbove'],
+          additionalProperties: false,
+          description: 'Optional: hold this reply until Session Manager runs a version above appVersionAbove (give the version running now); '
+            + 'it then sends itself, even after this Epic closes; `{version}` in the message becomes that version.',
+        },
       },
       required: ['message', 'outcome'],
     },

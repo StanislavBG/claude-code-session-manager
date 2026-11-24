@@ -367,7 +367,11 @@ const MCP_TOOL_CATALOG = [
     notes: 'Capped at 3 replies per thread. Identity comes from this session only; it cannot be passed in. '
       + 'The result delivery is "delivered" (into the asking session), "event-only" (recorded on the asking '
       + 'Epic, its session not prompted) or "fallback" (the asking Epic could not take it, so a new proposed '
-      + 'session opened in that project). Never report that the other project acted on the reply.',
+      + 'session opened in that project). Never report that the other project acted on the reply. '
+      + 'deliverWhen { appVersionAbove }: hold this reply until Session Manager runs a version above '
+      + 'appVersionAbove (give the version running now); it then sends itself, even after this Epic closes; '
+      + '`{version}` in the message becomes that version. A held reply returns delivery "scheduled" and '
+      + 'counts toward the 3-reply cap at once.',
   },
   {
     name: 'project_home_write',

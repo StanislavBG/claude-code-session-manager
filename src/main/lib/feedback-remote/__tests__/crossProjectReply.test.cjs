@@ -706,3 +706,100 @@ test('a reused ACTIVE fallback Epic gets the reply as event + prompt, like a del
   expect(extra).toEqual({ sessionId: 'cs-f', cwd: expect.any(String) });
   expect(events(a, first.fallbackEpicId).at(-1)).toMatchObject({ notice: 'cross-project-reply', text: prompt });
 });
+
+// ---------------------------------------------------------------------------
+// Scheduled replies (deliverWhen) — held in the pending-reply ledger
+// ---------------------------------------------------------------------------
+
+async function withSchedulerHome(fn) {
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-xreply-home-'));
+  tmpDirs.push(home);
+  const prev = process.env.SM_SCHEDULER_HOME;
+  process.env.SM_SCHEDULER_HOME = home;
+  try {
+    return await fn(home);
+  } finally {
+    if (prev === undefined) delete process.env.SM_SCHEDULER_HOME;
+    else process.env.SM_SCHEDULER_HOME = prev;
+  }
+}
+
+const readLedger = (home) => {
+  const file = path.join(home, 'pending-replies.json');
+  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).entries : [];
+};
+
+test('deliverWhen: a scheduled reply writes one ledger entry and sends no prompt', async () => {
+  await withSchedulerHome(async (home) => {
+    const { a, b } = await setup();
+    const d = deps('sent');
+    const before = events(a, 'psess-x').length;
+    const r = await sendFeedbackReply(input(b, {
+      message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' },
+    }), d);
+    expect(r).toEqual({
+      ok: true, delivery: 'scheduled', deliverWhen: { appVersionAbove: '0.141.0' },
+      repliesUsed: 1, repliesLeft: MAX_REPLIES_PER_THREAD - 1,
+    });
+    expect(d.calls).toHaveLength(0);
+    expect(events(a, 'psess-x')).toHaveLength(before);
+    expect(events(b, 'psess-y').some((e) => e.notice === 'cross-project-reply-sent')).toBe(false);
+
+    const ledger = readLedger(home);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({
+      replierCwd: b,
+      yId: 'psess-y',
+      goalText: 'Relay drops a frame',
+      thread: { cwd: a, epicId: 'psess-x', claudeSessionId: 'cs-x', legacy: false, mode: null },
+      targetCwd: a,
+      outcome: 'done',
+      message: 'Live in v{version}.',
+      referencePaths: ['src/relay.cjs'],
+      appVersionAbove: '0.141.0',
+      deliveredAt: null,
+    });
+    expect(d.audits).toEqual([{
+      kind: 'cross-project-reply-scheduled',
+      fields: expect.objectContaining({ cwd: a, epicId: 'psess-x', fromEpicId: 'psess-y', appVersionAbove: '0.141.0' }),
+    }]);
+  });
+});
+
+test('deliverWhen: the per-thread cap counts pending ledger entries', async () => {
+  await withSchedulerHome(async (home) => {
+    const { b } = await setup();
+    const d = deps('sent');
+    // one live reply (a receipt) + pending entries fill the cap together.
+    expect((await sendFeedbackReply(input(b, { message: 'live one' }), d)).ok).toBe(true);
+    for (let i = 1; i < MAX_REPLIES_PER_THREAD; i++) {
+      const r = await sendFeedbackReply(input(b, { message: `scheduled ${i}`, deliverWhen: { appVersionAbove: '1.0.0' } }), d);
+      expect(r).toMatchObject({ ok: true, delivery: 'scheduled', repliesUsed: i + 1 });
+    }
+    expect(readLedger(home)).toHaveLength(MAX_REPLIES_PER_THREAD - 1);
+    const over = await sendFeedbackReply(input(b, { message: 'one too many', deliverWhen: { appVersionAbove: '1.0.0' } }), d);
+    expect(over.status).toBe(429);
+    // a live reply is refused too: the pending entries hold its slots.
+    const live = await sendFeedbackReply(input(b, { message: 'live two' }), d);
+    expect(live.status).toBe(429);
+    expect(readLedger(home)).toHaveLength(MAX_REPLIES_PER_THREAD - 1);
+    expect(d.calls).toHaveLength(1);
+  });
+});
+
+test('deliverWhen: any shape but { appVersionAbove: "x.y.z" } is refused with 400', async () => {
+  await withSchedulerHome(async (home) => {
+    const { b } = await setup();
+    const d = deps();
+    for (const deliverWhen of [
+      'later', 5, [], {}, { appVersionAbove: '1.2' }, { appVersionAbove: 'v1.2.3' },
+      { appVersionAbove: 123 }, { appVersionAbove: '1.2.3', extra: true }, { version: '1.2.3' },
+    ]) {
+      const r = await sendFeedbackReply(input(b, { deliverWhen }), d);
+      expect(r.ok).toBe(false);
+      expect(r.status).toBe(400);
+    }
+    expect(d.calls).toHaveLength(0);
+    expect(readLedger(home)).toHaveLength(0);
+  });
+});

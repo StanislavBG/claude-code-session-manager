@@ -306,3 +306,10 @@ test('listArtifacts stats each entry through fsImpl and never throws on a stat e
   expect(stats.map((f) => path.basename(f)).sort()).toEqual(['one.txt', 'two.txt']);
   expect(list.map((e) => e.name)).toEqual(['one.txt']);
 });
+
+test('publishArtifact and ingestDir have no fsImpl seam: writes use the real fs', () => {
+  // Reads are injectable (listArtifacts above); the write paths take no fsImpl at all.
+  for (const fn of [store.publishArtifact, store.ingestDir]) {
+    expect(fn.toString()).not.toMatch(/fsImpl/);
+  }
+});

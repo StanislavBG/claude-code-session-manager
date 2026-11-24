@@ -21,6 +21,9 @@
  * by an in-process promise lock. publishArtifact/ingestDir never throw — every
  * refusal is a returned { ok:false, error } / skipped reason.
  *
+ * fs seam: reads are injectable (listArtifacts/readLedger take fsImpl); writes
+ * (publishArtifact/ingestDir) always use the real fs.
+ *
  * Retention: artifactsDays after the owning Epic completes (pruning lives in a
  * sibling module).
  */
@@ -77,13 +80,13 @@ function safeName(base) {
 }
 
 /** First free name in `dir`: name, name-2.ext, name-3.ext, ... (index.json is reserved). */
-function freeName(dir, name, fsImpl) {
+function freeName(dir, name) {
   const ext = path.extname(name);
   const stem = ext ? name.slice(0, -ext.length) : name;
   for (let i = 1; i < 100000; i += 1) {
     const candidate = i === 1 ? name : `${stem}-${i}${ext}`;
     if (candidate === LEDGER) continue;
-    if (!fsImpl.existsSync(path.join(dir, candidate))) return candidate;
+    if (!fs.existsSync(path.join(dir, candidate))) return candidate;
   }
   throw new Error('no free artifact name');
 }
@@ -93,10 +96,10 @@ function isUnder(child, root) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
-function sha256File(file, fsImpl) {
+function sha256File(file) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256');
-    const stream = (fsImpl.createReadStream || fs.createReadStream)(file);
+    const stream = fs.createReadStream(file);
     stream.on('error', reject);
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('end', () => resolve(hash.digest('hex')));
@@ -149,13 +152,14 @@ function cleanProducer(producer, epicId, taskId) {
 
 /**
  * publishArtifact({ projectRoot, epicId, taskId, srcPath, title, kind, producer,
- *   allowedRoots, fsImpl, appendEvent })
+ *   allowedRoots, appendEvent })
  *   → Promise<{ ok: true, storedPath, entry } | { ok: false, error }>
- * Never rejects.
+ * Never rejects. Every write step (lstat, realpath, mkdir, copy, hash,
+ * rename, unlink, ledger write) uses the real fs — there is no fsImpl seam.
  */
 async function publishArtifact({
   projectRoot, epicId, taskId, srcPath, title, kind, producer, allowedRoots,
-  fsImpl = fs, appendEvent = null,
+  appendEvent = null,
 } = {}) {
   try {
     const owner = ownerOf(epicId, taskId);
@@ -171,16 +175,16 @@ async function publishArtifact({
     }
 
     let st;
-    try { st = fsImpl.lstatSync(srcPath); } catch (e) { return { ok: false, error: `source unreadable: ${errMsg(e)}` }; }
+    try { st = fs.lstatSync(srcPath); } catch (e) { return { ok: false, error: `source unreadable: ${errMsg(e)}` }; }
     if (st.isSymbolicLink()) return { ok: false, error: 'source is a symlink' };
     if (!st.isFile()) return { ok: false, error: 'source is not a regular file' };
     if (st.size > MAX_BYTES) return { ok: false, error: `oversize (${st.size} > ${MAX_BYTES} bytes)` };
 
     let realSrc;
-    try { realSrc = fsImpl.realpathSync(srcPath); } catch (e) { return { ok: false, error: `source unresolvable: ${errMsg(e)}` }; }
+    try { realSrc = fs.realpathSync(srcPath); } catch (e) { return { ok: false, error: `source unresolvable: ${errMsg(e)}` }; }
     const roots = (Array.isArray(allowedRoots) && allowedRoots.length ? allowedRoots : [projectRoot])
       .filter((r) => typeof r === 'string' && path.isAbsolute(r))
-      .map((r) => { try { return fsImpl.realpathSync(r); } catch { return null; } })
+      .map((r) => { try { return fs.realpathSync(r); } catch { return null; } })
       .filter(Boolean);
     if (!roots.some((r) => isUnder(realSrc, /** @type {string} */ (r)))) {
       return { ok: false, error: 'source is outside every allowed root' };
@@ -199,8 +203,8 @@ async function publishArtifact({
     const ledgerFile = path.join(destDir, LEDGER);
 
     return await withLock(destDir, async () => {
-      fsImpl.mkdirSync(destDir, { recursive: true });
-      const name = freeName(destDir, safeName(path.basename(srcPath)), fsImpl);
+      fs.mkdirSync(destDir, { recursive: true });
+      const name = freeName(destDir, safeName(path.basename(srcPath)));
       const dest = path.join(destDir, name);
       const verdict = checkOpsWrite(dest, WRITER);
       if (!verdict.ok) return { ok: false, error: `write refused: ${verdict.error}` };
@@ -211,14 +215,14 @@ async function publishArtifact({
       let sha256;
       let size;
       try {
-        fsImpl.copyFileSync(realSrc, tmp, fs.constants.COPYFILE_FICLONE);
-        size = fsImpl.statSync(tmp).size;
+        fs.copyFileSync(realSrc, tmp, fs.constants.COPYFILE_FICLONE);
+        size = fs.statSync(tmp).size;
         if (size > MAX_BYTES) throw new Error(`oversize after copy (${size} > ${MAX_BYTES} bytes)`);
-        sha256 = await sha256File(tmp, fsImpl);
-        if (fsImpl.existsSync(dest)) throw new Error('destination appeared during copy');
-        fsImpl.renameSync(tmp, dest);
+        sha256 = await sha256File(tmp);
+        if (fs.existsSync(dest)) throw new Error('destination appeared during copy');
+        fs.renameSync(tmp, dest);
       } catch (e) {
-        try { fsImpl.unlinkSync(tmp); } catch { /* never created or already gone */ }
+        try { fs.unlinkSync(tmp); } catch { /* never created or already gone */ }
         return { ok: false, error: `copy failed: ${errMsg(e)}` };
       }
 
@@ -232,11 +236,11 @@ async function publishArtifact({
         producer: cleanProducer(producer, epicId, taskId),
       };
       try {
-        const entries = readLedger(ledgerFile, fsImpl);
+        const entries = readLedger(ledgerFile, fs);
         entries.push(entry);
         await writeJsonAtomic(ledgerFile, { version: 1, entries });
       } catch (e) {
-        try { fsImpl.unlinkSync(dest); } catch { /* best effort: keep store and ledger in step */ }
+        try { fs.unlinkSync(dest); } catch { /* best effort: keep store and ledger in step */ }
         return { ok: false, error: `ledger write failed: ${errMsg(e)}` };
       }
 
@@ -263,15 +267,16 @@ async function publishArtifact({
 }
 
 /**
- * ingestDir({ projectRoot, epicId, taskId, srcDir, producer, allowedRoots, minAgeMs, fsImpl, appendEvent })
+ * ingestDir({ projectRoot, epicId, taskId, srcDir, producer, allowedRoots, minAgeMs, appendEvent })
  *   → Promise<{ published: { srcPath, storedPath, entry }[], skipped: { path, reason }[] }>
  * Publishes every regular file directly in srcDir (non-recursive, max 200),
  * deleting each source only after its copy succeeded. Never rejects.
  * minAgeMs (default 0) skips any file modified within the last minAgeMs as
  * 'still being written', so a periodic sweep never moves a half-written file.
+ * Like publishArtifact, it uses the real fs for every step (no fsImpl seam).
  */
 async function ingestDir({
-  projectRoot, epicId, taskId, srcDir, producer, allowedRoots, minAgeMs = 0, fsImpl = fs, appendEvent = null,
+  projectRoot, epicId, taskId, srcDir, producer, allowedRoots, minAgeMs = 0, appendEvent = null,
 } = {}) {
   /** @type {{ srcPath: string, storedPath: string, entry: object }[]} */
   const published = [];
@@ -284,12 +289,12 @@ async function ingestDir({
     }
     let names;
     try {
-      const st = fsImpl.lstatSync(srcDir);
+      const st = fs.lstatSync(srcDir);
       if (!st.isDirectory()) {
         skipped.push({ path: srcDir, reason: 'srcDir is not a directory' });
         return { published, skipped };
       }
-      names = fsImpl.readdirSync(srcDir).map(String).sort();
+      names = fs.readdirSync(srcDir).map(String).sort();
     } catch (e) {
       if (e && e.code === 'ENOENT') return { published, skipped };
       skipped.push({ path: srcDir, reason: `cannot list srcDir: ${errMsg(e)}` });
@@ -302,7 +307,7 @@ async function ingestDir({
     for (const name of names) {
       const src = path.join(srcDir, name);
       try {
-        const st = fsImpl.lstatSync(src);
+        const st = fs.lstatSync(src);
         if (st.isSymbolicLink()) { skipped.push({ path: src, reason: 'symlink' }); continue; }
         if (st.isDirectory()) { skipped.push({ path: src, reason: 'directory' }); continue; }
         if (!st.isFile()) { skipped.push({ path: src, reason: 'not a regular file' }); continue; }
@@ -310,11 +315,11 @@ async function ingestDir({
         if (count >= MAX_INGEST_FILES) { skipped.push({ path: src, reason: `over the ${MAX_INGEST_FILES}-file limit` }); continue; }
         count += 1;
         const res = await publishArtifact({
-          projectRoot, epicId, taskId, srcPath: src, producer, allowedRoots: roots, fsImpl, appendEvent,
+          projectRoot, epicId, taskId, srcPath: src, producer, allowedRoots: roots, appendEvent,
         });
         if (!res.ok) { skipped.push({ path: src, reason: res.error }); continue; }
         published.push({ srcPath: src, storedPath: res.storedPath, entry: res.entry });
-        try { fsImpl.unlinkSync(src); } catch (e) {
+        try { fs.unlinkSync(src); } catch (e) {
           console.error('[artifactStore] could not delete ingested source', src, errMsg(e));
         }
       } catch (e) {

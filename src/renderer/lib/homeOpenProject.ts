@@ -1,7 +1,6 @@
-// Activate-or-open the SessionTab for a known project cwd. Single
-// implementation shared by Home's ProjectsCard row click and the New-epic
-// project picker drawer (NewEpicProjectDrawer) — both need the exact same
-// "does a tab for this cwd already exist?" join against useSessions.
+// Activate-or-open the SessionTab for a known project cwd. Its one caller is
+// Home's ProjectsCard row click (Home.tsx); it owns the "does a tab for this
+// cwd already exist?" join against useSessions.
 import type { useSessions } from '../state/sessions'
 
 type Tabs = ReturnType<typeof useSessions.getState>['tabs']

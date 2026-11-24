@@ -18,7 +18,7 @@ Ground every claim in something you read: the project's manifest (`package.json`
 can't point to where a claim came from, leave it out rather than guess — leaving something out is
 far better than inventing it. Never invent statistics, metrics, quotes, logos, testimonials,
 screenshots, or features that don't exist. Where the project already describes itself well (a
-tagline, a feature list, a mission statement), reuse its own wording.
+tagline, a feature list, a mission statement), reuse its own wording instead of paraphrasing.
 
 Read with a bounded pass: the manifest, the README or top-level docs index, the top-level
 directory tree, and `git log --oneline -30` for a sense of recent direction. Stop once you have
@@ -40,4 +40,4 @@ If the save tool rejects the HTML, fix the specific problem it reported and call
 3 attempts total. If the save tool isn't available in this session at all, that is a Session
 Manager launch bug, not an obstacle to route around: say so plainly, give the absolute path of the
 HTML file you built in your final result, and stop. Don't start Session Manager's MCP server
-yourself, call its admin API, write the saved file by hand, or build any other workaround.
+yourself, call its admin API, write the saved file by hand, or build any other workaround or tooling, in the target project or anywhere else.

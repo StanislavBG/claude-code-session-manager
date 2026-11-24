@@ -8,7 +8,7 @@ import { test, expect, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { seedDemoVideoKit, KIT_FILES, KIT_VERSION, KIT_DIGEST, kitDigest, kitDestDir } = require('../seedKit.cjs');
+const { seedDemoVideoKit, KIT_FILES, KIT_VERSION, KIT_DIGEST, kitDigest, kitDestDir, kitFiles } = require('../seedKit.cjs');
 
 const tmp = [];
 afterEach(() => {
@@ -88,8 +88,34 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 34 (project-home-html.md joins the kit)', () => {
-  expect(KIT_VERSION).toBe('34');
+test('KIT_VERSION is bumped to 35 (project-home-html.md restores two lost phrases)', () => {
+  expect(KIT_VERSION).toBe('35');
+});
+
+test('the playbook path both personas name is where the kit installs it by default', () => {
+  const POINTER = '~/.claude/session-manager/demo-video-kit/project-home-html.md';
+  const agentsDir = path.join(__dirname, '..', '..', '..', '..', 'seed', 'agents');
+  for (const persona of ['demo-video-builder.md', 'project-home-builder.md']) {
+    expect(fs.readFileSync(path.join(agentsDir, persona), 'utf8'), persona).toContain(POINTER);
+  }
+  expect(kitFiles()).toContain('project-home-html.md');
+  // Default destination: SM_SCHEDULER_HOME unset. HOME points at a temp dir so the
+  // live-root guard (schedulerPaths.cjs) allows the resolve under vitest.
+  const prevSched = process.env.SM_SCHEDULER_HOME;
+  const prevHome = process.env.HOME;
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-seedkit-defhome-'));
+  tmp.push(fakeHome);
+  delete process.env.SM_SCHEDULER_HOME;
+  process.env.HOME = fakeHome;
+  try {
+    expect(os.homedir()).toBe(fakeHome);
+    const dest = kitDestDir();
+    expect(dest).toBe(path.join(os.homedir(), '.claude', 'session-manager', 'demo-video-kit'));
+    expect(path.join(dest, 'project-home-html.md')).toBe(path.join(os.homedir(), POINTER.slice(2)));
+  } finally {
+    if (prevSched === undefined) delete process.env.SM_SCHEDULER_HOME; else process.env.SM_SCHEDULER_HOME = prevSched;
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+  }
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

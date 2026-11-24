@@ -90,6 +90,9 @@ function descriptionFor(toolName) {
 
 const { adminTokenPath } = require('../src/main/lib/scheduler/schedulerPaths.cjs');
 const { normalizePreflight } = require('../src/main/lib/scheduler/preflightCheck.cjs');
+const {
+  findUnfilledPlaceholders, findSessionManagerVersions, normalizeReleaseClaim, isSessionManagerRepo, checkReleaseContains,
+} = require('../src/main/lib/feedback-remote/replyClaims.cjs');
 
 // Defined once so every failure path points to the same next call, verbatim
 // — never paste this sentence at each return site (PRD: session_manager_help).
@@ -909,6 +912,16 @@ const TOOLS = [
           description: 'Optional: hold this reply until Session Manager runs a version above appVersionAbove (give the version running now); '
             + 'it then sends itself, even after this Epic closes; `{version}` in the message becomes that version.',
         },
+        release: {
+          type: 'object',
+          properties: {
+            commits: { type: 'array', items: { type: 'string' }, description: 'Commit hashes (7-40 hex) the reply says shipped.' },
+          },
+          required: ['commits'],
+          additionalProperties: false,
+          description: 'Required for a Session Manager release claim: the commits must be in the running Session Manager release '
+            + '(tag v<running version>); `{version}` in a live reply becomes that version.',
+        },
       },
       required: ['message', 'outcome'],
     },
@@ -1543,6 +1556,72 @@ const HELD_REPLY_MIN_APP_VERSION = '0.142.0';
 // Refuses (returns an error line) when a feedback_reply carries deliverWhen but
 // the running app is older than HELD_REPLY_MIN_APP_VERSION or reports no
 // version. A missing admin-api.json returns null so adminRequest reports "not running".
+// Last app release whose held replies key on version only and ignore
+// release.commits, so a held commit-gated reply would go out unchecked.
+const COMMIT_GATED_HOLD_AFTER_APP_VERSION = '0.142.0';
+
+function runningAppVersion(cfg) {
+  return cfg && typeof cfg.appVersion === 'string' && cfg.appVersion ? cfg.appVersion : null;
+}
+
+// Applies the replyClaims rules to a feedback_reply before any request.
+// Returns { refusal } or { message } (the message to forward).
+async function feedbackReplyClaimCheck(args, held) {
+  const refuse = (text) => ({ refusal: `refused: ${text}` });
+  const { message } = args;
+  const hasRelease = args.release !== undefined && args.release !== null;
+  const unfilled = findUnfilledPlaceholders(message, { allowVersionToken: held || hasRelease });
+  if (unfilled.length) {
+    return refuse(`the message has unfilled placeholder(s) ${unfilled.join(', ')}. Write the real value, `
+      + 'or use {version} only with deliverWhen or release so it is filled for you.');
+  }
+  let claim = null;
+  if (hasRelease) {
+    const norm = normalizeReleaseClaim(args.release);
+    if (!norm.ok) return refuse(`${norm.error}.`);
+    claim = norm.value;
+  }
+  const projectRoot = process.env.SM_PROJECT_ROOT || process.cwd();
+  const smRepo = isSessionManagerRepo(projectRoot);
+  if (claim && !smRepo) {
+    return refuse(`release is for Session Manager release claims, but ${projectRoot} is not the Session Manager repo. `
+      + 'Send the reply without release and write your own version by hand.');
+  }
+  if (!claim && smRepo && args.outcome === 'done') {
+    const named = findSessionManagerVersions(message);
+    if (named.length || message.includes('{version}')) {
+      return refuse(`this done reply claims a Session Manager release (${named.length ? named.join(', ') : '{version}'}) `
+        + 'without release.commits, so nothing checks it. Add release: { commits: [...] } naming the commits that shipped.');
+    }
+  }
+  if (!claim) return { message };
+  let cfg = null;
+  try { cfg = await readAdminConfig(); } catch { cfg = null; }
+  const appVersion = runningAppVersion(cfg);
+  if (held) {
+    const cmp = appVersion ? compareVersions(appVersion, COMMIT_GATED_HOLD_AFTER_APP_VERSION) : NaN;
+    if (cmp > 0) return { message };
+    return refuse(`the running Session Manager app (${appVersion ? `v${appVersion}` : 'version not reported'}) holds replies by version only `
+      + 'and would ignore release.commits, so the held reply could go out naming a release without them. '
+      + 'Send it live with release.commits once the release that contains them runs.');
+  }
+  if (!appVersion) {
+    return refuse('the running Session Manager app reports no version, so release.commits cannot be checked against its release. '
+      + 'Restart Session Manager into a current build and call again.');
+  }
+  const check = await checkReleaseContains({ repoCwd: projectRoot, version: appVersion, commits: claim.commits });
+  if (!check.ok) {
+    return refuse(`the running Session Manager release v${appVersion} does not hold this claim: ${check.error}. `
+      + 'Send the reply once the release that contains the commits runs.');
+  }
+  const other = findSessionManagerVersions(message).filter((v) => v !== appVersion);
+  if (other.length) {
+    return refuse(`the message names Session Manager ${other.join(', ')}, but the running release is v${appVersion}. `
+      + 'Write {version} (filled with the running version) or the running version itself.');
+  }
+  return { message: message.split('{version}').join(appVersion) };
+}
+
 async function heldReplyAppRefusal(deliverWhen) {
   if (deliverWhen === undefined || deliverWhen === null) return null;
   let cfg;
@@ -1933,7 +2012,9 @@ async function handleCallTool(request) {
       const held = args.deliverWhen !== undefined && args.deliverWhen !== null;
       const heldRefusal = held ? await heldReplyAppRefusal(args.deliverWhen) : null;
       if (heldRefusal) return errorResult(heldRefusal);
-      const payload = { ...args };
+      const claimCheck = await feedbackReplyClaimCheck(args, held);
+      if (claimCheck.refusal) return errorResult(claimCheck.refusal);
+      const payload = { ...args, message: claimCheck.message };
       // Identity comes only from this process's env — never from the caller.
       delete payload.originClaudeSessionId;
       delete payload.originProjectRoot;

@@ -249,3 +249,183 @@ test('catalog says deliverWhen needs v0.142.0 or later; summary unchanged', () =
   expect(composeDescription(entry)).toMatch(/deliverWhen needs Session Manager v0\.142\.0 or later running/);
   expect(entry.summary).toBe('Answer the project that sent this session its feedback.');
 });
+
+// Release claims: the MCP server (run from the main checkout) applies the
+// replyClaims rules itself, so they hold even on an older published app.
+const { execFileSync } = require('node:child_process');
+
+async function makeSmRepo(version, { extraCommit = false } = {}) {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-mcp-reply-repo-'));
+  tmpDirs.push(dir);
+  const git = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('config', 'user.email', 't@example.invalid');
+  git('config', 'user.name', 't');
+  git('config', 'commit.gpgsign', 'false');
+  git('config', 'tag.gpgsign', 'false');
+  await fsp.writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'claude-code-session-manager', version }));
+  git('add', 'package.json');
+  git('commit', '-q', '-m', 'init');
+  const inside = git('rev-parse', 'HEAD');
+  git('tag', `v${version}`);
+  let outside = null;
+  if (extraCommit) {
+    await fsp.writeFile(path.join(dir, 'later.txt'), 'x');
+    git('add', 'later.txt');
+    git('commit', '-q', '-m', 'later');
+    outside = git('rev-parse', 'HEAD');
+  }
+  return { dir, inside, outside };
+}
+
+async function makeOtherRepo() {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-mcp-reply-other-'));
+  tmpDirs.push(dir);
+  await fsp.writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'some-other-project' }));
+  return dir;
+}
+
+test('feedback_reply schema declares release { commits } as a closed object', async () => {
+  const { TOOLS } = await setup({ ok: true }, {});
+  const rel = TOOLS.find((t) => t.name === 'feedback_reply').inputSchema.properties.release;
+  expect(rel.type).toBe('object');
+  expect(rel.required).toEqual(['commits']);
+  expect(rel.additionalProperties).toBe(false);
+  expect(rel.properties.commits).toEqual(expect.objectContaining({ type: 'array', items: { type: 'string' } }));
+  expect(rel.description).toMatch(/running Session Manager release/);
+});
+
+test.each([
+  ['{{appVersion}}', {}],
+  ['{version}', {}],
+  ['<semver>', { deliverWhen: { appVersionAbove: '0.142.0' } }],
+])('an unfilled placeholder %s is refused before any request', async (tok, extra) => {
+  const root = await makeOtherRepo();
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'delivered' }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: root }, { appVersion: '0.143.0' });
+  const r = await call(handleCallTool, { message: `Shipped in ${tok}.`, outcome: 'blocked', ...extra });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toMatch(/^refused:/);
+  expect(r.content[0].text).toContain(tok);
+  expect(requests).toHaveLength(0);
+});
+
+test('{version} is allowed in a held reply from a non-Session-Manager repo', async () => {
+  const root = await makeOtherRepo();
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'scheduled' }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: root }, { appVersion: '0.142.0' });
+  const r = await call(handleCallTool, { message: 'Live in {version}.', outcome: 'done', deliverWhen: { appVersionAbove: '0.142.0' } });
+  expect(r.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+});
+
+test.each([
+  [{ commits: [] }],
+  [{ commits: ['not-a-hash'] }],
+  [{ commits: ['abcdef1'], extra: 1 }],
+  [['abcdef1']],
+])('a malformed release %j is refused before any request', async (release) => {
+  const { dir } = await makeSmRepo('0.143.0');
+  const { handleCallTool, requests } = await setup({ ok: true }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir }, { appVersion: '0.143.0' });
+  const r = await call(handleCallTool, { message: 'Live in {version}.', outcome: 'done', release });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toMatch(/^refused:.*release/);
+  expect(requests).toHaveLength(0);
+});
+
+test('release from a project that is not Session Manager is refused', async () => {
+  const root = await makeOtherRepo();
+  const { handleCallTool, requests } = await setup({ ok: true }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: root }, { appVersion: '0.143.0' });
+  const r = await call(handleCallTool, { message: 'Live in {version}.', outcome: 'done', release: { commits: ['abcdef1'] } });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toMatch(/^refused:/);
+  expect(r.content[0].text).toMatch(/not the Session Manager repo/);
+  expect(requests).toHaveLength(0);
+});
+
+test.each([
+  ['Fixed in Session Manager 0.143.0.', {}],
+  ['Live in {version}.', { deliverWhen: { appVersionAbove: '0.142.0' } }],
+])('a Session Manager done reply %s without release is refused', async (message, extra) => {
+  const { dir } = await makeSmRepo('0.143.0');
+  const { handleCallTool, requests } = await setup({ ok: true }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir }, { appVersion: '0.143.0' });
+  const r = await call(handleCallTool, { message, outcome: 'done', ...extra });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toMatch(/^refused:/);
+  expect(r.content[0].text).toContain('release.commits');
+  expect(requests).toHaveLength(0);
+});
+
+test('a held reply with release is refused on app 0.142.0', async () => {
+  const { dir, inside } = await makeSmRepo('0.142.0');
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'scheduled' }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir }, { appVersion: '0.142.0' });
+  const r = await call(handleCallTool, {
+    message: 'Live in {version}.', outcome: 'done', deliverWhen: { appVersionAbove: '0.142.0' }, release: { commits: [inside] },
+  });
+  expect(r.isError).toBe(true);
+  const text = r.content[0].text;
+  expect(text).toMatch(/^refused:/);
+  expect(text).toMatch(/holds replies by version only/);
+  expect(text).toMatch(/send it live with release\.commits once the release that contains them runs/i);
+  expect(requests).toHaveLength(0);
+});
+
+test('a held reply with release is sent on an app above 0.142.0', async () => {
+  const { dir, inside } = await makeSmRepo('0.143.0');
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'scheduled' }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir }, { appVersion: '0.143.0' });
+  const r = await call(handleCallTool, {
+    message: 'Live in {version}.', outcome: 'done', deliverWhen: { appVersionAbove: '0.143.0' }, release: { commits: [inside] },
+  });
+  expect(r.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body.message).toBe('Live in {version}.');
+  expect(requests[0].body.release).toEqual({ commits: [inside] });
+});
+
+test('a live release reply with no running app version is refused', async () => {
+  const { dir, inside } = await makeSmRepo('0.143.0');
+  const { handleCallTool, requests } = await setup({ ok: true }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir });
+  const r = await call(handleCallTool, { message: 'Live in {version}.', outcome: 'done', release: { commits: [inside] } });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toMatch(/^refused:.*version/);
+  expect(requests).toHaveLength(0);
+});
+
+test('a live release reply whose commit is not in the running release is refused', async () => {
+  const { dir, outside } = await makeSmRepo('0.143.0', { extraCommit: true });
+  const { handleCallTool, requests } = await setup({ ok: true }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir }, { appVersion: '0.143.0' });
+  const r = await call(handleCallTool, { message: 'Live in {version}.', outcome: 'done', release: { commits: [outside] } });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toMatch(/^refused:/);
+  expect(r.content[0].text).toContain('does not contain commit');
+  expect(requests).toHaveLength(0);
+});
+
+test('a live release reply whose tag is missing is refused', async () => {
+  const { dir, inside } = await makeSmRepo('0.143.0');
+  const { handleCallTool, requests } = await setup({ ok: true }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir }, { appVersion: '0.144.0' });
+  const r = await call(handleCallTool, { message: 'Live in {version}.', outcome: 'done', release: { commits: [inside] } });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toMatch(/^refused:.*v0\.144\.0/);
+  expect(requests).toHaveLength(0);
+});
+
+test('a live release reply naming another Session Manager version is refused', async () => {
+  const { dir, inside } = await makeSmRepo('0.143.0');
+  const { handleCallTool, requests } = await setup({ ok: true }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir }, { appVersion: '0.143.0' });
+  const r = await call(handleCallTool, { message: 'Fixed in Session Manager 0.144.0.', outcome: 'done', release: { commits: [inside] } });
+  expect(r.isError).toBe(true);
+  expect(r.content[0].text).toMatch(/^refused:/);
+  expect(r.content[0].text).toContain('0.144.0');
+  expect(requests).toHaveLength(0);
+});
+
+test('a verified live release reply is forwarded with {version} filled by the running version', async () => {
+  const { dir, inside } = await makeSmRepo('0.143.0');
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'delivered' }, { SM_CHAT_SESSION_ID: 's', SM_PROJECT_ROOT: dir }, { appVersion: '0.143.0' });
+  const r = await call(handleCallTool, {
+    message: 'Live in Session Manager {version} ({version}).', outcome: 'done', release: { commits: [inside.slice(0, 10)] },
+  });
+  expect(r.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body.message).toBe('Live in Session Manager 0.143.0 (0.143.0).');
+  expect(requests[0].body.release).toEqual({ commits: [inside.slice(0, 10)] });
+});

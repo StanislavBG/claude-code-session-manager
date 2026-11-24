@@ -15,6 +15,7 @@ import {
   parseUnicodeRange,
   sampleCodePoints,
 } from './fontCss';
+import { TIMED_OUT, beforeDeadline, fetchBytesCached } from './fontFetch';
 
 const seenFontUrls = new Set<string>();
 let watching = false;
@@ -211,32 +212,12 @@ export interface ApiFontCssOptions {
   doc?: Document;
 }
 
-const FETCH_TIMEOUT_MS = 3000;
 const DEFAULT_BUDGET_MS = 3000;
 const PROBE_PREFIX = '__smfw_probe_';
 
-const bytesCache = new Map<string, Promise<ArrayBuffer | null>>();
-
-/** fetch() a font file once per URL (cors, same-origin credentials, 3 s timeout); null on any failure. */
+/** fetch() a font file (cors, same-origin credentials, 3 s timeout, cached on success); null on any failure. */
 function defaultFetchBytes(url: string): Promise<ArrayBuffer | null> {
-  let p = bytesCache.get(url);
-  if (!p) {
-    p = (async () => {
-      const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timer = setTimeout(() => ctl?.abort(), FETCH_TIMEOUT_MS);
-      try {
-        const res = await fetch(url, { mode: 'cors', credentials: 'same-origin', signal: ctl?.signal });
-        if (!res.ok) return null;
-        return await res.arrayBuffer();
-      } catch {
-        return null;
-      } finally {
-        clearTimeout(timer);
-      }
-    })();
-    bytesCache.set(url, p);
-  }
-  return p;
+  return fetchBytesCached(url, 'same-origin');
 }
 
 type FaceCacheEntry = { dataUrl: string } | { missAtUrlCount: number };
@@ -244,24 +225,6 @@ type FaceCacheEntry = { dataUrl: string } | { missAtUrlCount: number };
 /** Per page FontFace: its matched data URL, or a miss and how many font URLs were known then. */
 const faceCache = new WeakMap<FontFace, FaceCacheEntry>();
 let probeSeq = 0;
-
-const TIMED_OUT: unique symbol = Symbol('timed-out');
-type TimedOut = typeof TIMED_OUT;
-
-/** Resolves `p`, or TIMED_OUT once `deadline` (Date.now() ms) passes. Never rejects. */
-function beforeDeadline<T>(p: Promise<T>, deadline: number): Promise<T | TimedOut> {
-  const left = deadline - Date.now();
-  if (left <= 0) return Promise.resolve<T | TimedOut>(TIMED_OUT);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<TimedOut>((resolve) => {
-    timer = setTimeout(() => resolve(TIMED_OUT), left);
-  });
-  const settled = p.then(
-    (v): T | TimedOut => v,
-    (): T | TimedOut => TIMED_OUT,
-  );
-  return Promise.race<T | TimedOut>([settled, timeout]).finally(() => clearTimeout(timer));
-}
 
 /** The family as the page wrote it, minus one pair of matching quotes (case kept). */
 function displayFamily(name: string): string {

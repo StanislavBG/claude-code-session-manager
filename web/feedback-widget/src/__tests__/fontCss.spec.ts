@@ -10,6 +10,8 @@ import {
   parseUnicodeRange,
   sampleCodePoints,
   splitFamilyList,
+  unescapeCss,
+  URL_RE,
 } from '../fontCss';
 
 const FULL: Array<[number, number]> = [[0, 0x10ffff]];
@@ -317,5 +319,14 @@ describe('fontFaceRulesFromCss', () => {
     expect(fontFaceRulesFromCss('a { color: red }', 'https://x.test/', doc)).toEqual([]);
     // Real jsdom: createHTMLDocument <style> has no sheet → nothing, never a throw.
     expect(fontFaceRulesFromCss(css, 'https://x.test/', document)).toEqual([]);
+  });
+});
+
+describe('URL_RE / unescapeCss', () => {
+  it('match every url() quoting style and unescape CSS escapes', () => {
+    const css = `src:url("a\\2e woff2"),url('b.woff'),url( c.ttf )`;
+    const raws = Array.from(css.matchAll(URL_RE), (m) => unescapeCss(m[1] ?? m[2] ?? m[3] ?? ''));
+    expect(raws).toEqual(['a.woff2', 'b.woff', 'c.ttf']);
+    expect(unescapeCss('\\"x\\)')).toBe('"x)');
   });
 });

@@ -9,12 +9,11 @@
 // Read-only over the live page: no <style>/<link> element, no adoptedStyleSheets change
 // (strict CSP, see capture.ts header). Parsing happens in a detached document (fontCss.ts).
 
-import { bytesToDataUrl, fontFaceRulesFromCss, isFontBytes, normalizeFamily } from './fontCss';
+import { URL_RE, bytesToDataUrl, fontFaceRulesFromCss, isFontBytes, normalizeFamily, unescapeCss } from './fontCss';
+import { fetchBytesCached, fetchTextCached } from './fontFetch';
 import { widgetFontSheet } from './ui/tokens';
 
 const FONT_FACE_RULE = 5; // CSSRule.FONT_FACE_RULE — by number, works across realms.
-const FETCH_TIMEOUT_MS = 3000;
-const URL_RE = /url\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^)"'\s]*))\s*\)/gi;
 
 type RuleLike = {
   type?: number;
@@ -32,12 +31,6 @@ function readRules(sheet: SheetLike | null | undefined): ArrayLike<RuleLike> | n
   } catch {
     return null; // cross-origin without CORS: SecurityError
   }
-}
-
-function unescapeCss(s: string): string {
-  return s.replace(/\\([0-9a-f]{1,6})\s?|\\(.)/gi, (_m, hex?: string, ch?: string) =>
-    hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)) : (ch ?? ''),
-  );
 }
 
 function urlsIn(text: string, base: string): string[] {
@@ -121,40 +114,8 @@ export function declaredFontUrls(doc: Document = document): Set<string> {
 
 type Fetcher<T> = (url: string) => Promise<T | null>;
 
-function cachedFetch<T>(cache: Map<string, Promise<T | null>>, read: (res: Response) => Promise<T>): Fetcher<T> {
-  return (url) => {
-    let p = cache.get(url);
-    if (!p) {
-      p = (async () => {
-        if (typeof fetch !== 'function') return null;
-        const ctl = typeof AbortController === 'function' ? new AbortController() : null;
-        const timer = setTimeout(() => ctl?.abort(), FETCH_TIMEOUT_MS);
-        try {
-          const res = await fetch(url, { mode: 'cors', credentials: 'omit', signal: ctl?.signal });
-          if (!res.ok) return null;
-          return await read(res);
-        } catch {
-          return null;
-        } finally {
-          clearTimeout(timer);
-        }
-      })();
-      cache.set(url, p);
-    }
-    return p;
-  };
-}
-
-const textCache = new Map<string, Promise<string | null>>();
-const bytesCache = new Map<string, Promise<ArrayBuffer | null>>();
-const defaultFetchText = cachedFetch(textCache, (r) => r.text());
-const defaultFetchBytes = cachedFetch(bytesCache, (r) => r.arrayBuffer());
-
-/** Test hook: forget the default fetchers' cached responses. */
-export function resetFontSheetCacheForTests(): void {
-  textCache.clear();
-  bytesCache.clear();
-}
+const defaultFetchText: Fetcher<string> = (url) => fetchTextCached(url);
+const defaultFetchBytes: Fetcher<ArrayBuffer> = (url) => fetchBytesCached(url, 'omit');
 
 function safe<T>(fn: Fetcher<T>): Fetcher<T> {
   return async (url) => {

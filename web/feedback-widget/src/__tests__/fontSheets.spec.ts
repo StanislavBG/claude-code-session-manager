@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { coveredFamilies, declaredFontUrls, resetFontSheetCacheForTests, sheetFontCss } from '../fontSheets';
+import { resetFontFetchCacheForTests } from '../fontFetch';
+import { coveredFamilies, declaredFontUrls, sheetFontCss } from '../fontSheets';
 import { FONT_FACES, fontFaceCss, loadFonts, resetTokensForTests, widgetFontSheet } from '../ui/tokens';
 
 // jsdom has constructable CSSStyleSheet but no document.adoptedStyleSheets; shim it so
@@ -21,7 +22,7 @@ beforeAll(() => {
 
 afterEach(() => {
   resetTokensForTests();
-  resetFontSheetCacheForTests();
+  resetFontFetchCacheForTests();
   document.adoptedStyleSheets = [];
   vi.unstubAllGlobals();
 });

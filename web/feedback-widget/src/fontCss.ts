@@ -269,10 +269,10 @@ export interface ParsedFontFace {
   urls: string[];
 }
 
-const URL_RE = /url\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^)"'\s]*))\s*\)/gi;
+export const URL_RE = /url\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^)"'\s]*))\s*\)/gi;
 const FONT_FACE_RULE = 5; // CSSRule.FONT_FACE_RULE — compared by number, works across realms.
 
-function unescapeCss(s: string): string {
+export function unescapeCss(s: string): string {
   return s.replace(/\\([0-9a-f]{1,6})\s?|\\(.)/gi, (_m, hex: string | undefined, ch: string | undefined) =>
     hex ? String.fromCodePoint(Math.min(parseInt(hex, 16), MAX_CODE_POINT)) : (ch ?? ''),
   );

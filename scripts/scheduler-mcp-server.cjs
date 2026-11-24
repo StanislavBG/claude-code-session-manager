@@ -16,6 +16,8 @@
  *   project_demo_video_write({ cwd?, html? | htmlPath? }) -> POST /admin/project-home/demo-video/write
  *   project_page_write({ cwd?, pageId, title, topic?, html? | htmlPath? }) -> POST /admin/project-home/pages/write
  *   project_matrix_read({ cwd? }) -> POST /admin/project-home/matrix/read
+ *   artifact_publish({ path, title?, kind? }) -> POST /admin/artifacts/publish
+ *   artifact_list({ cwd? }) -> GET  /admin/artifacts?cwd=<encoded>
  *   project_matrix_write({ cwd?, matrix? | matrixPath?, model? }) -> POST /admin/project-home/matrix/write
  *   project_character_write({ cwd?, json, js? | jsPath?, replace? }) -> POST /admin/project-home/character/write
  *   project_video_write({ cwd?, videoId, title, kind, lengthS, html? | htmlPath?, meta?, mp4Path?, posterPath? }) -> POST /admin/project-home/videos/write
@@ -910,6 +912,29 @@ const TOOLS = [
         htmlPath: { type: 'string', description: 'Absolute path to a local .html/.htm file holding the document (same rules as html). Give exactly one of html / htmlPath.' },
       },
       required: ['pageId', 'title'],
+    },
+  },
+  {
+    name: 'artifact_publish',
+    description: descriptionFor('artifact_publish'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path of the file to publish: absolute (worktree, project or /tmp), or relative to your Epic worktree.' },
+        title: { type: 'string', description: 'Optional: human label shown in File Explorer > Artifacts.' },
+        kind: { type: 'string', description: 'Optional: file kind hint (e.g. image, audio, video, report).' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'artifact_list',
+    description: descriptionFor('artifact_list'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+      },
     },
   },
   {
@@ -1868,6 +1893,24 @@ async function handleCallTool(request) {
       const body = { cwd, pageId: args.pageId, title: args.title, html: loaded.html };
       if (typeof args.topic === 'string' && args.topic) body.topic = args.topic;
       const result = await adminRequest('POST', '/admin/project-home/pages/write', body);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'artifact_publish') {
+      if (!args || typeof args.path !== 'string' || !args.path) return errorResult('missing required argument: path');
+      // Session hints as project_page_write sends them: cwd from SM_PROJECT_ROOT
+      // (resolveCwdArg), plus the chat session id so the route finds this Epic.
+      const body = { path: args.path };
+      if (typeof args.title === 'string' && args.title) body.title = args.title;
+      if (typeof args.kind === 'string' && args.kind) body.kind = args.kind;
+      body.cwd = resolveCwdArg(null);
+      if (process.env.SM_CHAT_SESSION_ID) body.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
+      const result = await adminRequest('POST', '/admin/artifacts/publish', body);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'artifact_list') {
+      const qs = new URLSearchParams({ cwd: resolveCwdArg(args) });
+      if (process.env.SM_CHAT_SESSION_ID) qs.set('originClaudeSessionId', process.env.SM_CHAT_SESSION_ID);
+      const result = await adminRequest('GET', `/admin/artifacts?${qs.toString()}`);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'project_matrix_read') {

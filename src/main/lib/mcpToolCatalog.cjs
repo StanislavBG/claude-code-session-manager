@@ -24,7 +24,7 @@ const { MISS_KINDS } = require('./scheduler/validatorVerdictSchema.cjs');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
-  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'feedback-widget', 'epics', 'agents', 'tasks']),
+  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback', 'feedback-widget', 'epics', 'agents', 'tasks', 'artifacts']),
   purpose: z.string().min(1),
   summary: z.string().min(10).max(90).regex(/^[^|`\n]+$/),
   whenToUse: z.string().min(1),
@@ -1005,6 +1005,34 @@ const MCP_TOOL_CATALOG = [
       + 'A TikTok takes an optional series brief path as its target, a Marketing an optional landing page URL. '
       + 'TikTok and Marketing save an MP4 and poster with project_video_write; a persona saved with project_character_write hosts every Demo Video unless Character is off, '
       + 'and its cast members speak their own lines in their own voices.',
+  },
+  {
+    name: 'artifact_publish',
+    group: 'artifacts',
+    purpose: "Copy one file you made — anywhere: your Epic worktree, the project, or /tmp — into this project's Artifacts store "
+      + "via the session-manager app's admin API, and get the stored path back (`storedPath`, plus `revealPath` relative to the project).",
+    summary: 'Publish a file for review.',
+    whenToUse: 'Call it for every file a human should review: renders, audio takes, reports, contact sheets, screenshots, exports. '
+      + 'Publish each file the moment it is done, then name the returned storedPath in your reply. `path` is absolute, or relative '
+      + 'to your Epic worktree; `title` is the human label; `kind` is an optional file kind hint.',
+    whenNotToUse: 'Do not use for scratch or intermediate files nobody needs to see, for Project Home pages or videos (use '
+      + 'project_page_write / project_video_write), or to move source code — commit that instead. Refused inside a scheduled job '
+      + 'with no Epic session: a job writes to SM_ARTIFACTS_DIR and is harvested for you.',
+    exampleArgs: { path: '/tmp/renders/hero-v3.png', title: 'Hero render v3' },
+    notes: 'The stored file appears in File Explorer > Artifacts, grouped under this Epic — review outputs for a human go here, '
+      + 'not only in a worktree a human cannot browse. The calling session (SM_CHAT_SESSION_ID) and project root (SM_PROJECT_ROOT) '
+      + 'are sent for you; they cannot be passed in. Publishing never moves or deletes the source file.',
+  },
+  {
+    name: 'artifact_list',
+    group: 'artifacts',
+    purpose: "List the files in this project's Artifacts store (title, kind, producing Epic, stored path) via the session-manager app's admin API.",
+    summary: 'List stored artifacts.',
+    whenToUse: 'Use to check what has already been published (avoid re-publishing the same take) or to find the stored path of an earlier artifact.',
+    whenNotToUse: 'Do not use to publish — use artifact_publish. Do not read the artifacts folder from disk yourself.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'These are the same files a human sees in File Explorer > Artifacts; review outputs for a human go there via artifact_publish.',
   },
 ];
 

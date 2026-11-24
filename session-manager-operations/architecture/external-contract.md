@@ -437,6 +437,8 @@ only (`to` one of `awaiting_approval`, `open`, `closed`; no `blockedKind`). Thos
 so they do not appear after upgrading. Versions after 0.142.0 serve the fine-grained rows again, and rows
 written by 0.141.0's watcher stay readable. A reader that followed Epics on 0.142.0 should, after
 upgrading, **re-read the states** it cares about with `GET /admin/epic`, as for `gap: true`.
+The contract version stays 1: every `to` word 0.142.0 served is a v1 word, so no v1 reader breaks, and the restore brings back 0.141.0's shape.
+The first release after 0.142.0 states the same in its release notes ([`release-notes/after-v0.142.0.md`](../../release-notes/after-v0.142.0.md)).
 
 ### `GET /admin/events`
 

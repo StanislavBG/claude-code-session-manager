@@ -404,9 +404,7 @@ export function App(props: AppProps) {
 
   return (
     <>
-      {config.launcher !== 'hidden' && (
-        <Launcher state={state} capturing={capturing} onOpen={requestOpen} />
-      )}
+      <Launcher state={state} variant={config.launcher} capturing={capturing} onOpen={requestOpen} />
       <CaptureChrome state={state} dispatch={dispatch} capture={capture} toolbar={config.toolbar}>
         <MarksLayer
           marks={marks.marks}

@@ -97,6 +97,37 @@ describe('WebsitesList in DevicePicker', () => {
     expect(screen.queryByTestId('websites-body')).toBeNull();
   });
 
+  it.each([401, 403])('clears the list and hides the section when an expand-reload is refused (%i)', async (status) => {
+    vi.mocked(getBoxes).mockResolvedValueOnce({ ok: true, data: [box()] });
+    renderPicker();
+    const toggle = await screen.findByTestId('websites-toggle');
+    expect(toggle).toHaveTextContent('Websites (1)');
+    vi.mocked(getBoxes).mockResolvedValueOnce({ ok: false, status, error: 'unauthorized' });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(getBoxes).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId('websites-list')).toBeNull());
+    expect(screen.queryByText('Marketing site')).toBeNull();
+  });
+
+  it('disables the retry row while a load is in flight, so repeated taps send one request', async () => {
+    vi.mocked(getBoxes).mockResolvedValueOnce({ ok: false, status: 500, error: 'http_500' });
+    renderPicker();
+    const toggle = await screen.findByTestId('websites-toggle');
+    expect(toggle).not.toBeDisabled();
+    let release: () => void = () => {};
+    vi.mocked(getBoxes).mockImplementationOnce(
+      () => new Promise((r) => { release = () => r({ ok: true, data: [box()] }); }),
+    );
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByTestId('websites-toggle')).toBeDisabled());
+    fireEvent.click(screen.getByTestId('websites-toggle'));
+    fireEvent.click(screen.getByTestId('websites-toggle'));
+    expect(getBoxes).toHaveBeenCalledTimes(2);
+    await act(async () => { release(); });
+    expect(await screen.findByTestId('website-row-box1')).toBeInTheDocument();
+    expect(getBoxes).toHaveBeenCalledTimes(2);
+  });
+
   it('reloads the list each time it is expanded', async () => {
     vi.mocked(getBoxes).mockResolvedValueOnce({ ok: true, data: [box()] });
     renderPicker();

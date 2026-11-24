@@ -10,12 +10,18 @@
 
 import { domToCanvas } from 'modern-screenshot';
 import { HOST_ID } from './host';
+import { normalizeFamily, splitFamilyList } from './fontCss';
+import { apiFontCss } from './fontProbe';
+import { coveredFamilies, declaredFontUrls, sheetFontCss } from './fontSheets';
 
 export const MASK_COLOR = '#1a1612';
 export const PLACEHOLDER_COLOR = '#ede6d6';
 export const CAPTURE_TIMEOUT_MS = 8000;
 export const MASK_SELECTOR = 'input[type=password], [data-feedback-mask]';
 const MAX_ERROR_CHARS = 200;
+/** Font-embedding step's budget inside CAPTURE_TIMEOUT_MS (leaves 5 s for modern-screenshot). */
+export const FONT_BUDGET_MS = 3000;
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export interface CaptureOptions {
   /** The widget's host element; hidden while rasterising. Defaults to #feedback-widget-host. */
@@ -96,6 +102,149 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/**
+ * Normalised families the page draws with: the computed font-family of the parent of every
+ * non-whitespace text node under `root`, plus every input, textarea, select and button.
+ * Anything inside `hostEl` is skipped. Generic families are dropped (splitFamilyList).
+ */
+export function usedFamilies(root: Element, hostEl: HTMLElement | null): Set<string> {
+  const out = new Set<string>();
+  const seen = new Set<Element>();
+  const add = (el: Element | null) => {
+    if (!el || seen.has(el)) return;
+    seen.add(el);
+    if (hostEl && hostEl.contains(el)) return;
+    try {
+      const value = el.ownerDocument.defaultView?.getComputedStyle(el).fontFamily ?? '';
+      for (const f of splitFamilyList(value)) out.add(f);
+    } catch {
+      // detached or exotic node — skip it
+    }
+  };
+  try {
+    const doc = root.ownerDocument;
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!n.nodeValue || !n.nodeValue.trim()) continue;
+      add(n.parentElement);
+    }
+    root.querySelectorAll('input, textarea, select, button').forEach((el) => add(el));
+  } catch {
+    // never throw from capture
+  }
+  return out;
+}
+
+/** Families with at least one face in document.fonts (normalised). */
+function fontSetFamilies(): Set<string> {
+  const out = new Set<string>();
+  try {
+    document.fonts?.forEach((f) => {
+      try {
+        out.add(normalizeFamily(f.family));
+      } catch {
+        // broken face — skip
+      }
+    });
+  } catch {
+    // no FontFaceSet
+  }
+  return out;
+}
+
+const TIMED_OUT = Symbol('timed-out');
+
+function beforeDeadline<T>(p: Promise<T>, deadline: number): Promise<T | typeof TIMED_OUT> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(TIMED_OUT), Math.max(0, deadline - Date.now()));
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(t);
+        resolve(TIMED_OUT);
+      },
+    );
+  });
+}
+
+const warnedFontSets = new Set<string>();
+
+/** Test hook: forget which missing-font sets were already warned about. */
+export function resetFontWarningsForTests(): void {
+  warnedFontSets.clear();
+}
+
+function warnMissing(missing: string[]): void {
+  if (!missing.length) return;
+  const key = missing.join(', ');
+  if (warnedFontSets.has(key)) return;
+  warnedFontSets.add(key);
+  try {
+    // console.warn, never console.error: the widget's buffers record errors into reports.
+    console.warn(
+      `[feedback-widget] screenshot fonts not embedded: ${key}. Declare them with @font-face in a stylesheet the page can read.`,
+    );
+  } catch {
+    // console unavailable
+  }
+}
+
+/**
+ * @font-face CSS for the families the page uses that no readable stylesheet declares
+ * (modern-screenshot cannot see them): sheetFontCss first, then apiFontCss for the rest.
+ * `missing` = families still unresolved, sorted. Never rejects; resolves within `budgetMs`.
+ */
+export async function extraFontCss(
+  hostEl: HTMLElement | null,
+  budgetMs: number = FONT_BUDGET_MS,
+): Promise<{ cssText: string; missing: string[] }> {
+  const deadline = Date.now() + Math.max(0, budgetMs);
+  const parts: string[] = [];
+  let left = new Set<string>();
+  try {
+    const covered = coveredFamilies();
+    const inFontSet = fontSetFamilies();
+    for (const f of usedFamilies(document.documentElement, hostEl)) {
+      if (!covered.has(f) && inFontSet.has(f)) left.add(f);
+    }
+    if (!left.size) return { cssText: '', missing: [] };
+
+    const exclude = new Set<string>();
+    try {
+      for (const u of declaredFontUrls()) exclude.add(u);
+    } catch {
+      // unreadable sheets — nothing to exclude
+    }
+
+    const sheet = await beforeDeadline(Promise.resolve().then(() => sheetFontCss(new Set(left))), deadline);
+    if (sheet !== TIMED_OUT) {
+      if (sheet.cssText) parts.push(sheet.cssText);
+      left = new Set([...left].filter((f) => !sheet.families.has(f)));
+      for (const u of sheet.urls) exclude.add(u);
+    }
+
+    const remaining = deadline - Date.now();
+    if (left.size && remaining > 0) {
+      const api = await beforeDeadline(
+        Promise.resolve().then(() => apiFontCss(new Set(left), { exclude, budgetMs: remaining })),
+        deadline,
+      );
+      if (api !== TIMED_OUT) {
+        if (api.cssText) parts.push(api.cssText);
+        left = new Set([...left].filter((f) => !api.families.has(f)));
+      }
+    }
+  } catch {
+    // fall through with what we have
+  }
+  const missing = [...left].sort();
+  warnMissing(missing);
+  return { cssText: parts.join('\n'), missing };
+}
+
 async function rasterise(
   vw: number,
   vh: number,
@@ -105,6 +254,7 @@ async function rasterise(
   const sx = window.scrollX;
   const sy = window.scrollY;
   const root = document.documentElement;
+  const { cssText: fontCss } = await extraFontCss(hostEl);
   // Size the clone to the viewport and shift it by the scroll offset, so the SVG
   // foreignObject window shows exactly what is on screen.
   const raw = await domToCanvas(root, {
@@ -120,6 +270,16 @@ async function rasterise(
         cloned.style.translate = `${sx}px ${sy}px`;
       }
     },
+    // Fonts modern-screenshot cannot read go into the serialized SVG — never the page DOM.
+    ...(fontCss
+      ? {
+          onCreateForeignObjectSvg: (svg: SVGSVGElement) => {
+            const style = svg.ownerDocument.createElementNS(SVG_NS, 'style');
+            style.appendChild(svg.ownerDocument.createTextNode(fontCss));
+            svg.insertBefore(style, svg.firstChild);
+          },
+        }
+      : {}),
   });
   return raw;
 }

@@ -1,5 +1,6 @@
 // Entry of the one-file IIFE bundle (dist/feedback.js).
 import { installBuffers } from './buffers';
+import { watchFontResources } from './fontProbe';
 import { getHost, getReporter, init, resolveConfig, type FeedbackApi } from './host';
 import { startOutbox } from './outbox';
 import { mountApp } from './ui/App';
@@ -11,6 +12,8 @@ export const RELAY_BASE = 'https://bilko.run/api/sm-relay';
 export const buffers = installBuffers({
   ownUrlPrefixes: [RELAY_BASE, resolveConfig().endpoint],
 });
+// Records font URLs from Resource Timing so a capture can match FontFace-API faces to files.
+watchFontResources();
 
 /** Mounts App inside host.ts's shadow root and wires window.Feedback to it. */
 export function start(): boolean {

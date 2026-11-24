@@ -60,6 +60,7 @@ function registerSiteFeedbackHandlers(deps = {}) {
   handle('siteFeedback:inbox-image', s.siteFeedbackInboxImage, (p) => service.getImage(p));
   handle('siteFeedback:inbox-set-status', s.siteFeedbackInboxSetStatus, (p) => service.setStatus(p));
   handle('siteFeedback:inbox-link-epic', s.siteFeedbackInboxLinkEpic, (p) => service.linkEpic(p));
+  handle('siteFeedback:inbox-remove', s.siteFeedbackInboxGet, (p) => service.removeItem(p));
   handle('siteFeedback:drain-now', s.siteFeedbackDrainNow, () => service.drainNow());
 }
 

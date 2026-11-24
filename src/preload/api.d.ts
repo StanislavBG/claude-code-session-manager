@@ -3224,6 +3224,8 @@ export interface SessionManagerAPI {
     inboxLinkEpic: (p: SiteFeedbackInboxLinkEpicInput) => Promise<
       SiteFeedbackResult<{ meta: SiteFeedbackItemMeta }>
     >;
+    /** Deletes one stored item (report, images, meta); not_found when it was already gone. */
+    inboxRemove: (p: SiteFeedbackInboxGetInput) => Promise<SiteFeedbackResult<{ hostId: string }>>;
     drainNow: () => Promise<SiteFeedbackResult<SiteFeedbackDrainResult>>;
   };
   telemetry: {

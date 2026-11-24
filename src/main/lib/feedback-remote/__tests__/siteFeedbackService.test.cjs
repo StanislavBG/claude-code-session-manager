@@ -273,6 +273,11 @@ test('inbox actions delegate to siteFeedbackInbox', async () => {
 
   expect(await svc.linkEpic({ cwd, hostId: 'FB-ABCDE', epicId: 'epic-123' })).toMatchObject({ ok: true, meta: { epicId: 'epic-123' } });
   expect(await svc.linkEpic({ cwd, hostId: 'FB-ABCDE', epicId: '../x' })).toMatchObject({ ok: false, error: 'invalid_input' });
+
+  expect(await svc.removeItem({ cwd, hostId: 'FB-NOPNG' })).toEqual({ ok: true, hostId: 'FB-NOPNG' });
+  expect(await svc.getItem({ cwd, hostId: 'FB-NOPNG' })).toMatchObject({ ok: false, error: 'not_found' });
+  expect(await svc.removeItem({ cwd, hostId: 'FB-NOPNG' })).toMatchObject({ ok: false, error: 'not_found' });
+  expect(await svc.removeItem({ cwd, hostId: '../etc' })).toMatchObject({ ok: false, error: 'invalid_input' });
 });
 
 test('drainNow and startDrainLoop delegate to feedbackBoxDrain with the service deps', async () => {

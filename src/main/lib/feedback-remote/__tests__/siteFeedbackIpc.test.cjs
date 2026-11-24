@@ -37,6 +37,8 @@ const CASES = {
   'siteFeedback:inbox-link-epic': ['linkEpic', { cwd: CWD, hostId: HOST, epicId: 'abc-123' },
     { cwd: CWD, hostId: HOST, epicId: 'abc-123' },
     [{ cwd: CWD, hostId: HOST }, { cwd: CWD, hostId: HOST, epicId: '../x' }, { cwd: CWD, hostId: HOST, epicId: '' }]],
+  'siteFeedback:inbox-remove': ['removeItem', { cwd: CWD, hostId: HOST }, { cwd: CWD, hostId: HOST },
+    [{ cwd: CWD }, { cwd: CWD, hostId: '../etc' }, { cwd: CWD, hostId: HOST, force: true }]],
   'siteFeedback:drain-now': ['drainNow', undefined, undefined, [{ boxId: BOX }, 'now']],
 };
 
@@ -53,7 +55,7 @@ function setup(overrides = {}) {
 }
 
 describe('siteFeedbackIpc', () => {
-  it('registers exactly the eleven siteFeedback:* channels', () => {
+  it('registers exactly the twelve siteFeedback:* channels', () => {
     const { handlers } = setup();
     expect([...handlers.keys()].sort()).toEqual(Object.keys(CASES).sort());
   });

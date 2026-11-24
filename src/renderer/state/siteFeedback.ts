@@ -83,6 +83,8 @@ interface SiteFeedbackState {
     note?: string | null,
   ) => Promise<SiteFeedbackResult<{ meta: SiteFeedbackItemMeta }>>
   linkEpic: (cwd: string, hostId: string, epicId: string) => Promise<SiteFeedbackResult<{ meta: SiteFeedbackItemMeta }>>
+  /** Deletes one item; drops it from `items` and clears the selection when it was open. */
+  removeItem: (cwd: string, hostId: string) => Promise<SiteFeedbackResult<{ hostId: string }>>
   /** Drains every box on the relay; reloads this cwd's widgets and items afterwards. */
   drainNow: (cwd: string) => Promise<SiteFeedbackResult<SiteFeedbackDrainResult>>
   clearError: (cwd: string) => void
@@ -216,6 +218,12 @@ export const useSiteFeedback = create<SiteFeedbackState>((set, get) => {
       call(cwd, () => api().inboxLinkEpic({ cwd, hostId, epicId }), (r, cur) => ({
         items: cur.items.map((it) => applyMeta(it, r.meta)),
         selected: cur.selected && cur.selected.meta.hostId === hostId ? { ...cur.selected, meta: r.meta } : cur.selected,
+      })),
+
+    removeItem: (cwd, hostId) =>
+      call(cwd, () => api().inboxRemove({ cwd, hostId }), (_r, cur) => ({
+        items: cur.items.filter((it) => it.hostId !== hostId),
+        ...(cur.selectedHostId === hostId ? { selectedHostId: null, selected: null } : {}),
       })),
 
     drainNow: async (cwd) => {

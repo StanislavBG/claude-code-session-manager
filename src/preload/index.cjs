@@ -308,6 +308,7 @@ contextBridge.exposeInMainWorld('api', {
     inboxImage: (p) => ipcRenderer.invoke('siteFeedback:inbox-image', p),
     inboxSetStatus: (p) => ipcRenderer.invoke('siteFeedback:inbox-set-status', p),
     inboxLinkEpic: (p) => ipcRenderer.invoke('siteFeedback:inbox-link-epic', p),
+    inboxRemove: (p) => ipcRenderer.invoke('siteFeedback:inbox-remove', p),
     drainNow: () => ipcRenderer.invoke('siteFeedback:drain-now'),
   },
   // Diagnostic only — no handler is registered unless the main process was

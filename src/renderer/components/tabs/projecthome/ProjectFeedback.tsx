@@ -1,7 +1,7 @@
 /**
  * ProjectFeedback — Project Home ▸ Feedback: one project's website feedback, beside the
  * project it belongs to. Two sections: Website widget (this cwd's relay boxes, managed by ProjectFeedbackWidgetCard) and Inbox
- * (the items those boxes delivered). A shell today — later PRDs fill each section in.
+ * (the items those boxes delivered, read in full in ProjectFeedbackInbox).
  *
  * Data comes only from the `siteFeedback` store (`state/siteFeedback.ts`): widgets and items
  * load on mount and whenever `cwd` changes. A failed load surfaces through the toast channel;
@@ -12,6 +12,7 @@ import { useEffect } from 'react'
 import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
 import { toast } from '../../../state/toast'
 import { ProjectFeedbackWidgetCard } from './ProjectFeedbackWidgetCard'
+import { ProjectFeedbackInbox } from './ProjectFeedbackInbox'
 import type { SiteFeedbackResult } from '../../../../preload/api'
 
 function toastFailure<T>(r: SiteFeedbackResult<T>): void {
@@ -55,6 +56,7 @@ export function ProjectFeedback({ cwd }: { cwd: string }) {
               ? 'No feedback yet'
               : `${state.items.length} item${state.items.length === 1 ? '' : 's'} · ${openCount} open`}
         </p>
+        <ProjectFeedbackInbox cwd={cwd} />
       </section>
     </div>
   )

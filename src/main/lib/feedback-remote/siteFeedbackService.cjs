@@ -385,6 +385,19 @@ function createSiteFeedbackService(deps = {}) {
     }
   }
 
+  /** Delete one stored item (its report, images and meta). @param {{ cwd: string, hostId: string }} p */
+  async function removeItem(p) {
+    const { cwd, hostId } = p || /** @type {any} */ ({});
+    if (!nonEmpty(cwd)) return failure('invalid_input', 'cwd is required');
+    try {
+      const r = await inbox().remove(cwd, hostId);
+      if (!r.removed) return failure('not_found', `No feedback item ${hostId}`);
+      return { ok: /** @type {const} */ (true), hostId };
+    } catch (e) {
+      return failure('invalid_input', errMessage(e));
+    }
+  }
+
   /** One drain pass now (shares a pass already running). */
   async function drainNow() {
     try {
@@ -411,7 +424,7 @@ function createSiteFeedbackService(deps = {}) {
 
   return {
     createWidget, listWidgets, updateWidget, deleteWidget, getSnippet,
-    listItems, getItem, getImage, setStatus, linkEpic, drainNow,
+    listItems, getItem, getImage, setStatus, linkEpic, removeItem, drainNow,
     startDrainLoop, stopDrainLoop,
   };
 }

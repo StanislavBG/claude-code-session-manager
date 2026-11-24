@@ -31,6 +31,7 @@ function installApi() {
     inboxImage: vi.fn(),
     inboxSetStatus: vi.fn(),
     inboxLinkEpic: vi.fn(),
+    inboxRemove: vi.fn(),
     drainNow: vi.fn().mockResolvedValue({
       ok: true, stored: 2, duplicates: 0, rejected: 0, goneBoxes: [], heldBoxes: [],
     }),
@@ -227,6 +228,23 @@ describe('siteFeedback store', () => {
     expect(sf.inboxLinkEpic).toHaveBeenLastCalledWith({ cwd: CWD, hostId: 'FB-AAAAA', epicId: 'e1' })
     expect(slice().items[0].epicId).toBe('e1')
     expect(slice().error).toBeNull()
+  })
+
+  it('removeItem drops the item and its selection; failure keeps it', async () => {
+    const sf = installApi()
+    const { s, slice } = await load()
+    await s.getState().loadItems(CWD)
+    sf.inboxRemove.mockResolvedValueOnce(fail('gone'))
+    expect((await s.getState().removeItem(CWD, 'FB-AAAAA')).ok).toBe(false)
+    expect(slice().items).toHaveLength(1)
+    expect(slice().error).toBe('gone')
+    await s.getState().openItem(CWD, 'FB-AAAAA')
+    sf.inboxRemove.mockResolvedValueOnce({ ok: true, hostId: 'FB-AAAAA' })
+    expect((await s.getState().removeItem(CWD, 'FB-AAAAA')).ok).toBe(true)
+    expect(sf.inboxRemove).toHaveBeenLastCalledWith({ cwd: CWD, hostId: 'FB-AAAAA' })
+    expect(slice().items).toHaveLength(0)
+    expect(slice().selectedHostId).toBeNull()
+    expect(slice().selected).toBeNull()
   })
 
   it('drainNow stores the result and reloads widgets and items with the filter', async () => {

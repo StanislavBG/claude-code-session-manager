@@ -328,9 +328,25 @@ async function ingestDir({
 }
 
 /**
+ * True only when a stat of the stored file says it is gone (ENOENT/ENOTDIR).
+ * Any other stat error keeps the entry — the file may well exist. Never throws.
+ */
+function storedFileMissing(file, fsImpl) {
+  try {
+    fsImpl.statSync(file);
+    return false;
+  } catch (e) {
+    return !!e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+  }
+}
+
+/**
  * listArtifacts(projectRoot, { fsImpl }) → entries newest first, each with
  * `ownerId` (an Epic id, or `_tasks/<task-id>`). A missing or corrupt ledger
- * contributes [] for that owner. Never throws.
+ * contributes [] for that owner. An entry whose stored file
+ * (artifacts/<owner>/<name>) no longer exists — e.g. deleted from the OS file
+ * manager — is omitted (one stat per entry through fsImpl); the daily sweep
+ * (artifactRetention.cjs) compacts such rows out of the ledger. Never throws.
  */
 function listArtifacts(projectRoot, { fsImpl = fs } = {}) {
   /** @type {object[]} */
@@ -354,7 +370,10 @@ function listArtifacts(projectRoot, { fsImpl = fs } = {}) {
     }
   }
   for (const { ownerId, dir } of owners) {
-    for (const e of readLedger(path.join(dir, LEDGER), fsImpl)) out.push({ ...e, ownerId });
+    for (const e of readLedger(path.join(dir, LEDGER), fsImpl)) {
+      if (storedFileMissing(path.join(dir, e.name), fsImpl)) continue;
+      out.push({ ...e, ownerId });
+    }
   }
   const t = (e) => { const v = Date.parse(e.createdAt); return Number.isFinite(v) ? v : 0; };
   out.sort((a, b) => t(b) - t(a));

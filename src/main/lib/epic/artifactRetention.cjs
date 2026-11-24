@@ -5,7 +5,16 @@
  * pruneArtifacts({ projectRoot, epicStatus, now, days, tasksDays, dryRun, fsImpl, sizeCapBytes })
  *   → { removed: string[] (owner ids whose folder was deleted), trimmed: string[] (owner
  *       ids that lost some files but keep pinned/fresh ones), removedFiles, kept,
- *       totalBytes (store size left after the sweep), overCap }. Never throws.
+ *       totalBytes (store size left after the sweep), overCap,
+ *       missingRows: string[] ('<owner-id>/<name>' ledger rows dropped because their file
+ *       is gone), compacted: string[] (owner ids whose ledger was rewritten only to drop
+ *       such rows) }. Never throws.
+ *
+ * Missing-file compaction runs for EVERY owner, whatever its lifecycle: a ledger row whose
+ *   stored file artifacts/<owner>/<name> no longer exists (deleted from the OS file manager)
+ *   is dropped — pinned rows included, since nothing is left to keep. Only an ENOENT/ENOTDIR
+ *   lstat counts as missing. The rewrite is asserted as writer 'artifacts'; dryRun reports
+ *   the rows without writing.
  *
  * Epic folders artifacts/<epic-id>/ are eligible when:
  *   - epicStatus(id) → { status: 'completed' | 'archived', completedAt | archivedAt }
@@ -114,6 +123,32 @@ function childFiles(fsImpl, dir) {
   return entries.filter((e) => e.name !== LEDGER && !e.isSymbolicLink()).map((e) => e.name);
 }
 
+/** True only when lstat says the entry's stored file is gone. */
+function fileMissing(fsImpl, dir, name) {
+  try { fsImpl.lstatSync(path.join(dir, name)); return false; } catch (e) {
+    return !!e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+  }
+}
+
+/** Ledger entries whose stored file still exists; records the dropped rows on ctx.result. */
+function presentEntries(ctx, ownerId, dir, entries) {
+  const live = [];
+  for (const e of entries) {
+    if (fileMissing(ctx.fsImpl, dir, e.name)) ctx.result.missingRows.push(`${ownerId}/${e.name}`);
+    else live.push(e);
+  }
+  return live;
+}
+
+/** Rewrite a kept owner's ledger without its missing-file rows → 'compacted' | null. */
+function compactOwner(ctx, dir, entries, live, raw) {
+  if (live.length === entries.length) return null;
+  const ledgerFile = path.join(dir, LEDGER);
+  opsOwnership.assertOpsWrite(ledgerFile, WRITER);
+  if (!ctx.dryRun) atomicFs.writeJsonAtomicSync(ledgerFile, { ...raw, entries: live });
+  return 'compacted';
+}
+
 function isEpicEligible(id, dir, epicStatus, cutoffMs, fsImpl) {
   let st;
   try { st = epicStatus(id); } catch { return false; }
@@ -128,7 +163,8 @@ function isEpicEligible(id, dir, epicStatus, cutoffMs, fsImpl) {
 
 /**
  * Remove `names` from owner folder `dir`, keeping `keepEntries` in its ledger. Deletes the
- * whole folder when nothing would remain. Returns 'removed' | 'trimmed' | null.
+ * whole folder when nothing would remain. Returns 'removed' | 'trimmed' | 'compacted'
+ * (only missing-file rows left the ledger) | null.
  */
 function applyOwner({ dir, names, keepEntries, entries, raw, dryRun, fsImpl, result }) {
   const remaining = childFiles(fsImpl, dir).filter((n) => !names.includes(n));
@@ -148,24 +184,26 @@ function applyOwner({ dir, names, keepEntries, entries, raw, dryRun, fsImpl, res
   const ledgerFile = path.join(dir, LEDGER);
   opsOwnership.assertOpsWrite(ledgerFile, WRITER);
   if (!dryRun) atomicFs.writeJsonAtomicSync(ledgerFile, { ...raw, entries: keepEntries });
-  return 'trimmed';
+  return names.length === 0 ? 'compacted' : 'trimmed';
 }
 
 function pruneEpicOwner(ctx, id, dir) {
-  if (!isEpicEligible(id, dir, ctx.epicStatus, ctx.cutoffMs, ctx.fsImpl)) return null;
   const { entries, raw } = readLedger(ctx.fsImpl, path.join(dir, LEDGER));
-  const keepEntries = entries.filter((e) => e.pinned === true);
+  const live = presentEntries(ctx, id, dir, entries);
+  if (!isEpicEligible(id, dir, ctx.epicStatus, ctx.cutoffMs, ctx.fsImpl)) return compactOwner(ctx, dir, entries, live, raw);
+  const keepEntries = live.filter((e) => e.pinned === true);
   const keepNames = new Set(keepEntries.map((e) => e.name));
   const names = childFiles(ctx.fsImpl, dir).filter((n) => !keepNames.has(n));
   return applyOwner({ dir, names, keepEntries, entries, raw, dryRun: ctx.dryRun, fsImpl: ctx.fsImpl, result: ctx.result });
 }
 
-function pruneTaskOwner(ctx, dir) {
+function pruneTaskOwner(ctx, ownerId, dir) {
   const { fsImpl, tasksCutoffMs } = ctx;
   const { entries, raw } = readLedger(fsImpl, path.join(dir, LEDGER));
+  const live = presentEntries(ctx, ownerId, dir, entries);
   const mtime = (n) => { try { return fsImpl.lstatSync(path.join(dir, n)).mtimeMs; } catch { return null; } };
   const old = (ms) => ms !== null && ms < tasksCutoffMs;
-  const keepEntries = entries.filter((e) => e.pinned === true || !old(toMs(e.createdAt) ?? mtime(e.name)));
+  const keepEntries = live.filter((e) => e.pinned === true || !old(toMs(e.createdAt) ?? mtime(e.name)));
   const tracked = new Set(entries.map((e) => e.name));
   const keepNames = new Set(keepEntries.map((e) => e.name));
   const names = childFiles(fsImpl, dir).filter((n) => (tracked.has(n) ? !keepNames.has(n) : old(mtime(n))));
@@ -183,7 +221,9 @@ function safeDirs(fsImpl, dir) {
 }
 
 function pruneArtifacts(opts) {
-  const result = { removed: [], trimmed: [], removedFiles: 0, kept: 0, totalBytes: 0, overCap: false };
+  const result = {
+    removed: [], trimmed: [], removedFiles: 0, kept: 0, totalBytes: 0, overCap: false, missingRows: [], compacted: [],
+  };
   try {
     const o = opts || {};
     const fsImpl = o.fsImpl || nodeFs;
@@ -206,6 +246,7 @@ function pruneArtifacts(opts) {
         const size = scan(fsImpl, dir).bytes;
         const out = fn();
         if (out === 'removed') { result.removed.push(ownerId); freed += size; return; }
+        if (out === 'compacted') result.compacted.push(ownerId);
         if (out === 'trimmed') {
           result.trimmed.push(ownerId);
           if (!ctx.dryRun) freed += size - scan(fsImpl, dir).bytes;
@@ -223,7 +264,8 @@ function pruneArtifacts(opts) {
     }
     for (const t of safeDirs(fsImpl, path.join(root, TASKS_DIR))) {
       const dir = opsOwnership.opsPath(o.projectRoot, NS, TASKS_DIR, t);
-      visit(`${TASKS_DIR}/${t}`, dir, () => pruneTaskOwner(ctx, dir));
+      const ownerId = `${TASKS_DIR}/${t}`;
+      visit(ownerId, dir, () => pruneTaskOwner(ctx, ownerId, dir));
     }
     result.totalBytes = ctx.dryRun ? Math.max(0, before - freed) : scan(fsImpl, root).bytes;
     if (result.totalBytes > cap) {

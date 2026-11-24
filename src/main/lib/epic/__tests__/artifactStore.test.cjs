@@ -241,6 +241,7 @@ test('listArtifacts returns every owner\'s entries newest first; empty store →
   const write = (dir, entries) => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify({ version: 1, entries }));
+    for (const e of entries) fs.writeFileSync(path.join(dir, e.name), 'x');
   };
   write(path.join(ns(), 'epic-a'), [
     { name: 'old.txt', createdAt: '2026-11-01T00:00:00.000Z' },
@@ -266,7 +267,42 @@ test('listArtifacts reads the ledger through the injected fsImpl, not the real d
       if (file === ledger) return JSON.stringify({ version: 1, entries: [{ name: 'ghost.txt', createdAt: '2026-11-20T00:00:00.000Z' }] });
       return fs.readFileSync(file, enc);
     },
+    statSync: (file) => {
+      if (file === path.join(epicDir, 'ghost.txt')) return { isFile: () => true };
+      return fs.statSync(file);
+    },
   };
   expect(fs.existsSync(ledger)).toBe(false);
   expect(store.listArtifacts(root, { fsImpl: fake }).map((e) => [e.ownerId, e.name])).toEqual([['epic-fake', 'ghost.txt']]);
+});
+
+test('listArtifacts hides an entry whose stored file was deleted (e.g. from the OS file manager)', async () => {
+  const a = await pub({ srcPath: mk('keep.txt') });
+  const b = await pub({ srcPath: mk('gone.txt') });
+  expect(a.ok && b.ok).toBe(true);
+  expect(store.listArtifacts(root).map((e) => e.name).sort()).toEqual(['gone.txt', 'keep.txt']);
+  fs.unlinkSync(path.join(ns(), EPIC, 'gone.txt'));
+  expect(store.listArtifacts(root).map((e) => e.name)).toEqual(['keep.txt']);
+  // The ledger itself is untouched — the retention sweep compacts it.
+  const ledger = JSON.parse(fs.readFileSync(path.join(ns(), EPIC, 'index.json'), 'utf8'));
+  expect(ledger.entries.map((e) => e.name).sort()).toEqual(['gone.txt', 'keep.txt']);
+});
+
+test('listArtifacts stats each entry through fsImpl and never throws on a stat error', async () => {
+  await pub({ srcPath: mk('one.txt') });
+  await pub({ srcPath: mk('two.txt') });
+  const stats = [];
+  const fake = {
+    ...fs,
+    statSync: (file) => {
+      stats.push(file);
+      if (file.endsWith('two.txt')) { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+      if (file.endsWith('one.txt')) throw new Error('weird stat failure');
+      return fs.statSync(file);
+    },
+  };
+  let list;
+  expect(() => { list = store.listArtifacts(root, { fsImpl: fake }); }).not.toThrow();
+  expect(stats.map((f) => path.basename(f)).sort()).toEqual(['one.txt', 'two.txt']);
+  expect(list.map((e) => e.name)).toEqual(['one.txt']);
 });

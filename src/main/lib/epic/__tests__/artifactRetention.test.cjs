@@ -293,3 +293,71 @@ test('staging: runArtifactSweep calls pruneArtifactStaging once with artifactsDa
   expect(calls).toEqual([{ now: NOW, days: 12 }]);
   expect(out).toEqual({ projects: 2, removed: 0, errors: 0 });
 });
+
+function ownerMissing(segs, entries, missing) {
+  const dir = owner(segs, entries);
+  for (const n of missing) fs.unlinkSync(path.join(dir, n));
+  return dir;
+}
+
+test('ledger rows whose file is missing are compacted, even for a live Epic', () => {
+  const live = ownerMissing(['live-epic'], [
+    { name: 'here.png', createdAt: iso(1) },
+    { name: 'gone.png', createdAt: iso(1) },
+  ], ['gone.png']);
+  const intact = owner(['new-done'], [{ name: 'a.png', createdAt: iso(1) }]);
+  const task = ownerMissing(['_tasks', 'task-1'], [
+    { name: 'new.json', createdAt: iso(1) },
+    { name: 'lost.json', createdAt: iso(1) },
+  ], ['lost.json']);
+  const intactMtime = fs.statSync(path.join(intact, 'index.json')).mtimeMs;
+  const spy = vi.spyOn(opsOwnership, 'assertOpsWrite');
+  const r = pruneArtifacts({ projectRoot: root, epicStatus, now: NOW, days: 30, tasksDays: 10 });
+  expect(ledger(live)).toEqual(['here.png']);
+  expect(fs.existsSync(path.join(live, 'here.png'))).toBe(true);
+  expect(ledger(task)).toEqual(['new.json']);
+  expect(ledger(intact)).toEqual(['a.png']);
+  expect(fs.statSync(path.join(intact, 'index.json')).mtimeMs).toBe(intactMtime);
+  expect(r.missingRows.sort()).toEqual(['_tasks/task-1/lost.json', 'live-epic/gone.png']);
+  expect(r.compacted.sort()).toEqual(['_tasks/task-1', 'live-epic']);
+  expect(r.removed).toEqual([]);
+  // The ledger rewrite was asserted as writer 'artifacts'.
+  const asserted = spy.mock.calls.map((c) => [c[0], c[1]]);
+  expect(asserted).toContainEqual([path.join(live, 'index.json'), 'artifacts']);
+  expect(asserted).toContainEqual([path.join(task, 'index.json'), 'artifacts']);
+  for (const c of spy.mock.calls) expect(c[1]).toBe('artifacts');
+});
+
+test('a pinned row whose file is missing is removed; a folder left empty is deleted', () => {
+  const mixed = ownerMissing(['old-pinned'], [
+    { name: 'keep.mp4', createdAt: iso(50), pinned: true },
+    { name: 'lost.mp4', createdAt: iso(50), pinned: true },
+  ], ['lost.mp4']);
+  const allGone = ownerMissing(['old-done'], [{ name: 'p.png', createdAt: iso(50), pinned: true }], ['p.png']);
+  const livePinned = ownerMissing(['live-epic'], [{ name: 'p.png', createdAt: iso(1), pinned: true }], ['p.png']);
+  const r = pruneArtifacts({ projectRoot: root, epicStatus, now: NOW, days: 30, tasksDays: 10 });
+  expect(ledger(mixed)).toEqual(['keep.mp4']);
+  expect(fs.existsSync(path.join(mixed, 'keep.mp4'))).toBe(true);
+  expect(fs.existsSync(allGone)).toBe(false);
+  expect(ledger(livePinned)).toEqual([]);
+  expect(r.removed).toEqual(['old-done']);
+  expect(r.missingRows.sort()).toEqual(['live-epic/p.png', 'old-done/p.png', 'old-pinned/lost.mp4']);
+});
+
+test('dryRun reports missing rows without rewriting any ledger', () => {
+  const live = ownerMissing(['live-epic'], [
+    { name: 'here.png', createdAt: iso(1) },
+    { name: 'gone.png', createdAt: iso(1), pinned: true },
+  ], ['gone.png']);
+  const before = fs.readFileSync(path.join(live, 'index.json'), 'utf8');
+  const spy = vi.spyOn(opsOwnership, 'assertOpsWrite');
+  const dry = pruneArtifacts({ projectRoot: root, epicStatus, now: NOW, days: 30, tasksDays: 10, dryRun: true });
+  expect(fs.readFileSync(path.join(live, 'index.json'), 'utf8')).toBe(before);
+  expect(dry.missingRows).toEqual(['live-epic/gone.png']);
+  expect(dry.compacted).toEqual(['live-epic']);
+  for (const c of spy.mock.calls) expect(c[1]).toBe('artifacts');
+  const real = pruneArtifacts({ projectRoot: root, epicStatus, now: NOW, days: 30, tasksDays: 10 });
+  expect(real.missingRows).toEqual(dry.missingRows);
+  expect(real.compacted).toEqual(dry.compacted);
+  expect(ledger(live)).toEqual(['here.png']);
+});

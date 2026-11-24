@@ -9,7 +9,7 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
@@ -1180,4 +1180,32 @@ test('character/write: a replace dropping a sound removes its WAV; dropping all 
   expect(none.status).toBe(200);
   expect(none.body.sounds).toEqual([]);
   expect(fs.existsSync(path.join(dir, 'sounds'))).toBe(false);
+});
+
+test('character/write: a failed prune of a stale WAV still answers 200 with pruneError; the new persona is saved', async () => {
+  const { cwd, adminHttp, dir } = await characterSetup();
+  const wavs = soundWavs();
+  expect((await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: SOUND_JSON, sounds: toB64(wavs) } })).status).toBe(200);
+  const stale = path.join(fs.realpathSync(dir), 'sounds', 'ding.wav');
+  const realRm = fs.promises.rm.bind(fs.promises);
+  const spy = vi.spyOn(fs.promises, 'rm').mockImplementation(async (p, opts) => {
+    if (fs.realpathSync(path.dirname(String(p))) === path.dirname(stale) && path.basename(String(p)) === 'ding.wav') {
+      throw new Error('EBUSY: resource busy, rm ding.wav');
+    }
+    return realRm(p, opts);
+  });
+  try {
+    const fewer = { ...SOUND_JSON, sounds: { sfx: [{ name: 'bark' }], beds: SOUND_JSON.sounds.beds } };
+    const r = await adminHttp.call('POST', CHARACTER_URL, { body: { cwd, ...GOOD_CHARACTER, json: fewer, sounds: toB64({ bark: wavs.bark, garden: wavs.garden }), replace: true } });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect(r.body.sounds).toEqual(['bark', 'garden']);
+    expect(r.body.pruneError).toMatch(/EBUSY.*ding\.wav/);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8')).sounds).toEqual(fewer.sounds);
+    expect(fs.readFileSync(path.join(dir, 'sounds', 'bark.wav')).equals(wavs.bark)).toBe(true);
+    expect(fs.readFileSync(path.join(dir, 'sounds', 'garden.wav')).equals(wavs.garden)).toBe(true);
+    expect(spy).toHaveBeenCalled();
+  } finally {
+    spy.mockRestore();
+  }
 });

@@ -791,8 +791,16 @@ async function characterWriteHandler(req, res) {
     const jsPath = path.join(dir, 'character.js');
     await config.writeTextAtomic(jsPath, body.js, { writer: 'project-home' });
     await config.writeTextAtomic(path.join(dir, 'character.json'), jsonText, { writer: 'project-home' });
-    await pruneSounds(resolved.cwd, soundPayload.files.map((f) => f.name));
-    sendJson(res, 200, { ok: true, path: dir, bytes: Buffer.byteLength(body.js, 'utf8'), sounds: soundPayload.files.map((f) => f.name) });
+    // character.json is saved: the persona is usable, so a stale-WAV prune failure is reported, never a 500.
+    let pruneError;
+    try {
+      await pruneSounds(resolved.cwd, soundPayload.files.map((f) => f.name));
+    } catch (e) {
+      pruneError = e?.message ?? String(e);
+    }
+    const answer = { ok: true, path: dir, bytes: Buffer.byteLength(body.js, 'utf8'), sounds: soundPayload.files.map((f) => f.name) };
+    if (pruneError !== undefined) answer.pruneError = pruneError;
+    sendJson(res, 200, answer);
   } catch (e) {
     sendJson(res, 500, { ok: false, error: e?.message ?? 'write failed' });
   }

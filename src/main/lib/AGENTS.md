@@ -1,6 +1,6 @@
 # src/main/lib/ — scoped context
 
-Shared main-process helpers (CommonJS `.cjs`). Layout source of truth: `scripts/lib-layout.json`.
+Shared main-process helpers (CommonJS `.cjs`). `scripts/lib-layout.json` maps top-level lib modules only: a module inside an existing subfolder needs no entry, and listing the file in a PRD's files makes that PRD wait for every other PRD that lists it.
 
 ## What's here
 

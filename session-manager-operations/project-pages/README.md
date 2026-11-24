@@ -392,8 +392,11 @@ Which voice speaks a video's narration, first match wins:
 3. the persona's `voice`;
 4. the kit default.
 
-A job tool gets 1 or 2 as `SM_VOICE_ID` in its job env (`macroJobDispatch.cjs`); a tool without a
-job, and Demo Video, get a `Voice: <id>` line instead.
+A project Video tool job gets the voice set from the press pick, else the tool's `voiceId`
+(`macroJobDispatch.cjs`), twice: as `SM_VOICE_ID` in its process env (PRD frontmatter `voiceId`,
+exported by the scheduler) and as a `Voice: <id>` line in its PRD notes. A tool without a job, and
+Demo Video, get only the `Voice: <id>` line in their prompt. The `demo-video-builder` persona reads
+a `Voice: <id>` line, else `SM_VOICE_ID`, else the persona's `voice`, else `af_heart` / `am_michael`.
 
 ### The voice lane
 
@@ -402,7 +405,9 @@ Every synthesis — video runs and previews alike — waits in the one machine-w
 `<voices home>/lane/<heavy|light>/` (or `SM_VOICE_LANE_DIR`). Two lanes, `heavy` and `light`,
 each run **one synthesis at a time**. `heavy` in the voice file wins; otherwise a Kokoro voice is
 light and every other engine heavy. Dead-pid or 6 h old tickets are swept; a waiting call prints
-its position; each finished call appends a line to `<voices home>/usage.jsonl`.
+its position; each finished call appends a line to `<voices home>/usage.jsonl`. A lane wait that
+times out fails the run with its position (`timed out after <ms> ms at position N of M`), and its
+ticket leaves the lane with no usage line: nothing was synthesized.
 
 ### Preview cache
 

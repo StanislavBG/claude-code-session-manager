@@ -748,3 +748,13 @@ test('PERSONAS equals the persona files in src/seed/agents', () => {
   expect(Array.isArray(PERSONAS)).toBe(true);
   expect([...PERSONAS].sort()).toEqual(onDisk);
 });
+
+test('demo-video-builder: voice precedence is Voice line, then SM_VOICE_ID, then persona, then kit default', () => {
+  const body = dvbBundled();
+  const at = (s) => { const i = body.indexOf(s); expect(i).toBeGreaterThan(-1); return i; };
+  const voiceLine = at("1. A 'Voice: <id>' line");
+  const env = at('else `SM_VOICE_ID` from the environment');
+  const persona = at("2. The project persona's");
+  const kit = at('3. No persona');
+  expect(voiceLine < env && env < persona && persona < kit).toBe(true);
+});

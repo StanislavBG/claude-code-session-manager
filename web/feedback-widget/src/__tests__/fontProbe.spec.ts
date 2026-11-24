@@ -288,3 +288,227 @@ describe('watchFontResources / fontResourceUrls', () => {
     expect(() => watchFontResources()).not.toThrow();
   });
 });
+
+describe('apiFontCss', () => {
+  /** A WOFF2-signed payload whose 5th byte identifies the file. */
+  const fontBytes = (id: number) => new Uint8Array([0x77, 0x4f, 0x46, 0x32, id]).buffer;
+  const fileId = (buf: ArrayBuffer) => new Uint8Array(buf)[4];
+
+  type Desc = { weight?: string; style?: string; stretch?: string };
+  type PageFace = {
+    family: string;
+    weight: string;
+    style: string;
+    stretch: string;
+    unicodeRange: string;
+    featureSettings: string;
+    status: string;
+  };
+
+  let probesMade: FakeFontFace[];
+  class FakeFontFace {
+    family: string;
+    bytes: ArrayBuffer;
+    desc: Desc;
+    status = 'unloaded';
+    constructor(family: string, bytes: ArrayBuffer, desc: Desc = {}) {
+      this.family = family;
+      this.bytes = bytes;
+      this.desc = desc;
+      probesMade.push(this);
+    }
+    load() {
+      this.status = 'loaded';
+      return Promise.resolve(this);
+    }
+  }
+
+  function fakeDoc(pageFaces: PageFace[]) {
+    const members = new Set<unknown>(pageFaces);
+    const fonts = {
+      forEach(cb: (f: never) => void) {
+        for (const f of [...members]) cb(f as never);
+      },
+      add: vi.fn((f: unknown) => members.add(f)),
+      delete: vi.fn((f: unknown) => members.delete(f)),
+      has: (f: unknown) => members.has(f),
+      size: () => members.size,
+    };
+    return { doc: { fonts } as unknown as Document, fonts };
+  }
+
+  function pageFace(over: Partial<PageFace> & { family: string }): PageFace {
+    return {
+      weight: '400',
+      style: 'normal',
+      stretch: 'normal',
+      unicodeRange: 'U+0-10FFFF',
+      featureSettings: 'normal',
+      status: 'loaded',
+      ...over,
+    };
+  }
+
+  let resourceNames: string[];
+  beforeEach(() => {
+    probesMade = [];
+    resourceNames = [];
+    vi.stubGlobal('FontFace', FakeFontFace);
+    vi.spyOn(performance, 'getEntriesByType').mockImplementation(
+      () => resourceNames.map((name) => ({ name })) as unknown as PerformanceEntryList,
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Measure: page fonts by CSS string; a probe draws `fileWidths[fileId](cp, desc)` but only
+   * while registered in doc.fonts.
+   */
+  function probeMeasure(
+    fonts: { has(f: unknown): boolean },
+    page: Record<string, (cp: number) => number | null>,
+    fileWidths: Record<number, (cp: number, desc: Desc) => number | null>,
+  ) {
+    return (font: string, cp: number): number | null => {
+      if (page[font]) return page[font](cp);
+      const m = /^64px "(__smfw_probe_\d+)"$/.exec(font);
+      if (!m) return null;
+      const probe = probesMade.find((p) => p.family === m[1]);
+      if (!probe || !fonts.has(probe)) return null;
+      const w = fileWidths[fileId(probe.bytes)];
+      return w ? w(cp, probe.desc) : null;
+    };
+  }
+
+  it('emits a rule with the face descriptors and a data URL, then removes the probes', async () => {
+    const { apiFontCss } = await freshModule();
+    const brand = pageFace({ family: '"Brand Sans"', weight: '700', style: 'italic', unicodeRange: 'U+0-FF' });
+    const other = pageFace({ family: 'Unrelated' });
+    const { doc, fonts } = fakeDoc([brand, other]);
+    resourceNames = ['https://x.test/a.woff2', 'https://x.test/b.woff2', 'https://x.test/app.js'];
+    const fetchBytes = vi.fn(async (url: string) => fontBytes(url.endsWith('a.woff2') ? 1 : 2));
+    const measure = probeMeasure(fonts, { 'italic 700 normal 64px "Brand Sans"': widthsB }, { 1: widthsA, 2: widthsB });
+
+    const out = await apiFontCss(new Set(['brand sans']), { doc, fetchBytes, measure });
+    expect(fetchBytes.mock.calls.map((c) => c[0])).toEqual(['https://x.test/a.woff2', 'https://x.test/b.woff2']);
+    expect(out.families).toEqual(new Set(['brand sans']));
+    expect(out.cssText).toContain('font-family:"Brand Sans"');
+    expect(out.cssText).toContain('font-weight:700');
+    expect(out.cssText).toContain('font-style:italic');
+    expect(out.cssText).toContain('unicode-range:U+0-FF');
+    expect(out.cssText).toContain('src:url("data:font/woff2;base64,');
+    expect(out.cssText.match(/@font-face/g)).toHaveLength(1);
+    expect(probesMade.length).toBeGreaterThan(0);
+    expect(probesMade.every((p) => p.family.startsWith('__smfw_probe_'))).toBe(true);
+    for (const p of probesMade) expect(fonts.has(p)).toBe(false);
+    expect(fonts.size()).toBe(2);
+
+    // A second capture of the same page fetches and probes nothing new.
+    fetchBytes.mockClear();
+    const made = probesMade.length;
+    const again = await apiFontCss(new Set(['brand sans']), { doc, fetchBytes, measure });
+    expect(again.cssText).toBe(out.cssText);
+    expect(fetchBytes).not.toHaveBeenCalled();
+    expect(probesMade.length).toBe(made);
+  });
+
+  it('removes probes when measure throws, and never rejects', async () => {
+    const { apiFontCss } = await freshModule();
+    const { doc, fonts } = fakeDoc([pageFace({ family: 'Brand' })]);
+    resourceNames = ['https://x.test/a.woff2'];
+    const measure = () => {
+      throw new Error('canvas exploded');
+    };
+    const out = await apiFontCss(new Set(['brand']), { doc, fetchBytes: async () => fontBytes(1), measure });
+    expect(out.cssText).toBe('');
+    expect(probesMade.length).toBeGreaterThan(0);
+    for (const p of probesMade) expect(fonts.has(p)).toBe(false);
+  });
+
+  it('never fetches excluded URLs and skips a non-font payload', async () => {
+    const { apiFontCss } = await freshModule();
+    const { doc, fonts } = fakeDoc([pageFace({ family: 'Brand' })]);
+    resourceNames = ['https://x.test/sheet.woff2', 'https://x.test/html.woff2', 'https://x.test/real.woff2'];
+    const fetchBytes = vi.fn(async (url: string) =>
+      url.includes('html') ? new TextEncoder().encode('<!doctype html>').buffer : fontBytes(3),
+    );
+    const measure = probeMeasure(fonts, { 'normal 400 normal 64px "Brand"': widthsC }, { 3: widthsC });
+    const out = await apiFontCss(new Set(['brand']), {
+      doc,
+      fetchBytes,
+      measure,
+      exclude: new Set(['https://x.test/sheet.woff2']),
+    });
+    expect(fetchBytes.mock.calls.map((c) => c[0])).toEqual(['https://x.test/html.woff2', 'https://x.test/real.woff2']);
+    expect(probesMade).toHaveLength(1);
+    expect(fileId(probesMade[0].bytes)).toBe(3);
+    expect(out.families).toEqual(new Set(['brand']));
+  });
+
+  it('returns early when the budget runs out', async () => {
+    const { apiFontCss } = await freshModule();
+    const { doc, fonts } = fakeDoc([pageFace({ family: 'Brand' })]);
+    resourceNames = ['https://x.test/slow.woff2'];
+    const fetchBytes = () => new Promise<ArrayBuffer | null>(() => {});
+    const t0 = Date.now();
+    const out = await apiFontCss(new Set(['brand']), { doc, fetchBytes, measure: () => 1, budgetMs: 30 });
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(out.cssText).toBe('');
+    expect(out.families.size).toBe(0);
+    expect(fonts.size()).toBe(1);
+  });
+
+  it('second pass with the face descriptors resolves a variable face the first pass missed', async () => {
+    const { apiFontCss } = await freshModule();
+    const heavy = pageFace({ family: 'Var', weight: '800' });
+    const { doc, fonts } = fakeDoc([heavy]);
+    resourceNames = ['https://x.test/other.woff2', 'https://x.test/var.woff2'];
+    const fetchBytes = async (url: string) => fontBytes(url.includes('var') ? 5 : 6);
+    // The variable file draws its 800 instance only when the probe face says weight 800.
+    const measure = probeMeasure(
+      fonts,
+      { 'normal 800 normal 64px "Var"': widthsB },
+      { 5: (cp, desc) => (desc.weight === '800' ? widthsB(cp) : widthsA(cp)), 6: widthsC },
+    );
+    const out = await apiFontCss(new Set(['var']), { doc, fetchBytes, measure });
+    expect(out.families).toEqual(new Set(['var']));
+    expect(out.cssText).toContain('font-weight:800');
+    const second = probesMade.filter((p) => p.desc.weight === '800');
+    expect(second.map((p) => fileId(p.bytes)).sort()).toEqual([5, 6]);
+    expect(second.every((p) => p.desc.style === 'normal' && p.desc.stretch === 'normal')).toBe(true);
+    for (const p of probesMade) expect(fonts.has(p)).toBe(false);
+  });
+
+  it('second pass only probes candidates the first pass left unmatched', async () => {
+    const { apiFontCss } = await freshModule();
+    const plain = pageFace({ family: 'Mix', weight: '400' });
+    const heavy = pageFace({ family: 'Mix', weight: '900' });
+    const { doc, fonts } = fakeDoc([plain, heavy]);
+    resourceNames = ['https://x.test/static.woff2', 'https://x.test/var.woff2'];
+    const fetchBytes = async (url: string) => fontBytes(url.includes('var') ? 5 : 7);
+    const measure = probeMeasure(
+      fonts,
+      { 'normal 400 normal 64px "Mix"': widthsA, 'normal 900 normal 64px "Mix"': widthsB },
+      { 7: widthsA, 5: (cp, desc) => (desc.weight === '900' ? widthsB(cp) : widthsC(cp)) },
+    );
+    const out = await apiFontCss(new Set(['mix']), { doc, fetchBytes, measure });
+    expect(out.cssText.match(/@font-face/g)).toHaveLength(2);
+    const second = probesMade.filter((p) => p.desc.weight === '900');
+    expect(second.map((p) => fileId(p.bytes))).toEqual([5]);
+  });
+
+  it('fetches nothing with no requested families or no loaded API faces', async () => {
+    const { apiFontCss } = await freshModule();
+    resourceNames = ['https://x.test/a.woff2'];
+    const fetchBytes = vi.fn(async () => fontBytes(1));
+    const { doc } = fakeDoc([pageFace({ family: 'Brand' }), pageFace({ family: 'Late', status: 'loading' })]);
+    expect((await apiFontCss(new Set(), { doc, fetchBytes, measure: () => 1 })).cssText).toBe('');
+    expect((await apiFontCss(new Set(['late']), { doc, fetchBytes, measure: () => 1 })).cssText).toBe('');
+    expect((await apiFontCss(new Set(['nope']), { doc, fetchBytes, measure: () => 1 })).cssText).toBe('');
+    expect(fetchBytes).not.toHaveBeenCalled();
+    expect(probesMade).toHaveLength(0);
+  });
+});

@@ -6,7 +6,15 @@
 // No DOM access at import time. Strict-CSP rule (host.ts): no style attribute strings;
 // this module only draws on an off-DOM canvas.
 
-import { isFontUrl, parseUnicodeRange, sampleCodePoints } from './fontCss';
+import {
+  bytesToDataUrl,
+  fontFaceRule,
+  isFontBytes,
+  isFontUrl,
+  normalizeFamily,
+  parseUnicodeRange,
+  sampleCodePoints,
+} from './fontCss';
 
 const seenFontUrls = new Set<string>();
 let watching = false;
@@ -189,4 +197,281 @@ export function canvasMeasurer(doc: Document = document): Measure {
       return null;
     }
   };
+}
+
+export type FetchBytes = (url: string) => Promise<ArrayBuffer | null>;
+
+export interface ApiFontCssOptions {
+  /** Candidate URLs never fetched (already embedded from a stylesheet). */
+  exclude?: Set<string>;
+  /** Wall-clock budget for the whole call (default 3000 ms). */
+  budgetMs?: number;
+  fetchBytes?: FetchBytes;
+  measure?: Measure;
+  doc?: Document;
+}
+
+const FETCH_TIMEOUT_MS = 3000;
+const DEFAULT_BUDGET_MS = 3000;
+const PROBE_PREFIX = '__smfw_probe_';
+
+const bytesCache = new Map<string, Promise<ArrayBuffer | null>>();
+
+/** fetch() a font file once per URL (cors, same-origin credentials, 3 s timeout); null on any failure. */
+function defaultFetchBytes(url: string): Promise<ArrayBuffer | null> {
+  let p = bytesCache.get(url);
+  if (!p) {
+    p = (async () => {
+      const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = setTimeout(() => ctl?.abort(), FETCH_TIMEOUT_MS);
+      try {
+        const res = await fetch(url, { mode: 'cors', credentials: 'same-origin', signal: ctl?.signal });
+        if (!res.ok) return null;
+        return await res.arrayBuffer();
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+    bytesCache.set(url, p);
+  }
+  return p;
+}
+
+type FaceCacheEntry = { dataUrl: string } | { missAtUrlCount: number };
+
+/** Per page FontFace: its matched data URL, or a miss and how many font URLs were known then. */
+const faceCache = new WeakMap<FontFace, FaceCacheEntry>();
+let probeSeq = 0;
+
+const TIMED_OUT: unique symbol = Symbol('timed-out');
+type TimedOut = typeof TIMED_OUT;
+
+/** Resolves `p`, or TIMED_OUT once `deadline` (Date.now() ms) passes. Never rejects. */
+function beforeDeadline<T>(p: Promise<T>, deadline: number): Promise<T | TimedOut> {
+  const left = deadline - Date.now();
+  if (left <= 0) return Promise.resolve<T | TimedOut>(TIMED_OUT);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<TimedOut>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), left);
+  });
+  const settled = p.then(
+    (v): T | TimedOut => v,
+    (): T | TimedOut => TIMED_OUT,
+  );
+  return Promise.race<T | TimedOut>([settled, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** The family as the page wrote it, minus one pair of matching quotes (case kept). */
+function displayFamily(name: string): string {
+  const s = String(name ?? '').trim();
+  if (s.length >= 2 && (s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) return s.slice(1, -1);
+  return s;
+}
+
+function faceInfo(face: FontFace): FaceInfo {
+  return {
+    family: displayFamily(face.family),
+    weight: String(face.weight ?? 'normal'),
+    style: String(face.style ?? 'normal'),
+    stretch: String(face.stretch ?? 'normal'),
+    unicodeRange: String(face.unicodeRange ?? ''),
+  };
+}
+
+function safeFontBytes(buf: unknown): ArrayBuffer | null {
+  try {
+    if (!buf || typeof (buf as ArrayBuffer).byteLength !== 'number') return null;
+    return isFontBytes(buf as ArrayBuffer) ? (buf as ArrayBuffer) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @font-face CSS (data URL sources) for the page's loaded FontFace-API faces of `families`
+ * (normalised names). Fetches the page's font files (Resource Timing, minus `exclude`),
+ * registers each as a temporary `__smfw_probe_<n>` face, matches faces to files by glyph
+ * widths (matchFaces), and always removes every probe. Respects `budgetMs` (returns what
+ * matched so far) and never rejects. Writes nothing to the live page but the probes.
+ */
+export async function apiFontCss(
+  families: Set<string>,
+  opts: ApiFontCssOptions = {},
+): Promise<{ cssText: string; families: Set<string> }> {
+  const rules: string[] = [];
+  const matchedFamilies = new Set<string>();
+  const probes: FontFace[] = [];
+  let doc: Document | undefined;
+  const emit = (face: FontFace, dataUrl: string) => {
+    const info = faceInfo(face);
+    rules.push(
+      fontFaceRule(
+        {
+          family: info.family,
+          weight: info.weight,
+          style: info.style,
+          stretch: info.stretch,
+          unicodeRange: info.unicodeRange,
+          featureSettings: face.featureSettings,
+        },
+        dataUrl,
+      ),
+    );
+    matchedFamilies.add(normalizeFamily(info.family));
+  };
+  const result = () => ({ cssText: rules.join('\n'), families: matchedFamilies });
+
+  try {
+    const deadline = Date.now() + Math.max(0, opts.budgetMs ?? DEFAULT_BUDGET_MS);
+    if (!families || families.size === 0) return result();
+    doc = opts.doc ?? (typeof document !== 'undefined' ? document : undefined);
+    const fontSet = doc?.fonts;
+    if (!fontSet) return result();
+
+    const faces: FontFace[] = [];
+    fontSet.forEach((f) => {
+      try {
+        if (f.status === 'loaded' && families.has(normalizeFamily(f.family))) faces.push(f);
+      } catch {
+        // a broken face object — skip it
+      }
+    });
+    if (!faces.length) return result();
+
+    const urls = fontResourceUrls();
+    const pending: FontFace[] = [];
+    for (const f of faces) {
+      const cached = faceCache.get(f);
+      if (cached && 'dataUrl' in cached) emit(f, cached.dataUrl);
+      else if (cached && cached.missAtUrlCount >= urls.length) continue;
+      else pending.push(f);
+    }
+    if (!pending.length) return result();
+
+    const exclude = opts.exclude ?? new Set<string>();
+    const candidateUrls = urls.filter((u) => !exclude.has(u));
+    const missAll = () => {
+      for (const f of pending) faceCache.set(f, { missAtUrlCount: urls.length });
+    };
+    if (!candidateUrls.length) {
+      missAll();
+      return result();
+    }
+
+    const fetchBytes = opts.fetchBytes ?? defaultFetchBytes;
+    const fetched = await beforeDeadline(
+      Promise.all(
+        candidateUrls.map(async (url) => {
+          try {
+            return safeFontBytes(await fetchBytes(url));
+          } catch {
+            return null;
+          }
+        }),
+      ),
+      deadline,
+    );
+    if (fetched === TIMED_OUT) return result();
+    const files = candidateUrls
+      .map((url, i) => ({ url, bytes: fetched[i] }))
+      .filter((c): c is { url: string; bytes: ArrayBuffer } => c.bytes !== null);
+    if (!files.length) {
+      missAll();
+      return result();
+    }
+    const bytesByUrl = new Map(files.map((c) => [c.url, c.bytes]));
+    const measure = opts.measure ?? canvasMeasurer(doc);
+
+    /** Builds, loads and registers one probe per file; null when the budget ran out. */
+    const registerProbes = async (
+      list: Array<{ url: string; bytes: ArrayBuffer }>,
+      descriptors?: FontFaceDescriptors,
+    ): Promise<Array<{ url: string; probeFamily: string }> | null> => {
+      const built: Array<{ url: string; probeFamily: string; face: FontFace }> = [];
+      for (const c of list) {
+        const probeFamily = `${PROBE_PREFIX}${probeSeq++}`;
+        try {
+          built.push({ url: c.url, probeFamily, face: new FontFace(probeFamily, c.bytes, descriptors) });
+        } catch {
+          // invalid descriptors or bytes — skip this candidate
+        }
+      }
+      const loaded = await beforeDeadline(
+        Promise.all(built.map((b) => b.face.load().then(() => true, () => false))),
+        deadline,
+      );
+      if (loaded === TIMED_OUT) return null;
+      const ready: Array<{ url: string; probeFamily: string }> = [];
+      built.forEach((b, i) => {
+        if (!loaded[i]) return;
+        try {
+          fontSet.add(b.face);
+          probes.push(b.face);
+          ready.push({ url: b.url, probeFamily: b.probeFamily });
+        } catch {
+          // add refused — skip
+        }
+      });
+      return ready;
+    };
+
+    const infos = new Map<FaceInfo, FontFace>();
+    for (const f of pending) infos.set(faceInfo(f), f);
+    const record = (info: FaceInfo, url: string) => {
+      const f = infos.get(info);
+      const bytes = bytesByUrl.get(url);
+      if (!f || !bytes) return;
+      const dataUrl = bytesToDataUrl(bytes);
+      faceCache.set(f, { dataUrl });
+      emit(f, dataUrl);
+    };
+
+    // Pass 1: default probe descriptors.
+    const firstProbes = await registerProbes(files);
+    if (!firstProbes) return result();
+    const first = matchFaces([...infos.keys()], firstProbes, measure);
+    for (const [info, url] of first) record(info, url);
+    if (Date.now() >= deadline) return result();
+
+    // Pass 2 (variable fonts): unmatched faces vs unmatched files, probes copy the face's
+    // weight, style and stretch so the file renders at the same axis position.
+    const usedUrls = new Set(first.values());
+    const restFiles = files.filter((c) => !usedUrls.has(c.url));
+    const unmatched = [...infos.keys()].filter((info) => !first.has(info));
+    const missed: FaceInfo[] = [];
+    for (const info of unmatched) {
+      if (!restFiles.length) {
+        missed.push(info);
+        continue;
+      }
+      if (Date.now() >= deadline) return result();
+      const f = infos.get(info)!;
+      const probesFor = await registerProbes(restFiles, {
+        weight: String(f.weight ?? 'normal'),
+        style: String(f.style ?? 'normal'),
+        stretch: String(f.stretch ?? 'normal'),
+      });
+      if (!probesFor) return result();
+      const url = matchFaces([info], probesFor, measure).get(info);
+      if (url) record(info, url);
+      else missed.push(info);
+    }
+    for (const info of missed) {
+      const f = infos.get(info);
+      if (f) faceCache.set(f, { missAtUrlCount: urls.length });
+    }
+    return result();
+  } catch {
+    return result();
+  } finally {
+    for (const p of probes) {
+      try {
+        doc?.fonts?.delete(p);
+      } catch {
+        // already gone
+      }
+    }
+  }
 }

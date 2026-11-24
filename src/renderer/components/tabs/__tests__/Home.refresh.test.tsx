@@ -28,7 +28,7 @@ vi.mock('../../../lib/useKnownProjects', async (orig) => {
   return { ...actual, useKnownProjects: () => ({ projects: [], recentSessions: [], loading: false }) }
 })
 
-import { Home, HomeHeaderWithLegend } from '../Home'
+import { Home, HomeHero } from '../Home'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -59,8 +59,8 @@ async function render(el: ReturnType<typeof createElement>) {
 }
 
 function header(props: Partial<{ onRefresh: () => void; refreshing: boolean; lastRefreshedAt: number | null; failedSources: string[] }>) {
-  return createElement(HomeHeaderWithLegend, {
-    greeting: 'Good morning', projectCount: 1, needsCount: 0, onOpenNewEpic: () => {}, ...props,
+  return createElement(HomeHero, {
+    greeting: 'Good morning', projectCount: 1, needsCount: 0, ...props,
   })
 }
 

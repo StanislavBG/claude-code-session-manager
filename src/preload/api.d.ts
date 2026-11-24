@@ -295,8 +295,7 @@ export type McpCheckResult =
   | { ok: false; status: 'failed' | 'needs-auth'; error: string; checkedAt: number };
 
 /** One session-manager-scheduler MCP tool's catalog entry (src/main/lib/mcpToolCatalog.cjs) —
- *  the same data GET /admin/mcp/catalog serves, read in-process for the Dashboard's
- *  HomeAgentTools section. */
+ *  the same data GET /admin/mcp/catalog serves, read in-process over IPC. */
 export interface McpToolCatalogEntry {
   name: string;
   group: 'scheduler' | 'chat' | 'feedback' | 'help' | 'project-home' | 'macros' | 'customer-feedback' | 'epics' | 'agents' | 'tasks';

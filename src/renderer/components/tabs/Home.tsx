@@ -4,8 +4,8 @@
  *
  * Sections (top to bottom):
  *   1. Hero — "This machine · N projects" kicker + live session-slot greeting,
- *      with the open "needs you" count as a jump-link, plus All history / New
- *      epic actions.
+ *      with the open "needs you" count as a jump-link, plus Refresh (with its
+ *      last-refresh stamp) and All history.
  *   2. Grid — 5h billing window card + Projects card + Queued (pending
  *      scheduler jobs) card.
  *   3. Needs you — real signals only (see lib/homeNeedsYou.ts): a `proposed`
@@ -16,10 +16,13 @@
  *      against running scheduler jobs / chat runs for context.
  *   5. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
  *      History tab) and shows the 5 most-recent.
- *   6. Reference (collapsed) — Agent tools (MCP tool catalog) + Agents.
  *
- * Display-only: the slot cap is edited solely by the Scheduler's concurrency
- * stepper; terminal appearance lives on App settings; Data Model has its own nav row.
+ * View-only (owner 2026-11-22, decided 2026-11-23 in Epic 9f2682ff): the page
+ * reports the situation and carries no controls that belong on other pages —
+ * New Epic lives in the Sessions view, the MCP tool catalog and Epic tag
+ * reference are not shown here. The slot cap is edited solely by the
+ * Scheduler's concurrency stepper; terminal appearance lives on App settings;
+ * Data Model has its own nav row.
  *
  * Data sources are all existing zustand stores; nothing new on the backend.
  *
@@ -60,14 +63,8 @@ import { Pager } from '../ui/Pager'
 import { scrollWithin } from '../../lib/scrollWithin'
 import { UsageMeters } from './home/UsageMeters'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
-import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
 import { QueuedJobPopover, type QueuedJobPopoverJob } from './home/QueuedJobPopover'
-import { HomeAgentTools } from './home/HomeAgentTools'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
-import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
-import { useEffectiveSettingsFor, readLeafWithSource } from '../../lib/useEffectiveSettings'
-import { formatEffortSegment } from '../../lib/effectiveModelInfo'
-import { ticketTagTone } from '../../lib/ticketDisplay'
 import { toast } from '../../state/toast'
 import { formatAgo } from '../../lib/formatTime'
 import type { ScheduleJob } from '../../../preload/api'
@@ -104,25 +101,15 @@ function HomeComponent({ onNavigate }: HomeProps) {
   }, [lastRefreshedAt])
 
   const projectRows = useHomeProjectRows()
-  const tabs = useSessions((s) => s.tabs)
-  const addTab = useSessions((s) => s.addTab)
-  const setActive = useSessions((s) => s.setActive)
-  const [newEpicOpen, setNewEpicOpen] = useState(false)
-
-  const confirmNewEpicProject = (cwd: string) => {
-    openProjectTab(cwd, tabs, addTab, setActive)
-    onNavigate?.('terminal')
-  }
 
   return (
     <div className="h-full overflow-auto" data-home-scroller>
       <div className="mx-auto max-w-[1400px] px-[34px] py-[26px] text-fg">
-        <HomeHeaderWithLegend
+        <HomeHero
           greeting={greeting}
           projectCount={projectRows.length}
           needsCount={needsRows.length}
           onNavigate={onNavigate}
-          onOpenNewEpic={() => setNewEpicOpen(true)}
           onRefresh={refresh}
           refreshing={refreshing}
           lastRefreshedAt={lastRefreshedAt}
@@ -143,20 +130,7 @@ function HomeComponent({ onNavigate }: HomeProps) {
           <ActiveSessionsCard onNavigate={onNavigate} />
           <RecentSessionsCard onNavigate={onNavigate} />
         </div>
-        <details data-testid="home-reference" className="mb-6">
-          <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-3">
-            Reference
-          </summary>
-          <HomeAgentTools />
-          <AgentsCard />
-        </details>
       </div>
-      <NewEpicProjectDrawer
-        open={newEpicOpen}
-        onClose={() => setNewEpicOpen(false)}
-        projects={projectRows}
-        onConfirm={confirmNewEpicProject}
-      />
     </div>
   )
 }
@@ -170,10 +144,9 @@ function HomeComponent({ onNavigate }: HomeProps) {
 export const Home = memo(HomeComponent)
 
 // ────────────────────────────────────────────────────────────────────
-// Home project rows — single source for both ProjectsCard and the New-epic
-// project picker drawer, so "known projects" is computed once (useKnownProjects'
-// unique-per-cwd aggregates + running chats + Epic sessions, via
-// buildHomeProjectRows) rather than the picker growing its own divergent copy.
+// Home project rows — ProjectsCard's rows and the hero's project count, so
+// "known projects" is computed once (useKnownProjects' unique-per-cwd
+// aggregates + running chats + Epic sessions, via buildHomeProjectRows).
 // One row per real working directory — see lib/knownProjectAggregate.ts.
 // ────────────────────────────────────────────────────────────────────
 function useHomeProjectRows(): HomeProjectRow[] {
@@ -210,105 +183,6 @@ function useNeedsYouRows(): { rows: NeedsYouRow[]; answer: OutsideAnswer; reload
   return { rows, answer, reloadOutside }
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Agents — the fixed set of Epic tags, each an "agent" grounded by its own
-// initial-prompt template (agentTagDefs.ts). An Epic carries exactly one
-// tag, chosen once at creation; this card is a read-only reference for what
-// each tag actually seeds into the session, not a picker.
-//
-// The caption also carries a MACHINE-WIDE effort readout: the settings.json
-// scope chain read with no cwd, so it reflects the global/user-scope default
-// rather than any one project's project/local overlay. Reuses
-// formatEffortSegment (effectiveModelInfo.ts) so this never drifts from the
-// per-Epic wording EffectiveRuntimeLine renders on New Session / Epic detail.
-// ────────────────────────────────────────────────────────────────────
-export function AgentsCard() {
-  const settingsNode = useEffectiveSettingsFor(null)
-  const { value: effortLevel, source: effortSource } = readLeafWithSource(settingsNode, ['effortLevel'])
-  const effortCaption = formatEffortSegment(effortLevel, effortSource)
-  return (
-    <section className="mb-6">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="m-0 font-serif text-[22px] font-medium">Agents</h2>
-        <span
-          className="font-mono text-[12px] text-fg-faint"
-          data-testid="home-agents-effort"
-          title="Machine-wide effective reasoning effort — the settings.json scope chain's current winner, independent of any one project."
-        >
-          1 tag per session · {effortCaption}
-        </span>
-      </div>
-      <div className="grid gap-2">
-        {AGENT_TAG_ORDER.map((tag) => {
-          const def = AGENT_TAG_DEFS[tag]
-          const tone = ticketTagTone(tag)
-          return (
-            <div
-              key={tag}
-              className="bg-bg-hi border border-line rounded-[13px] px-4 py-[13px]"
-            >
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className={`font-mono text-[10.5px] font-semibold uppercase tracking-[0.06em] px-1.5 py-0.5 rounded ${tone.bg} ${tone.text}`}>
-                  {tone.label}
-                </span>
-                <span className="text-[12px] text-fg-faint">{def.description}</span>
-              </div>
-              <p className="m-0 text-[12.5px] text-fg-dim leading-[1.5] font-mono whitespace-pre-wrap">
-                {def.initialPromptTemplate}
-              </p>
-            </div>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Hero + Interactions legend toggle — owns the legend's open/closed state
-// so it can be mounted (and its toggle tested) without every other Home
-// section's store dependencies. Exported for Home.interactionsLegend.test.tsx.
-// ────────────────────────────────────────────────────────────────────
-export function HomeHeaderWithLegend({
-  greeting,
-  projectCount,
-  needsCount,
-  onNavigate,
-  onOpenNewEpic,
-  onRefresh,
-  refreshing,
-  lastRefreshedAt,
-  failedSources,
-  focused,
-}: {
-  greeting: string
-  projectCount: number
-  needsCount: number
-  onNavigate?: (k: NavKey) => void
-  onOpenNewEpic: () => void
-} & HeroRefreshProps) {
-  const [legendOpen, setLegendOpen] = useState(false)
-  return (
-    <>
-      <Hero
-        greeting={greeting}
-        projectCount={projectCount}
-        needsCount={needsCount}
-        onNavigate={onNavigate}
-        onOpenNewEpic={onOpenNewEpic}
-        legendOpen={legendOpen}
-        onToggleLegend={() => setLegendOpen((v) => !v)}
-        onRefresh={onRefresh}
-        refreshing={refreshing}
-        lastRefreshedAt={lastRefreshedAt}
-        failedSources={failedSources}
-        focused={focused}
-      />
-      {legendOpen && <InteractionsLegend />}
-    </>
-  )
-}
-
 /** Optional — with no `onRefresh`, Hero renders neither the button nor the stamp. */
 interface HeroRefreshProps {
   /** useDashboardRefresh().refresh */
@@ -323,16 +197,14 @@ interface HeroRefreshProps {
 const REFRESH_STAMP_TICK_MS = 15_000
 
 // ────────────────────────────────────────────────────────────────────
-// Hero — "This machine" kicker + greeting with live session-slot count.
+// Hero — "This machine" kicker + greeting with live session-slot count,
+// Refresh + stamp, and All history. Exported for Home.refresh.test.tsx.
 // ────────────────────────────────────────────────────────────────────
-function Hero({
+export function HomeHero({
   greeting,
   projectCount,
   needsCount,
   onNavigate,
-  onOpenNewEpic,
-  legendOpen,
-  onToggleLegend,
   onRefresh,
   refreshing = false,
   lastRefreshedAt = null,
@@ -343,9 +215,6 @@ function Hero({
   projectCount: number
   needsCount: number
   onNavigate?: (k: NavKey) => void
-  onOpenNewEpic: () => void
-  legendOpen: boolean
-  onToggleLegend: () => void
 } & HeroRefreshProps) {
   const slots = useSessionSlots()
   const [now, setNow] = useState(() => Date.now())
@@ -407,65 +276,15 @@ function Hero({
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </HeroButton>
         )}
-        <HeroButton onClick={onToggleLegend}>{legendOpen ? 'Hide interactions' : 'Interactions'}</HeroButton>
         <HeroButton onClick={() => onNavigate?.('history')}>All history</HeroButton>
-        <HeroButton primary onClick={onOpenNewEpic}>New epic</HeroButton>
       </div>
     </header>
   )
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Interactions legend — a reference panel explaining what each interactive
-// element on this page actually does. Adapted from the Home Screen A mock's
-// `legend` panel (variants/home-a.jsx), but every line below describes a
-// REAL wired action in this codebase — no fictional Pace chart / breakdown
-// popovers, which this Epic deliberately did not build (see file header).
-//
-// Hand-written, so it drifts silently. Rule: change an entry in the same
-// commit as the behavior it describes. Source of truth per entry:
-//   Usage card         — tabs/home/UsageMeters.tsx, lib/usageWindow.ts
-//   Queued job         — QueuedCard (this file), tabs/home/QueuedJobPopover.tsx
-//   Needs-you row      — lib/homeNeedsYou.ts (the needs-you rows in this file)
-//   Active session row — lib/homeSessionRows.ts, ActiveSessionsCard (this file)
-//   Recent row         — lib/homeSessionRows.ts, lib/useKnownProjects.ts
-//   Project row        — lib/homeProjectRows.ts, lib/homeOpenProject.ts
-//   New session        — lib/homeOpenProject.ts, the New session picker in this file
-//   Refresh            — lib/useDashboardRefresh.ts, the Hero in this file
-// ────────────────────────────────────────────────────────────────────
-const INTERACTIONS_LEGEND: { term: string; description: string }[] = [
-  { term: 'Usage card', description: 'Read-only — shows the live 5-hour and weekly billing windows. Not clickable.' },
-  { term: 'Queued job', description: 'Click a job row to open a popover with its real details (project, estimate, status) and actions — Open in Scheduler, plus Nudge scheduler now while it\'s pending. Use "Open Scheduler →" in the card header to jump straight to the Scheduler tab.' },
-  { term: 'Needs-you row', description: 'Click a row to expand it inline, then Approve & start / Discard a proposed session, Open a session waiting on input, Retry / view a failed job, or Adopt / view a quarantined PRD.' },
-  { term: 'Active session row', description: 'Click Open to jump to the Scheduler tab (job) or the session\'s Terminal view.' },
-  { term: 'Recent row', description: 'Click resume to open a new Terminal tab that resumes that transcript session.' },
-  { term: 'Project row', description: 'Click a project to activate its open Terminal tab, or open a new dormant one.' },
-  { term: 'Refresh', description: 'Re-reads every card now. The page also refreshes itself whenever you open it, at most every 30 s.' },
-  { term: 'New session', description: 'Opens a project picker; confirming activates-or-opens that project\'s tab and lands you in its Sessions workspace to start the session.' },
-]
-
-function InteractionsLegend() {
-  return (
-    <div className="mb-7 bg-bg-hi border border-line rounded-[13px] px-4 py-[13px]">
-      <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-2.5">
-        Interactions
-      </div>
-      <div className="grid gap-2" style={{ gridTemplateColumns: 'minmax(0,140px) minmax(0,1fr)' }}>
-        {INTERACTIONS_LEGEND.map((row) => (
-          <div key={row.term} className="contents">
-            <div className="text-[12.5px] font-semibold text-fg underline decoration-dotted underline-offset-4">{row.term}</div>
-            <div className="text-[12.5px] text-fg-dim leading-[1.5]">{row.description}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function HeroButton({ children, onClick, primary, disabled, testId }: {
+function HeroButton({ children, onClick, disabled, testId }: {
   children: ReactNode
   onClick: () => void
-  primary?: boolean
   disabled?: boolean
   testId?: string
 }) {
@@ -474,11 +293,7 @@ function HeroButton({ children, onClick, primary, disabled, testId }: {
       onClick={onClick}
       disabled={disabled}
       data-testid={testId}
-      className={
-        primary
-          ? 'rounded-lg bg-accent text-bg-hi px-4 py-2 text-[12.5px] font-semibold hover:bg-accent-dark'
-          : 'rounded-lg border border-line bg-bg-hi px-4 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev disabled:opacity-50'
-      }
+      className="rounded-lg border border-line bg-bg-hi px-4 py-2 text-[12.5px] font-semibold text-fg-dim hover:bg-bg-elev disabled:opacity-50"
     >
       {children}
     </button>

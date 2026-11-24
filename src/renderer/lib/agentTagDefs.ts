@@ -14,10 +14,8 @@ export interface AgentTagDef {
 }
 
 /**
- * Canonical order for every tag-keyed list/table in the UI (this object's
- * own key order, since object key order is insertion order for string keys
- * — NewEpicCard's KIND_OPTIONS and Home's AgentsCard both iterate this via
- * `AGENT_TAG_ORDER = Object.keys(AGENT_TAG_DEFS)`).
+ * Every Epic tag's Mission text, keyed by tag. Key order is not a display
+ * order — tag-keyed UI that needs one reads AGENT_TAG_ORDER below.
  */
 export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
   feature: {
@@ -86,13 +84,13 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
 }
 
 /**
- * Display order for tag-keyed UI (NewEpicCard's KIND_OPTIONS, Home's
- * AgentsCard) — deliberately NOT `Object.keys(AGENT_TAG_DEFS)`. 'build' has
- * no UI surface to create Epics of that tag yet, so it's left out. NewEpicCard's
- * KIND_OPTIONS is a hardcoded {tag, label} array (which tags it exposes is a
- * deliberate 3-of-5 subset, not derived from this list), so
- * 'project-home-builder' appearing here only surfaces it in Home's read-only
- * AgentsCard reference — it is never hand-picked in the New Epic form. The
+ * Display order for a tag-keyed list — deliberately NOT
+ * `Object.keys(AGENT_TAG_DEFS)`. 'build' has no UI surface to create Epics of
+ * that tag yet, so it's left out. No component iterates this list today (the
+ * Dashboard's read-only Agents reference was removed when the Dashboard became
+ * view-only). NewEpicCard's KIND_OPTIONS is a hardcoded {tag, label} array
+ * (which tags it exposes is a deliberate subset, not derived from this list),
+ * so 'project-home-builder' is never hand-picked in the New Epic form. The
  * actual Epic-creation call for this tag lives in Project Home's "Generate
  * Now"/"Regenerate" buttons (ProjectPagesSection.tsx), which pass the tag
  * directly, not via this list. What KIND_OPTIONS never hardcodes twice is the

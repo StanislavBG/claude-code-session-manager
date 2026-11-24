@@ -27,7 +27,7 @@ afterEach(async () => {
 })
 
 describe('Home layout', () => {
-  it('lays out six panels in a grid and collapses reference cards', async () => {
+  it('lays out six panels in a grid with no Reference section', async () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
@@ -45,11 +45,7 @@ describe('Home layout', () => {
     expect(text[3]).toContain('Needs you')
     expect(text[4]).toContain('Active sessions')
     expect(text[5]).toContain('Recent sessions')
-    const ref = container.querySelector('details[data-testid="home-reference"]') as HTMLDetailsElement
-    expect(ref).toBeTruthy()
-    expect(ref.open).toBe(false)
-    expect(ref.querySelector('[data-testid="home-agent-tools"]')).toBeTruthy()
-    expect(ref.querySelector('[data-testid="home-data-model-card"]')).toBeNull()
-    expect(ref.textContent).not.toContain('Terminal')
+    expect(container.querySelector('[data-testid="home-reference"]')).toBeNull()
+    expect(container.querySelector('[data-testid="home-data-model-card"]')).toBeNull()
   })
 })

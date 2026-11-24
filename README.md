@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->46<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->48<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -181,6 +181,8 @@ Tools:
 | `project_character_write` | project-home | `json`, one of `js` / `jsPath` | Save the reusable character used in this project's videos. |
 | `project_video_review_write` | project-home | `videoId`, `text`, `imagePaths` | Save a script and images for a human to review a video. |
 | `project_video_outcome_write` | project-home | `videoId`, `outcome`, `text` | Record that a video run ended with no video on purpose. |
+| `voice_list` | project-home | — | List the voices this project can use for speech. |
+| `voice_preview` | project-home | `voiceId`, `text` | Hear one voice say a short line and get the clip path. |
 | `customer_feedback_list` | customer-feedback | — | List feedback that users sent to the owner's inbox. |
 | `customer_feedback_set_status` | customer-feedback | `id`, `status` | Set the status of one feedback item, with an optional note. |
 | `customer_feedback_get` | customer-feedback | `id`, `source` | Read one website feedback report in full, with its image paths. |

@@ -41,6 +41,8 @@
  *   epic_get({ cwd, id? | externalRef?, receipt? }) -> GET /admin/epic?cwd=<encoded>&(id|externalRef)=...[&receipt=1]
  *
  *   agent_list({ cwd? }) -> GET /admin/agents[?cwd=<encoded>]
+ *   voice_list({ cwd? }) -> GET /admin/voices?cwd=<encoded>
+ *   voice_preview({ cwd?, voiceId, text }) -> POST /admin/voices/preview
  *
  *   task_list({ cwd, since?, until?, pipeline?, runId?, step?, agent?, status?, source?, limit?, offset? }) -> GET /admin/tasks?cwd=<encoded>&...
  *   task_get({ cwd, id, after? }) -> GET /admin/task?cwd=<encoded>&id=<encoded>[&after=<n>]
@@ -1132,6 +1134,29 @@ const TOOLS = [
     },
   },
   {
+    name: 'voice_list',
+    description: descriptionFor('voice_list'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute project path; defaults to this session's project root" },
+      },
+    },
+  },
+  {
+    name: 'voice_preview',
+    description: descriptionFor('voice_preview'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute project path; defaults to this session's project root" },
+        voiceId: { type: 'string', description: 'Library voice id from voice_list (/^[a-z0-9][a-z0-9_-]{0,63}$/)' },
+        text: { type: 'string', description: 'The line to speak, 1-300 characters' },
+      },
+      required: ['voiceId', 'text'],
+    },
+  },
+  {
     name: 'customer_feedback_list',
     description: descriptionFor('customer_feedback_list'),
     inputSchema: {
@@ -1785,6 +1810,17 @@ async function handleCallTool(request) {
       }
       const cwd = resolveCwdArg(args);
       const result = await adminRequest('POST', '/admin/project-home/write', { cwd, html: args.html });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'voice_list') {
+      const qs = new URLSearchParams({ cwd: resolveCwdArg(args) });
+      const result = await adminRequest('GET', `/admin/voices?${qs.toString()}`);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'voice_preview') {
+      if (typeof args?.voiceId !== 'string' || !args.voiceId) return errorResult('missing required argument: voiceId');
+      if (typeof args?.text !== 'string' || !args.text) return errorResult('missing required argument: text');
+      const result = await adminRequest('POST', '/admin/voices/preview', { cwd: resolveCwdArg(args), voiceId: args.voiceId, text: args.text });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'project_character_write') {

@@ -78,11 +78,11 @@ test.each(MCP_TOOL_CATALOG)('$name composeDescription joins purpose/whenToUse/wh
   expect(composeDescription(entry).length).toBeGreaterThan(0);
 });
 
-test('project-home group lists the page/video tools and the two aliases', () => {
+test('project-home group lists the page/video tools, the two aliases and the voice read tools', () => {
   expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual([
     'project_home_write', 'project_page_write', 'project_matrix_read', 'project_matrix_write',
     'project_video_write', 'project_demo_video_write', 'project_character_write', 'project_video_review_write',
-    'project_video_outcome_write',
+    'project_video_outcome_write', 'voice_list', 'voice_preview',
   ]);
 });
 
@@ -368,8 +368,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 46 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(46);
+test('catalog has 48 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(48);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });
@@ -616,4 +616,101 @@ test('scheduler_slots_get / scheduler_slots_set sit in the scheduler group; set 
   expect(text).toMatch(/number/);
   const tool = TOOLS.find((t) => t.name === 'scheduler_slots_set');
   expect(tool.inputSchema.required).toEqual(['cap', 'quote']);
+});
+
+// ── voice_list / voice_preview: read-only voice library tools ─────────────
+
+test('voice_list and voice_preview are read-only project-home tools described from the catalog', () => {
+  const list = MCP_TOOL_CATALOG.find((e) => e.name === 'voice_list');
+  const preview = MCP_TOOL_CATALOG.find((e) => e.name === 'voice_preview');
+  for (const e of [list, preview]) {
+    expect(e.group).toBe('project-home');
+    expect(composeDescription(e)).toMatch(/read-only/i);
+    expect(TOOLS.find((t) => t.name === e.name).description).toBe(composeDescription(e));
+  }
+  expect(composeDescription(list)).toContain('GET /admin/voices');
+  expect(composeDescription(preview)).toContain('POST /admin/voices/preview');
+  expect(composeDescription(preview)).toMatch(/voice lane/);
+  expect(composeDescription(preview)).toMatch(/60 seconds/);
+  expect(composeDescription(preview)).toMatch(/queued/);
+  const listTool = TOOLS.find((t) => t.name === 'voice_list');
+  expect(Object.keys(listTool.inputSchema.properties)).toEqual(['cwd']);
+  expect(listTool.inputSchema.required).toBeUndefined();
+  const previewTool = TOOLS.find((t) => t.name === 'voice_preview');
+  expect(Object.keys(previewTool.inputSchema.properties)).toEqual(['cwd', 'voiceId', 'text']);
+  expect(previewTool.inputSchema.required).toEqual(['voiceId', 'text']);
+});
+
+describe('voice tools dispatch to the voice admin routes', () => {
+  const http = require('node:http');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  let server;
+  let requests;
+  let reply;
+  let tmp;
+  let saved;
+
+  beforeEach(async () => {
+    requests = [];
+    reply = { ok: true };
+    server = http.createServer((req, res) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        requests.push({ method: req.method, url: req.url, auth: req.headers.authorization, body: raw ? JSON.parse(raw) : undefined });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(reply));
+      });
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-voice-mcp-'));
+    const tokenPath = path.join(tmp, 'admin-api.json');
+    fs.writeFileSync(tokenPath, JSON.stringify({ port: server.address().port, token: 't0k' }));
+    saved = { tp: process.env.SM_ADMIN_TOKEN_PATH, scope: process.env.SM_SCHEDULER_JOB_MCP_TOOLS };
+    process.env.SM_ADMIN_TOKEN_PATH = tokenPath;
+    delete process.env.SM_SCHEDULER_JOB_MCP_TOOLS;
+  });
+
+  afterEach(async () => {
+    if (saved.tp === undefined) delete process.env.SM_ADMIN_TOKEN_PATH; else process.env.SM_ADMIN_TOKEN_PATH = saved.tp;
+    if (saved.scope !== undefined) process.env.SM_SCHEDULER_JOB_MCP_TOOLS = saved.scope;
+    await new Promise((r) => server.close(r));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const call = (name, args) => {
+    const { handleCallTool } = require(path.join(__dirname, '../../../../scripts/scheduler-mcp-server.cjs'));
+    return handleCallTool({ params: { name, arguments: args } });
+  };
+
+  test('voice_list -> GET /admin/voices?cwd=', async () => {
+    reply = { ok: true, voices: [{ id: 'narrator' }], errors: [] };
+    const result = await call('voice_list', { cwd: '/home/x/proj' });
+    expect(result.isError).toBeFalsy();
+    expect(requests).toEqual([{ method: 'GET', url: '/admin/voices?cwd=%2Fhome%2Fx%2Fproj', auth: 'Bearer t0k', body: undefined }]);
+    expect(JSON.parse(result.content[0].text)).toEqual(reply);
+  });
+
+  test('voice_preview -> POST /admin/voices/preview; ready and queued replies pass through', async () => {
+    reply = { ok: true, status: 'queued', lane: 'heavy', position: 2 };
+    let result = await call('voice_preview', { cwd: '/home/x/proj', voiceId: 'narrator', text: 'Hello.' });
+    expect(JSON.parse(result.content[0].text)).toEqual(reply);
+    reply = { ok: true, status: 'ready', cached: true, wavPath: '/c/k.wav', wallMs: 5, audioSeconds: 1.2 };
+    result = await call('voice_preview', { cwd: '/home/x/proj', voiceId: 'narrator', text: 'Hello.' });
+    expect(JSON.parse(result.content[0].text)).toEqual(reply);
+    expect(requests.map((r) => [r.method, r.url, r.body])).toEqual([
+      ['POST', '/admin/voices/preview', { cwd: '/home/x/proj', voiceId: 'narrator', text: 'Hello.' }],
+      ['POST', '/admin/voices/preview', { cwd: '/home/x/proj', voiceId: 'narrator', text: 'Hello.' }],
+    ]);
+  });
+
+  test('voice_preview without voiceId or text is refused before any admin call', async () => {
+    for (const args of [{ text: 'hi' }, { voiceId: 'narrator' }, { voiceId: 'narrator', text: '' }]) {
+      const result = await call('voice_preview', args);
+      expect(result.isError).toBe(true);
+    }
+    expect(requests).toEqual([]);
+  });
 });

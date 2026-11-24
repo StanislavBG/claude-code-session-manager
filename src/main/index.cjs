@@ -99,6 +99,8 @@ require('./lib/scheduler/slotsRoute.cjs').registerSlotsRoute(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
 prdAdminRoutes.registerAdminRoute(adminHttp, scheduler.remote);
 projectHomeAdminRoutes.registerAdminRoute(adminHttp);
+// GET /admin/voices + POST /admin/voices/preview — voice library reads for agents; no route changes a voice.
+require('./lib/project-pages/voiceAdminRoutes.cjs').registerAdminRoute(adminHttp);
 macroAdminRoutes.registerAdminRoute(adminHttp, {
   onChanged: () => broadcastMacrosChanged(),
   startExternalNewSession: chatRunner.startExternalNewSession,

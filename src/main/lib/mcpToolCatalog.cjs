@@ -574,6 +574,39 @@ const MCP_TOOL_CATALOG = [
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
   },
   {
+    name: 'voice_list',
+    group: 'project-home',
+    purpose: "Read-only list of the voices one project can use (project, machine and built-in library voices), via the "
+      + "session-manager app's admin API (GET /admin/voices?cwd=). Each voice carries its id, label, scope, engine params "
+      + 'and whether a human approved it.',
+    summary: 'List the voices this project can use for speech.',
+    whenToUse: 'Use before writing a character or a voiced video, to pick a real `voiceId` (a {voiceId} voice must name a '
+      + 'library voice), or before voice_preview to see which ids exist.',
+    whenNotToUse: 'Do not use it to add, edit, approve or delete a voice — it is read-only; only a human changes a voice in '
+      + 'Project Home > Video > Voices. A `cwd` that is not an absolute project root is refused.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'Returns { ok, voices, errors }; `errors` names voice files that did not parse.',
+  },
+  {
+    name: 'voice_preview',
+    group: 'project-home',
+    purpose: "Read-only preview of one library voice speaking a short line, via the session-manager app's admin API "
+      + '(POST /admin/voices/preview). The clip is spoken through the shared voice lane (queued behind video renders) and '
+      + 'cached; nothing about the voice changes.',
+    summary: 'Hear one voice say a short line and get the clip path.',
+    whenToUse: 'Use to check how a voice sounds before binding it to a character or video. Pass `voiceId` (from voice_list) '
+      + 'and `text` (1-300 characters). The call waits up to 60 seconds: it answers status "ready" with `wavPath`, '
+      + '`cached`, `wallMs` and `audioSeconds`, or status "queued" with the lane `position` while speaking continues. '
+      + 'Call again with the same voiceId and text to join that run or read the cached clip.',
+    whenNotToUse: 'Do not use it to change, approve or delete a voice — it is read-only. Do not use it to voice a whole video; '
+      + 'the kit speak CLI does that. A bad voiceId (not /^[a-z0-9][a-z0-9_-]{0,63}$/ or unknown), empty text or text over '
+      + '300 characters is refused.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', voiceId: 'narrator', text: 'Welcome to the project.' },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + "Returns { ok, status: 'ready', cached, wavPath, wallMs, audioSeconds } or { ok, status: 'queued', lane, position }.",
+  },
+  {
     name: 'customer_feedback_list',
     group: 'customer-feedback',
     purpose: "List the customers' feedback in the owner's local inbox (bug / feature / discussion items submitted "

@@ -68,6 +68,7 @@ test('writeItem stores report, meta and both PNGs, and the namespace .gitignore'
   expect(JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'))).toEqual({
     hostId: 'FB-AB123', boxId: 'box_1', receivedAt: '2026-11-20T10:00:00.000Z', origin: 'https://example.com',
     status: 'open', statusNote: null, epicId: null, statusChangedAt: '2026-11-20T10:00:00.000Z',
+    reporterVerified: null,
   });
   expect(fs.readFileSync(path.join(dir, 'screenshot.png')).equals(PNG_A)).toBe(true);
   expect(fs.readFileSync(path.join(dir, 'annotated.png')).equals(PNG_B)).toBe(true);

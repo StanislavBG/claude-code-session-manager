@@ -2,7 +2,8 @@
  * ProjectFeedbackInbox — Project Home ▸ Feedback ▸ Inbox: every website report this project's
  * widgets delivered, read in full.
  *
- * List: type dot, title, reporter ('claimed by site' or 'Anonymous'), page host, age, status —
+ * List: type dot, title, reporter (a 'Verified' / 'claimed by site' / 'signature did not match'
+ * badge from meta.reporterVerified, or 'Anonymous'), page host, age, status —
  * newest first, with a status filter (reloads through the store's loadItems). Detail: the
  * annotated screenshot (toggle to the raw one) loaded through window.api.siteFeedback.inboxImage,
  * a marks table, details, page URL + viewport, and collapsible console / network lists; status
@@ -61,11 +62,44 @@ export function pageHost(url: string): string {
   }
 }
 
-/** 'Name · claimed by site' for a site-claimed reporter, else 'Anonymous'. */
-export function reporterLabel(reporter: { id: string; name?: string | null; email?: string | null } | null): string {
+type ReporterLike = { id: string; name?: string | null; email?: string | null } | null
+
+/** Badge text for meta.reporterVerified: true 'Verified', false 'signature did not match', else 'claimed by site'. */
+export function reporterBadge(verified: boolean | null | undefined): string {
+  if (verified === true) return 'Verified'
+  if (verified === false) return 'signature did not match'
+  return 'claimed by site'
+}
+
+/** 'Name · <badge>' for a reporter, else 'Anonymous'. */
+export function reporterLabel(reporter: ReporterLike, verified?: boolean | null): string {
   if (!reporter) return 'Anonymous'
   const who = reporter.name || reporter.email || reporter.id
-  return `${who} · claimed by site`
+  return `${who} · ${reporterBadge(verified)}`
+}
+
+/** The reporter as text plus a badge span; textContent equals reporterLabel(). */
+function Reporter({ reporter, verified }: { reporter: ReporterLike; verified: boolean | null | undefined }) {
+  if (!reporter) return <>Anonymous</>
+  const who = reporter.name || reporter.email || reporter.id
+  const state = verified === true ? 'verified' : verified === false ? 'mismatch' : 'claimed'
+  const tone = verified === true
+    ? 'border-sage text-sage-dark'
+    : verified === false
+      ? 'border-accent text-accent-dark'
+      : 'border-line text-fg-dim'
+  return (
+    <>
+      {who} ·{' '}
+      <span
+        data-testid="site-feedback-reporter-badge"
+        data-verified={state}
+        className={`rounded border px-1 text-[10.5px] ${tone}`}
+      >
+        {reporterBadge(verified)}
+      </span>
+    </>
+  )
 }
 
 function TypeDot({ type }: { type: string }) {
@@ -282,7 +316,7 @@ function Detail({ cwd, detail }: { cwd: string; detail: SiteFeedbackItemDetail }
         </button>
       </div>
       <div className="font-mono text-[11px] text-fg-dim">
-        {meta.hostId} · {report ? reporterLabel(report.user) : 'Anonymous'} · received {new Date(toMs(meta.receivedAt)).toLocaleString()}
+        {meta.hostId} · <Reporter reporter={report ? report.user : null} verified={meta.reporterVerified} /> · received {new Date(toMs(meta.receivedAt)).toLocaleString()}
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <select
@@ -490,7 +524,7 @@ export function ProjectFeedbackInbox({ cwd }: { cwd: string }) {
                   {it.title}
                 </span>
                 <span data-testid="site-feedback-row-reporter" className="shrink-0 text-[11.5px] text-fg-dim">
-                  {reporterLabel(it.reporter)}
+                  <Reporter reporter={it.reporter} verified={it.reporterVerified} />
                 </span>
                 <span data-testid="site-feedback-row-host" className="shrink-0 font-mono text-[11px] text-fg-dim">
                   {pageHost(it.origin)}

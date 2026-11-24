@@ -68,8 +68,8 @@ function makePng(shade) {
   ]);
 }
 
-/** @param {string} clientReportId */
-function report(clientReportId) {
+/** @param {string} clientReportId @param {Record<string, unknown> | null} [user] */
+function report(clientReportId, user = null) {
   return {
     schemaVersion: 1,
     clientReportId,
@@ -87,15 +87,18 @@ function report(clientReportId) {
     marks: [{ kind: 'pin', n: 1, x: 1, y: 1, color: '#a83818', note: 'here' }],
     console: null,
     network: null,
-    user: null,
+    user,
     client: { widgetVersion: '0.1.0' },
   };
 }
 
-/** @param {string} clientReportId @param {string} publicKey @param {string} boxId */
-async function sealedReport(clientReportId, publicKey, boxId) {
+/**
+ * @param {string} clientReportId @param {string} publicKey @param {string} boxId
+ * @param {Record<string, unknown> | null} [user]
+ */
+async function sealedReport(clientReportId, publicKey, boxId, user = null) {
   const fd = new FormData();
-  fd.append('report', new Blob([JSON.stringify(report(clientReportId))], { type: 'application/json' }), 'report.json');
+  fd.append('report', new Blob([JSON.stringify(report(clientReportId, user))], { type: 'application/json' }), 'report.json');
   fd.append('screenshot', new Blob([makePng(0x80)], { type: 'image/png' }), 'screenshot.png');
   fd.append('annotated', new Blob([makePng(0x20)], { type: 'image/png' }), 'annotated.png');
   const req = new Request('http://localhost/', { method: 'POST', body: fd });
@@ -417,4 +420,83 @@ test('prune defaults to opsRetentionSettings feedbackInboxDays and a failure is 
   await drainMod.createDrain().drainOnce({ ...deps(), inbox: failing });
   expect(days).toEqual([settings.read().feedbackInboxDays]);
   expect(logs).toEqual(['feedback-inbox prune failed (prune_failed)']);
+});
+
+// ── verified reporter (site-feedback.md#verified-reporter)
+/** @param {string} secret @param {string} id @param {string} email @param {number} exp */
+function signReporter(secret, id, email, exp) {
+  return crypto.createHmac('sha256', secret).update(`v1|${id}|${email || ''}|${exp}`).digest('base64url');
+}
+// report().createdAt = 2026-11-23T10:42:17.204Z
+const CREATED_SEC = Math.floor(Date.parse('2026-11-23T10:42:17.204Z') / 1000);
+
+/** Seal + submit one report carrying `user`, drain, and return the stored item's meta. */
+async function drainWithUser(/** @type {any} */ box, /** @type {Record<string, unknown> | null} */ user) {
+  const id = crypto.randomUUID();
+  const env = await sealedReport(id, box.publicKey, box.boxId, user);
+  expect((/** @type {any} */ (await submit(mock.baseUrl, box.boxId, env, id))).status).toBe(201);
+  const r = await drainMod.createDrain().drainOnce(deps());
+  expect(r.stored).toBe(1);
+  const items = await inbox.list(cwd);
+  expect(items).toHaveLength(1);
+  const hit = items[0];
+  const got = await inbox.get(cwd, /** @type {any} */ (hit).hostId);
+  return /** @type {any} */ (got).meta;
+}
+
+test('a validly signed, unexpired reporter is stored reporterVerified: true', async () => {
+  const box = await newBox();
+  const secret = /** @type {string} */ (await keystore.getIdentitySecret(box.boxId));
+  const exp = CREATED_SEC + 3600;
+  const meta = await drainWithUser(box, { id: 'u_42', email: 'a@example.com', exp, sig: signReporter(secret, 'u_42', 'a@example.com', exp) });
+  expect(meta.reporterVerified).toBe(true);
+  expect(logs.join('\n')).not.toContain(secret);
+});
+
+test('a reporter signed without an email verifies with the empty-email form', async () => {
+  const box = await newBox();
+  const secret = /** @type {string} */ (await keystore.getIdentitySecret(box.boxId));
+  const exp = CREATED_SEC + 60;
+  const meta = await drainWithUser(box, { id: 'u_7', exp, sig: signReporter(secret, 'u_7', '', exp) });
+  expect(meta.reporterVerified).toBe(true);
+});
+
+test('exp within the 5-minute skew before createdAt still verifies', async () => {
+  const box = await newBox();
+  const secret = /** @type {string} */ (await keystore.getIdentitySecret(box.boxId));
+  const exp = CREATED_SEC - 240;
+  const meta = await drainWithUser(box, { id: 'u_1', exp, sig: signReporter(secret, 'u_1', '', exp) });
+  expect(meta.reporterVerified).toBe(true);
+});
+
+test('a tampered reporter (email changed after signing) is stored reporterVerified: false', async () => {
+  const box = await newBox();
+  const secret = /** @type {string} */ (await keystore.getIdentitySecret(box.boxId));
+  const exp = CREATED_SEC + 3600;
+  const meta = await drainWithUser(box, { id: 'u_42', email: 'evil@example.com', exp, sig: signReporter(secret, 'u_42', 'a@example.com', exp) });
+  expect(meta.reporterVerified).toBe(false);
+});
+
+test('a sig made with another secret, or of the wrong length, is false', async () => {
+  const box = await newBox();
+  await keystore.getIdentitySecret(box.boxId);
+  const exp = CREATED_SEC + 3600;
+  expect((await drainWithUser(box, { id: 'u_1', exp, sig: signReporter('other-secret', 'u_1', '', exp) })).reporterVerified).toBe(false);
+  await fsp.rm(path.join(cwd, 'session-manager-operations', 'feedback-inbox'), { recursive: true, force: true });
+  expect((await drainWithUser(box, { id: 'u_1', exp, sig: 'short' })).reporterVerified).toBe(false);
+});
+
+test('an expired reporter (exp more than 5 minutes before createdAt) is false', async () => {
+  const box = await newBox();
+  const secret = /** @type {string} */ (await keystore.getIdentitySecret(box.boxId));
+  const exp = CREATED_SEC - 301;
+  const meta = await drainWithUser(box, { id: 'u_42', exp, sig: signReporter(secret, 'u_42', '', exp) });
+  expect(meta.reporterVerified).toBe(false);
+});
+
+test('an unsigned reporter, and an anonymous report, are stored reporterVerified: null', async () => {
+  const box = await newBox();
+  expect((await drainWithUser(box, { id: 'u_42', name: 'Ada' })).reporterVerified).toBeNull();
+  await fsp.rm(path.join(cwd, 'session-manager-operations', 'feedback-inbox'), { recursive: true, force: true });
+  expect((await drainWithUser(box, null)).reporterVerified).toBeNull();
 });

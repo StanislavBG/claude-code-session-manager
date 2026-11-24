@@ -303,9 +303,32 @@ test('item returns the full report + local image paths, never image bytes', asyn
       meta: { hostId: 'FB-AB123', status: 'open' },
       report: { v: 1, clientReportId: 'c1', title: 'Broken', screenshot: { part: 'screenshot' }, preview: 'data:image/png;base64,AAAA' },
       imagePaths: { screenshot: '/p/screenshot.png', annotated: '/p/annotated.png' },
+      reporterVerified: null,
     },
   });
   expect(r.body.item.dataUrl).toBeUndefined();
+});
+
+test.each([[true, true], [false, false], [null, null], [undefined, null], ['yes', null]])(
+  'item carries reporterVerified from meta (%j -> %j)',
+  async (stored, shown) => {
+    const { adminHttp } = setup({
+      getItem: async (p) => ({
+        ok: true,
+        item: { meta: { hostId: p.hostId, status: 'open', reporterVerified: stored }, report: { v: 1 }, imagePaths: {} },
+      }),
+    });
+    const r = await adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd: CWD, id: 'FB-AB123' } });
+    expect(r.status).toBe(200);
+    expect(r.body.item.reporterVerified).toBe(shown);
+  },
+);
+
+test('item passes a not_found failure through without a reporterVerified field', async () => {
+  const { adminHttp } = setup({ getItem: async () => ({ ok: false, error: 'not_found' }) });
+  const r = await adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd: CWD, id: 'FB-AB123' } });
+  expect(r.status).toBe(404);
+  expect(r.body).toEqual({ ok: false, error: 'not_found' });
 });
 
 test.each([['FB-ab123'], ['FB-1234'], ['XX-12345'], ['']])('item rejects id %j', async (id) => {

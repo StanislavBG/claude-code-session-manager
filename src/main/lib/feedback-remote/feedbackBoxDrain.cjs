@@ -19,6 +19,13 @@
  *   - any throw -> box stopped for this pass, logged with a fixed code from classifyError
  *     (write_denied, io_error, relay_error, open_failed, keystore_error).
  *
+ * Verified reporter (site-feedback.md#verified-reporter): before the write, a report whose user
+ * carries a string `sig` is checked against the box's identity secret (keystore.getIdentitySecret):
+ * HMAC-SHA256(secret, 'v1|id|email|exp') as base64url, compared with crypto.timingSafeEqual, and
+ * exp (epoch seconds) not earlier than createdAt minus 5 minutes. The result is stored as
+ * meta.reporterVerified: true (valid), false (sig present but invalid, expired, or no secret) or
+ * null (no sig). Neither the secret nor the sig is ever logged.
+ *
  * Retention: once per project per 24 h (per drain instance) the drain calls
  * inbox.prune(cwd, feedbackInboxDays) with the days from opsRetentionSettings.read().
  *
@@ -28,6 +35,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const { openReportEnvelope } = require('./feedbackEnvelope.cjs');
 
 const PAGE_LIMIT = 20;
@@ -37,6 +45,8 @@ const MAX_PAGES_PER_BOX = 100;
 const HOST_ID_RE = /^FB-[0-9A-Z]{5}$/;
 const HOST_ID_CLASH = 'host_id_clash';
 const PRUNE_EVERY_MS = 24 * 60 * 60 * 1000;
+/** Clock skew allowed between the site's signer and the visitor's createdAt. */
+const REPORTER_EXP_SKEW_MS = 5 * 60 * 1000;
 
 /**
  * @typedef {{ ok: false, status: number, error: string, retryAfterSec?: number }} RelayFailure
@@ -51,6 +61,7 @@ const PRUNE_EVERY_MS = 24 * 60 * 60 * 1000;
  * @typedef {{
  *   listBoxes: () => Promise<DrainBox[]>,
  *   getPrivateKey: (boxId: string) => Promise<Record<string, unknown> | null>,
+ *   getIdentitySecret?: (boxId: string) => Promise<string | null>,
  * }} DrainKeystore
  * @typedef {{
  *   writeItem: (args: any) => Promise<{ duplicate: boolean, hostId: string }>,
@@ -100,6 +111,31 @@ function isHostIdClash(e) {
 /** @param {unknown} code */
 function safeCode(code) {
   return typeof code === 'string' && /^[a-z0-9_]{1,64}$/i.test(code) ? code : 'unknown';
+}
+
+/**
+ * Does the report's user carry a signature, and does it verify? Pure: the caller supplies the secret.
+ * @param {unknown} report  the opened Report v1
+ * @param {string | null} secret  the box's identity secret (null = the box has none)
+ * @returns {boolean | null} null when the user carries no sig
+ */
+function verifyReporter(report, secret) {
+  const r = /** @type {any} */ (report);
+  const u = r && typeof r === 'object' && r.user && typeof r.user === 'object' ? r.user : null;
+  if (!u || typeof u.sig !== 'string' || u.sig.length === 0) return null;
+  if (typeof secret !== 'string' || secret.length === 0) return false;
+  const { id, email, exp, sig } = u;
+  if (typeof id !== 'string' || !Number.isSafeInteger(exp)) return false;
+  if (email !== undefined && email !== null && typeof email !== 'string') return false;
+  const createdMs = typeof r.createdAt === 'string' ? Date.parse(r.createdAt) : NaN;
+  if (!Number.isFinite(createdMs) || exp * 1000 < createdMs - REPORTER_EXP_SKEW_MS) return false;
+  const expected = crypto.createHmac('sha256', secret)
+    .update(`v1|${id}|${typeof email === 'string' ? email : ''}|${exp}`)
+    .digest();
+  const given = Buffer.from(sig, 'utf8');
+  const want = Buffer.from(expected.toString('base64url'), 'utf8');
+  if (given.length !== want.length) return false;
+  return crypto.timingSafeEqual(given, want);
 }
 
 /** @typedef {'keystore' | 'relay' | 'open' | 'write'} DrainStage */
@@ -226,10 +262,18 @@ function createDrain(defaults = {}) {
         } else {
           /** @type {{ duplicate: boolean, hostId: string } | null} */
           let w = null;
+          let reporterVerified = verifyReporter(opened.report, null);
+          if (reporterVerified !== null) {
+            ctx.stage = 'keystore';
+            const secret = d.keystore.getIdentitySecret ? await d.keystore.getIdentitySecret(boxId) : null;
+            reporterVerified = verifyReporter(opened.report, secret);
+            ctx.stage = 'write';
+          }
           try {
             w = await d.inbox.writeItem({
               cwd, hostId, boxId, receivedAt: env.receivedAt, origin: env.origin,
               report: opened.report, screenshot: opened.screenshot, annotated: opened.annotated,
+              reporterVerified,
             });
           } catch (e) {
             if (!isHostIdClash(e)) throw e;
@@ -361,4 +405,5 @@ module.exports = {
   PAGE_LIMIT,
   DEFAULT_INTERVAL_MS,
   PRUNE_EVERY_MS,
+  verifyReporter,
 };

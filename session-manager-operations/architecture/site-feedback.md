@@ -47,9 +47,12 @@ sig = base64url(HMAC-SHA256(secret, 'v1|' + id + '|' + (email or '') + '|' + exp
 
 - `exp` = expiry, **epoch seconds** (integer), written in decimal; keep it short (minutes to hours).
 - `email` absent = empty string between the separators. base64url = RFC 4648 §5, **no padding**.
-- A report whose `sig` matches and whose `exp` has not passed is marked **verified**; anything else
-  (no sig, bad sig, expired, box without a secret) stays **claimed**. Verified means "the site vouched
-  for this id/email", still display data, never an authorization input.
+- The drain (`feedbackBoxDrain.cjs`) stores the check as `meta.reporterVerified`: **true** when `sig`
+  matches (timing-safe) and `exp` is not earlier than the report's `createdAt` minus 5 minutes;
+  **false** when a `sig` is present but bad, expired, or the box has no secret ("signature did not
+  match"); **null** with no `sig` ("claimed by site"). The inbox badge and `customer_feedback_get`
+  show it. Verified means "the site vouched for this id/email", still display data, never an
+  authorization input.
 
 Node:
 

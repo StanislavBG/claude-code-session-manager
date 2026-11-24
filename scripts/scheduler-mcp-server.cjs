@@ -2123,6 +2123,8 @@ async function handleCallTool(request) {
         label: SITE_FEEDBACK_LABEL,
         id: args.id,
         meta: item.meta ?? null,
+        // true = the site signed this reporter, false = its signature did not match, null = claimed by site.
+        reporterVerified: typeof item.reporterVerified === 'boolean' ? item.reporterVerified : null,
         report: item.report ?? null,
         screenshotPath: imagePaths.screenshot ?? null,
         annotatedPath: imagePaths.annotated ?? null,

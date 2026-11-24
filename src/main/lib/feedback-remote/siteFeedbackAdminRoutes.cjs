@@ -9,7 +9,7 @@
  *   POST /admin/feedback-widget/delete {boxId}                           -> { ok, boxId }
  *   GET  /admin/feedback-widget/snippet?boxId=                           -> { ok, boxId, fingerprint, snippet }
  *   GET  /admin/site-feedback/inbox?cwd=&status=                         -> { ok, items: [{ id, hostId, ... }] }
- *   GET  /admin/site-feedback/item?cwd=&id=                              -> { ok, item: { meta, report, imagePaths } }
+ *   GET  /admin/site-feedback/item?cwd=&id=                              -> { ok, item: { meta, report, imagePaths, reporterVerified } }
  *   POST /admin/site-feedback/status {cwd, id, status, note?}            -> { ok, meta }
  *
  * Failures are `{ ok: false, error, message? }` with an HTTP status from httpStatusFor():
@@ -18,7 +18,9 @@
  * routes take. Responses drop Session Manager's OWN secrets (box private key, device token —
  * OWN_SECRET_KEYS) and image bytes; the visitor's Report v1 under item.report is returned exactly
  * as stored (a visitor field named `token` or `secret` is report content, not our secret). The
- * item route returns local image paths only, never image bytes.
+ * item route returns local image paths only, never image bytes, and lifts meta.reporterVerified
+ * (true = signed by the site, false = signature did not match, null = claimed by site / legacy
+ * item) onto item.reporterVerified so customer_feedback_get shows it without reading meta.
  * Deliberately NO route that mints an Epic (SINGLE-CREATOR LAW, epicMint.cjs).
  */
 'use strict';
@@ -252,7 +254,13 @@ function registerAdminRoute(adminHttp, opts = {}) {
   adminHttp.registerRoute('GET', '/admin/site-feedback/item', route(async (_req, q) => {
     const cwd = requireCwd(q.get('cwd'));
     const hostId = requireHostId(q.get('id'));
-    return svc().getItem({ cwd, hostId });
+    const r = await svc().getItem({ cwd, hostId });
+    const item = r && r.ok !== false ? r.item : null;
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      const v = item.meta && typeof item.meta === 'object' ? item.meta.reporterVerified : undefined;
+      return { ...r, item: { ...item, reporterVerified: typeof v === 'boolean' ? v : null } };
+    }
+    return r;
   }));
 
   adminHttp.registerRoute('POST', '/admin/site-feedback/status', route(async (req) => {

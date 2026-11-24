@@ -890,6 +890,8 @@ export interface SiteFeedbackItemMeta {
   statusNote: string | null;
   epicId: string | null;
   statusChangedAt: string;
+  /** The drain's signed-reporter check: true verified, false signature did not match, null / absent claimed by site. */
+  reporterVerified?: boolean | null;
 }
 
 /** One inbox row (siteFeedbackInbox.cjs InboxSummary). */

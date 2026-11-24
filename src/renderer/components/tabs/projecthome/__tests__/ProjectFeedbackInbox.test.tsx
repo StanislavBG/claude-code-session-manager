@@ -187,6 +187,57 @@ describe('ProjectFeedbackInbox list', () => {
   })
 })
 
+describe('ProjectFeedbackInbox reporter badge', () => {
+  const rows = (verified: Array<boolean | null | undefined>) =>
+    sf.inboxList.mockResolvedValueOnce({
+      ok: true,
+      items: verified.map((v, i) =>
+        item(`FB-V000${i}`, {
+          receivedAt: `2026-11-2${i}T00:00:00Z`,
+          reporter: { id: `u${i}`, name: `R${i}`, email: null },
+          reporterVerified: v,
+        }),
+      ),
+    })
+
+  it('shows Verified for true, claimed by site for null/absent and signature did not match for false', async () => {
+    rows([true, null, false, undefined])
+    const el = await mount()
+    const byHost = (h: string) => el.querySelector(`[data-testid="site-feedback-row"][data-host-id="${h}"]`) as HTMLElement
+    const badge = (h: string) => q(byHost(h), 'site-feedback-reporter-badge')!
+    expect(badge('FB-V0000').textContent).toBe('Verified')
+    expect(badge('FB-V0000').getAttribute('data-verified')).toBe('verified')
+    expect(badge('FB-V0001').textContent).toBe('claimed by site')
+    expect(badge('FB-V0001').getAttribute('data-verified')).toBe('claimed')
+    expect(badge('FB-V0002').textContent).toBe('signature did not match')
+    expect(badge('FB-V0002').getAttribute('data-verified')).toBe('mismatch')
+    expect(badge('FB-V0003').textContent).toBe('claimed by site')
+    expect(q(byHost('FB-V0000'), 'site-feedback-row-reporter')?.textContent).toBe('R0 · Verified')
+  })
+
+  it('an anonymous report shows no badge', async () => {
+    const el = await mount()
+    const anon = el.querySelector('[data-testid="site-feedback-row"][data-host-id="FB-OLD01"]') as HTMLElement
+    expect(q(anon, 'site-feedback-reporter-badge')).toBeNull()
+  })
+
+  it('the detail shows the badge from meta.reporterVerified', async () => {
+    sf.inboxGet.mockResolvedValueOnce({ ok: true, item: { ...detail('FB-NEW01'), meta: meta('FB-NEW01', { reporterVerified: true }) } })
+    const el = await mount()
+    await openRow(el, 'FB-NEW01')
+    const d = q(el, 'site-feedback-detail')!
+    expect(q(d, 'site-feedback-reporter-badge')?.textContent).toBe('Verified')
+    expect(d.textContent).toContain('Ada · Verified')
+  })
+
+  it('the detail shows signature did not match for false', async () => {
+    sf.inboxGet.mockResolvedValueOnce({ ok: true, item: { ...detail('FB-NEW01'), meta: meta('FB-NEW01', { reporterVerified: false }) } })
+    const el = await mount()
+    await openRow(el, 'FB-NEW01')
+    expect(q(q(el, 'site-feedback-detail')!, 'site-feedback-reporter-badge')?.textContent).toBe('signature did not match')
+  })
+})
+
 describe('ProjectFeedbackInbox detail', () => {
   it('shows the annotated screenshot (toggle to raw), marks, details, page, viewport, console and network', async () => {
     const el = await mount()

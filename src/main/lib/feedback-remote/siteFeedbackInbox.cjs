@@ -5,7 +5,8 @@
  *
  *   feedback-inbox/items/<hostId>/report.json      the validated Report v1 (feedbackReport.cjs)
  *   feedback-inbox/items/<hostId>/meta.json        { hostId, boxId, receivedAt, origin, status,
- *                                                     statusNote, epicId, statusChangedAt }
+ *                                                     statusNote, epicId, statusChangedAt,
+ *                                                     reporterVerified }
  *   feedback-inbox/items/<hostId>/screenshot.png
  *   feedback-inbox/items/<hostId>/annotated.png
  *   feedback-inbox/index.json                      { version: 1, byClientReportId: { [clientReportId]: hostId } }
@@ -27,6 +28,9 @@
  *
  * Every write path first registers cwd (absolute, existing) with config.addAllowedRoot, so a
  * project root nothing else registered this session is still writable.
+ *
+ * `reporterVerified` is the drain's signed-reporter check (feedbackBoxDrain.cjs): true, false or
+ * null (no signature); anything else given to writeItem is stored as null.
  *
  * `statusChangedAt` (receivedAt at write, then the time of each setStatus) is what prune() ages.
  */
@@ -51,7 +55,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * @typedef {(typeof STATUSES)[number]} InboxStatus
  * @typedef {{ hostId: string, boxId: string, receivedAt: string, origin: string,
  *   status: InboxStatus, statusNote: string | null, epicId: string | null,
- *   statusChangedAt: string }} InboxMeta
+ *   statusChangedAt: string, reporterVerified?: boolean | null }} InboxMeta
  * @typedef {InboxMeta & { title: string, type: string, reporter: { id: string, name: string | null, email: string | null } | null }} InboxSummary
  */
 
@@ -214,11 +218,12 @@ function requireBuffer(v, name) {
 /**
  * Store one decrypted report. No-op `{ duplicate: true }` when report.clientReportId is already stored.
  * @param {{ cwd: string, hostId: string, boxId: string, receivedAt: string, origin: string,
- *   report: { clientReportId: string } & Record<string, unknown>, screenshot: Uint8Array, annotated: Uint8Array }} args
+ *   report: { clientReportId: string } & Record<string, unknown>, screenshot: Uint8Array, annotated: Uint8Array,
+ *   reporterVerified?: boolean | null }} args
  * @returns {Promise<{ duplicate: true, hostId: string } | { duplicate: false, hostId: string }>}
  */
 async function writeItem(args) {
-  const { cwd, hostId, boxId, receivedAt, origin, report, screenshot, annotated } = args || /** @type {any} */ ({});
+  const { cwd, hostId, boxId, receivedAt, origin, report, screenshot, annotated, reporterVerified } = args || /** @type {any} */ ({});
   assertHostId(hostId);
   requireString(boxId, 'boxId');
   requireString(receivedAt, 'receivedAt');
@@ -254,6 +259,7 @@ async function writeItem(args) {
       hostId, boxId, receivedAt, origin,
       status: 'open', statusNote: null, epicId: null,
       statusChangedAt: receivedAt,
+      reporterVerified: typeof reporterVerified === 'boolean' ? reporterVerified : null,
     };
     // meta.json last: an item with meta.json is complete.
     await writeJson(itemPath(cwd, hostId, 'meta.json'), meta);

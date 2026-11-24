@@ -257,6 +257,16 @@ test('get returns the full report and image paths under a site-submitted label',
   expect(out.annotatedPath).toBe(SITE_ITEM.imagePaths.annotated);
 });
 
+test.each([[true, true], [false, false], [null, null], [undefined, null]])(
+  'get carries the route\'s reporterVerified (%j -> %j)',
+  async (given, shown) => {
+    const { handleCallTool } = await setup({ ok: true, item: { ...SITE_ITEM, reporterVerified: given } });
+    withProjectRoot('/home/u/proj');
+    const result = await callTool(handleCallTool, GET_TOOL_NAME, { id: 'FB-7K2QX', source: 'site' });
+    expect(JSON.parse(result.content[0].text).reporterVerified).toBe(shown);
+  },
+);
+
 test('get passes cwd and nulls absent images', async () => {
   const item = { ...SITE_ITEM, imagePaths: { screenshot: null, annotated: null } };
   const { handleCallTool, requests } = await setup({ ok: true, item });

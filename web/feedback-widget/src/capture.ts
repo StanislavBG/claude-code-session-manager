@@ -2,7 +2,7 @@
 // §"Screenshot capture"). Runs on open, BEFORE any widget UI is visible:
 //   - rasterises the visible viewport (innerWidth × innerHeight at the current scroll
 //     position) with modern-screenshot — never getDisplayMedia (it prompts);
-//   - hides the widget host element for the duration and restores it after;
+//   - collects extra font CSS first, then hides the widget host only while rasterising;
 //   - paints input[type=password] and [data-feedback-mask] as solid #1a1612 boxes;
 //   - never rejects: a failure or timeout yields a same-size #ede6d6 placeholder + `error`.
 //
@@ -11,6 +11,7 @@
 import { domToCanvas } from 'modern-screenshot';
 import { HOST_ID } from './host';
 import { normalizeFamily, splitFamilyList } from './fontCss';
+import { TIMED_OUT, beforeDeadline } from './fontFetch';
 import { apiFontCss } from './fontProbe';
 import { coveredFamilies, declaredFontUrls, sheetFontCss } from './fontSheets';
 
@@ -152,24 +153,6 @@ function fontSetFamilies(): Set<string> {
   return out;
 }
 
-const TIMED_OUT = Symbol('timed-out');
-
-function beforeDeadline<T>(p: Promise<T>, deadline: number): Promise<T | typeof TIMED_OUT> {
-  return new Promise((resolve) => {
-    const t = setTimeout(() => resolve(TIMED_OUT), Math.max(0, deadline - Date.now()));
-    p.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      () => {
-        clearTimeout(t);
-        resolve(TIMED_OUT);
-      },
-    );
-  });
-}
-
 const warnedFontSets = new Set<string>();
 
 /** Test hook: forget which missing-font sets were already warned about. */
@@ -250,11 +233,12 @@ async function rasterise(
   vh: number,
   scale: number,
   hostEl: HTMLElement | null,
+  fontCss: string,
 ): Promise<HTMLCanvasElement> {
+  // Read after the font step, so a scroll during it is not lost.
   const sx = window.scrollX;
   const sy = window.scrollY;
   const root = document.documentElement;
-  const { cssText: fontCss } = await extraFontCss(hostEl);
   // Size the clone to the viewport and shift it by the scroll offset, so the SVG
   // foreignObject window shows exactly what is on screen.
   const raw = await domToCanvas(root, {
@@ -299,10 +283,22 @@ export async function captureViewport(opts: CaptureOptions = {}): Promise<Captur
 
   const prevDisplay = hostEl ? hostEl.style.getPropertyValue('display') : '';
   const prevPriority = hostEl ? hostEl.style.getPropertyPriority('display') : '';
-  try {
+  // One budget for the whole call: font step (widget still visible) then rasterise (widget
+  // hidden only for this step). A late font step after a timeout never hides the host.
+  let timedOut = false;
+  const work = async (): Promise<{ raw: HTMLCanvasElement; masks: DOMRect[] }> => {
+    const { cssText } = await extraFontCss(hostEl);
+    if (timedOut) throw new Error('capture timed out');
     if (hostEl) hostEl.style.setProperty('display', 'none', 'important');
     const masks = maskRects(hostEl);
-    const raw = await withTimeout(rasterise(vw, vh, scale, hostEl), timeoutMs);
+    const raw = await rasterise(vw, vh, scale, hostEl, cssText);
+    return { raw, masks };
+  };
+  try {
+    const { raw, masks } = await withTimeout(work(), timeoutMs).catch((err: unknown) => {
+      timedOut = true;
+      throw err;
+    });
 
     const out = makeCanvas(width, height);
     const ctx = out.getContext('2d');

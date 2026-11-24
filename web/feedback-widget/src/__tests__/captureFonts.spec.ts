@@ -1,4 +1,5 @@
-// capture.ts font embedding: usedFamilies + extraFontCss (fontSheets/fontProbe mocked).
+// capture.ts font embedding: usedFamilies + extraFontCss + captureViewport ordering
+// (fontSheets/fontProbe/modern-screenshot mocked).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -6,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   declaredFontUrls: vi.fn(() => new Set<string>()),
   sheetFontCss: vi.fn(async () => ({ cssText: '', families: new Set<string>(), urls: new Set<string>() })),
   apiFontCss: vi.fn(async () => ({ cssText: '', families: new Set<string>() })),
+  domToCanvas: vi.fn(async (..._args: unknown[]) => document.createElement('canvas')),
 }));
 
 vi.mock('../fontSheets', () => ({
@@ -14,8 +16,9 @@ vi.mock('../fontSheets', () => ({
   sheetFontCss: mocks.sheetFontCss,
 }));
 vi.mock('../fontProbe', () => ({ apiFontCss: mocks.apiFontCss }));
+vi.mock('modern-screenshot', () => ({ domToCanvas: mocks.domToCanvas }));
 
-import { FONT_BUDGET_MS, extraFontCss, resetFontWarningsForTests, usedFamilies } from '../capture';
+import { FONT_BUDGET_MS, captureViewport, extraFontCss, resetFontWarningsForTests, usedFamilies } from '../capture';
 
 function setFonts(families: string[]): void {
   const faces = families.map((family) => ({ family, status: 'loaded' }));
@@ -167,5 +170,68 @@ describe('extraFontCss', () => {
     expect(Date.now() - t0).toBeLessThan(500);
     expect(out).toEqual({ cssText: '', missing: ['alpha', 'beta', 'gamma'] });
     expect(mocks.apiFontCss).not.toHaveBeenCalled();
+  });
+});
+
+describe('captureViewport font step ordering', () => {
+  beforeEach(() => {
+    document.body.append(el('p', 'Alpha', 'a'));
+    setFonts(['Alpha']);
+    mocks.domToCanvas.mockReset();
+    // jsdom has no canvas backend: stub the 2d context and toBlob.
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: () => {},
+      fillRect: () => {},
+      fillStyle: '',
+    } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (cb: BlobCallback) {
+      cb(new Blob([], { type: 'image/png' }));
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('collects fonts with the host visible and hides it only while domToCanvas runs', async () => {
+    const host = document.createElement('div');
+    host.id = 'feedback-widget-host';
+    document.body.appendChild(host);
+    let releaseSheets!: (v: { cssText: string; families: Set<string>; urls: Set<string> }) => void;
+    mocks.sheetFontCss.mockReturnValue(
+      new Promise((r) => {
+        releaseSheets = r;
+      }) as never,
+    );
+    mocks.apiFontCss.mockResolvedValue({ cssText: '', families: new Set() });
+    let displayDuringRaster: string | null = null;
+    mocks.domToCanvas.mockImplementation(async () => {
+      displayDuringRaster = host.style.getPropertyValue('display');
+      return document.createElement('canvas');
+    });
+
+    const p = captureViewport({ hostEl: host, timeoutMs: 2000 });
+    await vi.waitFor(() => expect(mocks.sheetFontCss).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(host.style.getPropertyValue('display')).not.toBe('none');
+    expect(mocks.domToCanvas).not.toHaveBeenCalled();
+
+    releaseSheets({ cssText: '@font-face{font-family:"Alpha"}', families: new Set(['alpha']), urls: new Set() });
+    const out = await p;
+    expect(mocks.domToCanvas).toHaveBeenCalledTimes(1);
+    expect(displayDuringRaster).toBe('none');
+    expect(host.style.getPropertyValue('display')).toBe('');
+    expect(out.error).toBeUndefined();
+  });
+
+  it('returns the placeholder with an error when the font step outlasts the timeout', async () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    mocks.sheetFontCss.mockReturnValue(new Promise(() => {}) as never);
+    const out = await captureViewport({ hostEl: host, timeoutMs: 50 });
+    expect(out.error).toMatch(/timed out/);
+    expect(mocks.domToCanvas).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(host.style.getPropertyValue('display')).toBe('');
   });
 });

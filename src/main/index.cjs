@@ -68,9 +68,6 @@ const voiceHotkey = require('./voiceHotkey.cjs');
 const scheduler = require('./scheduler.cjs');
 const { createAdminHttp } = require('./lib/feedback-remote/localAdminHttp.cjs');
 const prdCreate = require('./lib/prd/prdCreate.cjs');
-const prdAdminRoutes = require('./lib/prd/prdAdminRoutes.cjs');
-const projectHomeAdminRoutes = require('./lib/feedback-remote/projectHomeAdminRoutes.cjs');
-const macroAdminRoutes = require('./lib/feedback-remote/macroAdminRoutes.cjs');
 const { smfileResponseHeaders, shouldBlockFrameNavigation, smfileUrlToPath } = require('./lib/smfileHeaders.cjs');
 const { buildMediaResponse } = require('./lib/util/smfileRange.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
@@ -92,7 +89,6 @@ const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const upgradeDrain = require('./lib/scheduler/upgradeDrain.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
-const crossProjectFeedback = require('./lib/feedback-remote/crossProjectFeedback.cjs');
 const adminHttp = createAdminHttp();
 require('./adminRouteRegistry.cjs').registerAppAdminRoutes(adminHttp, {
   onMacrosChanged: () => broadcastMacrosChanged(),

@@ -73,6 +73,20 @@ process.exit(0);
     expect(r.artifacts.skipped).toEqual([]);
   });
 
+  test('real store + real git: the Task-end harvest into artifacts/_tasks/<taskId>/ leaves nothing visible to git', async () => {
+    const { execFileSync } = require('node:child_process');
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(dir, 'git-project-')));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const taskId = 'task-git-456';
+    const r = await runTask({ deps, args: ['-p'], env: env(), prompt: 'x', cwd: root, projectRoot: root, taskId, timeoutMs: 30_000 });
+    expect(r.status).toBe('ok');
+    expect(r.artifacts.published).toHaveLength(1);
+    const stored = path.join(root, 'session-manager-operations', 'artifacts', '_tasks', taskId, 'report.md');
+    expect(r.artifacts.published[0].storedPath).toBe(stored);
+    expect(() => execFileSync('git', ['check-ignore', '-q', stored], { cwd: root })).not.toThrow();
+    expect(execFileSync('git', ['status', '--porcelain', '-uall', '--', 'session-manager-operations/artifacts'], { cwd: root, encoding: 'utf8' })).toBe('');
+  });
+
   test('no taskId → no SM_ARTIFACTS_DIR and no ingest', async () => {
     const r = await runTask({ deps, args: ['-p'], env: env(), prompt: 'x', cwd: project, timeoutMs: 30_000 });
     expect(r.status).toBe('ok');

@@ -64,3 +64,34 @@ test('a turn that published nothing posts no notice', async () => {
 
   expect(append).not.toHaveBeenCalled();
 });
+
+// Real git: the stored file is ignored and nothing under artifacts/ is visible.
+function assertGitInvisible(root, storedPath) {
+  const { execFileSync } = require('node:child_process');
+  expect(fs.existsSync(storedPath)).toBe(true);
+  expect(() => execFileSync('git', ['check-ignore', '-q', storedPath], { cwd: root })).not.toThrow();
+  expect(execFileSync('git', ['status', '--porcelain', '-uall', '--', 'session-manager-operations/artifacts'], { cwd: root, encoding: 'utf8' })).toBe('');
+}
+function gitProject(parent, name) {
+  const { execFileSync } = require('node:child_process');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(parent, name)));
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  return root;
+}
+
+test('real store + real git: a chat-turn ingest leaves nothing visible to git', async () => {
+  vi.restoreAllMocks();
+  vi.spyOn(events, 'appendResponseEventWithReason').mockResolvedValue({ ok: true });
+  const cwd = gitProject(fs.realpathSync(tmp), 'git-project-');
+  const srcDir = path.join(fs.realpathSync(tmp), 'staging');
+  fs.mkdirSync(srcDir, { recursive: true });
+  fs.writeFileSync(path.join(srcDir, 'shot.png'), 'png-bytes');
+
+  const res = await chatRunner.__ingestChatArtifacts({ cwd, sessionId: EPIC, srcDir });
+
+  expect(res.skipped).toEqual([]);
+  expect(res.published).toHaveLength(1);
+  const stored = res.published[0].storedPath;
+  expect(stored).toBe(path.join(cwd, 'session-manager-operations', 'artifacts', EPIC, 'shot.png'));
+  assertGitInvisible(cwd, stored);
+});

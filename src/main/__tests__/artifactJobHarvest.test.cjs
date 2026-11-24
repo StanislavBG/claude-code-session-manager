@@ -129,3 +129,35 @@ test('a harvest posts ONE artifact-ready notice with every published entry, and 
   await scheduler.harvestJobArtifacts(empty, worktreeDir, projectRoot);
   expect(append).not.toHaveBeenCalled();
 });
+
+// Real git: the stored file is ignored and nothing under artifacts/ is visible.
+function assertGitInvisible(root, storedPath) {
+  const { execFileSync } = require('node:child_process');
+  expect(fs.existsSync(storedPath)).toBe(true);
+  expect(() => execFileSync('git', ['check-ignore', '-q', storedPath], { cwd: root })).not.toThrow();
+  expect(execFileSync('git', ['status', '--porcelain', '-uall', '--', 'session-manager-operations/artifacts'], { cwd: root, encoding: 'utf8' })).toBe('');
+}
+function gitProject(parent, name) {
+  const { execFileSync } = require('node:child_process');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(parent, name)));
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  return root;
+}
+
+test('real store + real git: job artifactPaths (publishArtifact) and staging (ingestDir) leave nothing visible to git', { timeout: 30_000 }, async () => {
+  const events = require('../promptSessionEvents.cjs');
+  vi.spyOn(events, 'appendResponseEventWithReason').mockResolvedValue({ ok: true });
+  const root = gitProject(fs.realpathSync(tmp), 'git-project-');
+  const wt = fs.realpathSync(worktreeDir);
+  const job = { slug: '4438-git-invisible', epicId: EPIC, runId: RUN, artifactPaths: ['out/report.md'] };
+  write(wt, 'out/report.md', '# report\n');
+  const staging = artifactStore.stagingDirFor({ runId: scheduler.jobArtifactRunId(job, RUN) });
+  write(staging, 'clip.mp4', 'video-bytes');
+
+  await scheduler.harvestJobArtifacts(job, wt, root);
+
+  const dir = path.join(root, 'session-manager-operations', 'artifacts', EPIC);
+  assertGitInvisible(root, path.join(dir, 'report.md')); // artifactPaths → publishArtifact
+  assertGitInvisible(root, path.join(dir, 'clip.mp4')); // staging → ingestDir
+  expect(fs.existsSync(path.join(staging, 'clip.mp4'))).toBe(false);
+});

@@ -228,3 +228,42 @@ test('the exit sweep posts one notice when it publishes; a notice failure is log
   expect(err.mock.calls.some((c) => String(c[0]).includes('[pty] artifact-ready notice failed'))).toBe(true);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+// Real git: the stored file is ignored and nothing under artifacts/ is visible.
+function assertGitInvisible(root, storedPath) {
+  const { execFileSync } = require('node:child_process');
+  expect(fs.existsSync(storedPath)).toBe(true);
+  expect(() => execFileSync('git', ['check-ignore', '-q', storedPath], { cwd: root })).not.toThrow();
+  expect(execFileSync('git', ['status', '--porcelain', '-uall', '--', 'session-manager-operations/artifacts'], { cwd: root, encoding: 'utf8' })).toBe('');
+}
+function gitProject(parent, name) {
+  const { execFileSync } = require('node:child_process');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(parent, name)));
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  return root;
+}
+
+test('real store + real git: an Epic-terminal exit ingest leaves nothing visible to git', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const artifactNotice = require('../lib/epic/artifactNotice.cjs');
+  vi.spyOn(artifactNotice, 'postArtifactReadyNotice').mockResolvedValue({ ok: true });
+  const cwd = gitProject(fs.realpathSync(tmpHome), 'sm-pty-epic-git-');
+  const tabId = 'epic-terminal-session-git';
+  writeEpic(cwd, { epicId: 'epic-tgit', claudeSessionId: tabId });
+  const ingest = vi.spyOn(artifactStore, 'ingestDir'); // real implementation, observed only
+  const holder = {};
+  nodePty.spawn = () => fakeProc(holder);
+
+  manager.spawn({ tabId, cwd, cols: 80, rows: 24 });
+  const staging = artifactStore.stagingDirFor({ runId: tabId });
+  fs.writeFileSync(path.join(staging, 'clip.mp4'), 'video-bytes');
+  holder.exit({ exitCode: 0, signal: undefined });
+  await vi.waitFor(() => expect(ingest).toHaveBeenCalledTimes(1));
+  const res = await ingest.mock.results[0].value;
+
+  expect(res.skipped).toEqual([]);
+  expect(res.published).toHaveLength(1);
+  const stored = res.published[0].storedPath;
+  expect(stored).toBe(path.join(cwd, 'session-manager-operations', 'artifacts', 'epic-tgit', 'clip.mp4'));
+  assertGitInvisible(cwd, stored);
+});

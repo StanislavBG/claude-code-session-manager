@@ -1,6 +1,7 @@
 /**
  * siteFeedbackAdminRoutes.test.cjs — every /admin/feedback-widget/* and /admin/site-feedback/*
- * route over a stubbed siteFeedbackService: input validation, delegation, secret redaction.
+ * route over a stubbed siteFeedbackService: input validation, delegation, own-secret redaction,
+ * the stored report returned verbatim, list `id`, and the HTTP status for each failure class.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/siteFeedbackAdminRoutes.test.cjs
  */
@@ -128,7 +129,48 @@ test('a service failure passes through as ok:false', async () => {
   const r = await adminHttp.call('POST', '/admin/feedback-widget/create', {
     body: { cwd: CWD, label: 'x', allowedOrigins: ['https://a.example'] },
   });
+  expect(r.status).toBe(409);
   expect(r.body).toEqual({ ok: false, error: 'not_linked', message: 'pair first' });
+});
+
+test.each([
+  ['not_linked', 409],
+  ['not_enabled', 409],
+  ['invalid_input', 400],
+  ['invalid_label', 400],
+  ['invalid_allowed_origins', 400],
+  ['invalid_state', 400],
+  ['not_found', 404],
+  ['internal', 500],
+  ['keystore_failed', 500],
+  ['rate_limited', 502],
+  ['box_limit_reached', 502],
+  ['device_token_required', 502],
+  ['box_not_found', 502],
+  ['relay_unreachable', 502],
+])('a service failure %s answers HTTP %i with ok and error', async (code, status) => {
+  const { adminHttp } = setup({ getSnippet: async () => ({ ok: false, error: code, message: 'm', status: 503 }) });
+  const r = await adminHttp.call('GET', '/admin/feedback-widget/snippet', { query: { boxId: 'box1' } });
+  expect(r.status).toBe(status);
+  expect(r.body.ok).toBe(false);
+  expect(r.body.error).toBe(code);
+});
+
+test('a failure with no error code answers 502 with ok and error', async () => {
+  const { adminHttp } = setup({ listItems: async () => ({ ok: false }) });
+  const r = await adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd: CWD } });
+  expect(r.status).toBe(502);
+  expect(r.body.ok).toBe(false);
+  expect(typeof r.body.error).toBe('string');
+});
+
+test('success answers 200; input errors answer 400 with ok and error', async () => {
+  const { adminHttp } = setup();
+  expect((await adminHttp.call('GET', '/admin/feedback-widget/snippet', { query: { boxId: 'box1' } })).status).toBe(200);
+  const bad = await adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd: CWD, id: 'nope' } });
+  expect(bad.status).toBe(400);
+  expect(bad.body.ok).toBe(false);
+  expect(typeof bad.body.error).toBe('string');
 });
 
 test('a throwing service becomes a 500 ok:false', async () => {
@@ -203,7 +245,7 @@ test('snippet delegates and validates boxId', async () => {
 test('inbox delegates cwd + status', async () => {
   const { adminHttp, service } = setup();
   const r = await adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd: CWD, status: 'open' } });
-  expect(r.body).toEqual({ ok: true, items: [{ hostId: 'FB-AB123', status: 'open' }] });
+  expect(r.body).toEqual({ ok: true, items: [{ id: 'FB-AB123', hostId: 'FB-AB123', status: 'open' }] });
   await adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd: CWD } });
   expect(service.calls).toEqual([['listItems', { cwd: CWD, status: 'open' }], ['listItems', { cwd: CWD }]]);
 });
@@ -217,7 +259,40 @@ test('inbox rejects relative cwd and unknown status', async () => {
   expect(service.calls).toEqual([]);
 });
 
+test('every inbox item carries id = hostId, and that id is what item + status accept', async () => {
+  const { adminHttp, service } = setup({
+    listItems: async () => ({ ok: true, items: [{ hostId: 'FB-AB123', status: 'open' }, { hostId: 'FB-ZZ999', status: 'resolved' }] }),
+  });
+  const r = await adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd: CWD } });
+  expect(r.body.items.map((i) => [i.id, i.hostId])).toEqual([['FB-AB123', 'FB-AB123'], ['FB-ZZ999', 'FB-ZZ999']]);
+  const id = r.body.items[1].id;
+  expect((await adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd: CWD, id } })).status).toBe(200);
+  expect((await adminHttp.call('POST', '/admin/site-feedback/status', { body: { cwd: CWD, id, status: 'open' } })).status).toBe(200);
+  expect(service.calls.map((c) => c[1].hostId)).toEqual(['FB-ZZ999', 'FB-ZZ999']);
+});
+
 // ── item
+test('item returns the stored report unmodified, including a field named token or secret', async () => {
+  const report = {
+    v: 1,
+    clientReportId: 'c1',
+    title: 'Login broken',
+    token: 'visitor-csrf-token-value',
+    context: { secret: 'visible', Token: 'T', privateKey: 'visitor text' },
+    steps: [{ token: 'step-token' }],
+  };
+  const { adminHttp } = setup({
+    getItem: async (p) => ({
+      ok: true,
+      item: { meta: { hostId: p.hostId, status: 'open', deviceToken: 'OURS' }, report, imagePaths: { screenshot: '/p/s.png' } },
+    }),
+  });
+  const r = await adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd: CWD, id: 'FB-AB123' } });
+  expect(r.status).toBe(200);
+  expect(r.body.item.report).toEqual(report);
+  expect(r.body.item.meta).toEqual({ hostId: 'FB-AB123', status: 'open' });
+});
+
 test('item returns the full report + local image paths, never image bytes', async () => {
   const { adminHttp, service } = setup();
   const r = await adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd: CWD, id: 'FB-AB123' } });
@@ -226,11 +301,11 @@ test('item returns the full report + local image paths, never image bytes', asyn
     ok: true,
     item: {
       meta: { hostId: 'FB-AB123', status: 'open' },
-      report: { v: 1, clientReportId: 'c1', title: 'Broken', screenshot: { part: 'screenshot' } },
+      report: { v: 1, clientReportId: 'c1', title: 'Broken', screenshot: { part: 'screenshot' }, preview: 'data:image/png;base64,AAAA' },
       imagePaths: { screenshot: '/p/screenshot.png', annotated: '/p/annotated.png' },
     },
   });
-  expect(JSON.stringify(r.body)).not.toContain('base64');
+  expect(r.body.item.dataUrl).toBeUndefined();
 });
 
 test.each([['FB-ab123'], ['FB-1234'], ['XX-12345'], ['']])('item rejects id %j', async (id) => {

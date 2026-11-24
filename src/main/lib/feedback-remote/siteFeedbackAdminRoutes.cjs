@@ -8,20 +8,23 @@
  *   POST /admin/feedback-widget/update {boxId, label?, allowedOrigins?, state?} -> { ok, widget }
  *   POST /admin/feedback-widget/delete {boxId}                           -> { ok, boxId }
  *   GET  /admin/feedback-widget/snippet?boxId=                           -> { ok, boxId, fingerprint, snippet }
- *   GET  /admin/site-feedback/inbox?cwd=&status=                         -> { ok, items }
+ *   GET  /admin/site-feedback/inbox?cwd=&status=                         -> { ok, items: [{ id, hostId, ... }] }
  *   GET  /admin/site-feedback/item?cwd=&id=                              -> { ok, item: { meta, report, imagePaths } }
  *   POST /admin/site-feedback/status {cwd, id, status, note?}            -> { ok, meta }
  *
- * Failures are `{ ok: false, error, message? }`. Responses pass through redactSecrets
- * (siteFeedbackIpc.cjs), so a box private key or the device token can never leave here; the
- * item route returns local image paths only, never image bytes or data URLs.
+ * Failures are `{ ok: false, error, message? }` with an HTTP status from httpStatusFor():
+ * input errors 400, not_found 404, not_linked / not_enabled 409, relay or upstream failures 502,
+ * local faults 500. Inbox list items carry `id` (= hostId, kept too) — the id the item and status
+ * routes take. Responses drop Session Manager's OWN secrets (box private key, device token —
+ * OWN_SECRET_KEYS) and image bytes; the visitor's Report v1 under item.report is returned exactly
+ * as stored (a visitor field named `token` or `secret` is report content, not our secret). The
+ * item route returns local image paths only, never image bytes.
  * Deliberately NO route that mints an Epic (SINGLE-CREATOR LAW, epicMint.cjs).
  */
 'use strict';
 
 const path = require('path');
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
-const { redactSecrets } = require('./siteFeedbackIpc.cjs');
 
 const HOST_ID_RE = /^FB-[0-9A-Z]{5}$/;
 const BOX_ID_RE = /^[A-Za-z0-9_-]{1,200}$/;
@@ -29,8 +32,16 @@ const STATUSES = /** @type {const} */ (['open', 'in_progress', 'resolved', 'wont
 const WIDGET_STATES = /** @type {const} */ (['open', 'paused']);
 const MAX_LABEL = 80;
 const MAX_NOTE = 500;
-/** Keys that carry image bytes; stripped from every response on top of redactSecrets. */
+/** Session Manager's own secrets (never a visitor's report field). Matched case-insensitively. */
+const OWN_SECRET_KEYS = new Set(['privatekeyjwk', 'privatekey', 'devicetoken']);
+/** Keys that carry image bytes; stripped from every response outside the stored report. */
 const BYTE_KEYS = new Set(['dataurl', 'bytes', 'buffer', 'screenshotbytes', 'annotatedbytes']);
+/** Service failure codes that are the caller's bad input. */
+const INPUT_ERRORS = new Set(['invalid_input', 'invalid_label', 'invalid_allowed_origins', 'invalid_state']);
+/** Service failure codes that are local faults, not the relay's. */
+const LOCAL_ERRORS = new Set(['internal', 'keystore_failed', 'not_png']);
+/** The desktop is in the wrong state for the request (pair / enable first). */
+const CONFLICT_ERRORS = new Set(['not_linked', 'not_enabled']);
 
 class InputError extends Error {}
 
@@ -88,7 +99,8 @@ function requireOrigins(v) {
 }
 
 /**
- * Deep copy without secret-named fields or image bytes.
+ * Deep copy without Session Manager's own secret fields or image bytes. `item.report` (the
+ * visitor's stored Report v1) is passed through unmodified.
  * @param {unknown} value
  * @returns {any}
  */
@@ -100,7 +112,8 @@ function scrub(value) {
       /** @type {Record<string, unknown>} */
       const out = {};
       for (const [k, x] of Object.entries(v)) {
-        if (BYTE_KEYS.has(k.toLowerCase())) continue;
+        const key = k.toLowerCase();
+        if (OWN_SECRET_KEYS.has(key) || BYTE_KEYS.has(key)) continue;
         if (typeof x === 'string' && /^data:image\//i.test(x)) continue;
         out[k] = strip(x);
       }
@@ -108,7 +121,27 @@ function scrub(value) {
     }
     return v;
   };
-  return strip(redactSecrets(value));
+  const out = strip(value);
+  const item = /** @type {any} */ (value)?.item;
+  if (item && typeof item === 'object' && !Array.isArray(item) && 'report' in item && out.item) {
+    out.item.report = item.report;
+  }
+  return out;
+}
+
+/**
+ * HTTP status for a service result: 200 on ok, else by failure code.
+ * @param {any} result
+ * @returns {number}
+ */
+function httpStatusFor(result) {
+  if (result.ok !== false) return 200;
+  const code = typeof result.error === 'string' ? result.error : '';
+  if (CONFLICT_ERRORS.has(code)) return 409;
+  if (INPUT_ERRORS.has(code)) return 400;
+  if (code === 'not_found') return 404;
+  if (LOCAL_ERRORS.has(code)) return 500;
+  return 502;
 }
 
 /** @param {any} res @param {any} result */
@@ -117,7 +150,11 @@ function sendResult(res, result) {
     sendJson(res, 500, { ok: false, error: 'internal', message: 'the service returned no result' });
     return;
   }
-  sendJson(res, 200, scrub(result));
+  if (result.ok === false && typeof result.error !== 'string') {
+    sendJson(res, 502, { ok: false, error: 'upstream_failed', message: 'the service failed without an error code' });
+    return;
+  }
+  sendJson(res, httpStatusFor(result), scrub(result));
 }
 
 /** @param {any} req @returns {Promise<Record<string, unknown>>} */
@@ -205,7 +242,11 @@ function registerAdminRoute(adminHttp, opts = {}) {
   adminHttp.registerRoute('GET', '/admin/site-feedback/inbox', route(async (_req, q) => {
     const cwd = requireCwd(q.get('cwd'));
     const rawStatus = q.get('status');
-    return svc().listItems(rawStatus ? { cwd, status: requireStatus(rawStatus) } : { cwd });
+    const r = await svc().listItems(rawStatus ? { cwd, status: requireStatus(rawStatus) } : { cwd });
+    if (r && r.ok !== false && Array.isArray(r.items)) {
+      return { ...r, items: r.items.map((/** @type {any} */ it) => (it && typeof it === 'object' && typeof it.hostId === 'string' ? { ...it, id: it.hostId } : it)) };
+    }
+    return r;
   }));
 
   adminHttp.registerRoute('GET', '/admin/site-feedback/item', route(async (_req, q) => {

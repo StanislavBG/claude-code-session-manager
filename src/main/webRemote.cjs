@@ -178,6 +178,17 @@ async function loadConfig() {
   return _configCache;
 }
 
+// Device token of the first paired device in web-remote.json, or null. Read regardless of
+// remoteEnabled: website feedback (feedbackRelayClient) is a capability separate from remote
+// control. Never log or return the token anywhere else.
+function getLinkedDeviceToken() {
+  const cfg = loadConfigSync();
+  const device = (Array.isArray(cfg.devices) ? cfg.devices : []).find(
+    (d) => d && typeof d.deviceToken === 'string' && d.deviceToken.length > 0,
+  );
+  return device ? device.deviceToken : null;
+}
+
 function invalidateConfigCache() {
   _configCacheAt = 0;
   _configCache = null;
@@ -1716,6 +1727,7 @@ function destroy() {
 module.exports = {
   REMOTE_CAPABILITIES,
   loadConfig,
+  getLinkedDeviceToken,
   setIpcDispatcher,
   attachWindow,
   registerRemoteHandlers,

@@ -107,8 +107,6 @@ function validateVoice(v, label) {
   return `${label}.engine must be 'kokoro' or 'command'`;
 }
 
-const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-
 /** True when `v` is a voice-library reference ({voiceId, ...}) rather than an inline engine voice. */
 function isVoiceIdRef(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v) && 'voiceId' in v;
@@ -121,6 +119,8 @@ function validateVoiceOrRef(v, label) {
   for (const k of Object.keys(v)) {
     if (k !== 'voiceId') return `${label}.${k} is not allowed beside voiceId; a {voiceId} voice has exactly one key`;
   }
+  // Lazy: voiceLibrary.cjs requires this file at load, so a top-level require would see it half-built.
+  const { VOICE_ID_RE } = require('./voiceLibrary.cjs');
   if (typeof v.voiceId !== 'string' || !VOICE_ID_RE.test(v.voiceId)) return `${label}.voiceId must match ${VOICE_ID_RE}`;
   return null;
 }

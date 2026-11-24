@@ -81,6 +81,15 @@ test('exports the documented API', () => {
   expect(vl.voicesHome()).toBe(home);
 });
 
+test('exports VOICE_ID_RE, the one library voice id pattern', () => {
+  expect(vl.VOICE_ID_RE).toBeInstanceOf(RegExp);
+  expect(vl.VOICE_ID_RE.source).toBe('^[a-z0-9][a-z0-9_-]{0,63}$');
+  expect(vl.VOICE_ID_RE.flags).toBe('');
+  expect(vl.VOICE_ID_RE.test('af_heart')).toBe(true);
+  expect(vl.VOICE_ID_RE.test('-bad')).toBe(false);
+  expect(vl.VOICE_ID_RE.test('a'.repeat(65))).toBe(false);
+});
+
 test('requires only node built-ins and files in its own folder', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'voiceLibrary.cjs'), 'utf8');
   const reqs = [...src.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);

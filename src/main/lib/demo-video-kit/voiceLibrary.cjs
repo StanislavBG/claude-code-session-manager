@@ -17,7 +17,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { validateCharacterJson } = require('./character.cjs');
 
-const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** The one library voice id pattern; every other copy points here. */
+const VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MAX_ENTRY_BYTES = 16 * 1024;
 const LABEL_MAX = 80;
 const SAMPLE_MAX = 300;
@@ -131,7 +132,7 @@ function builtinVoices() {
 
 /** -> null when `json` is a valid voice entry for file stem `stem`, else a reason string. */
 function validateVoiceEntry(json, stem) {
-  if (typeof stem !== 'string' || !ID_RE.test(stem)) return `file name '${stem}' must match ${ID_RE}`;
+  if (typeof stem !== 'string' || !VOICE_ID_RE.test(stem)) return `file name '${stem}' must match ${VOICE_ID_RE}`;
   if (!json || typeof json !== 'object' || Array.isArray(json)) return 'voice entry must be an object';
   if ('id' in json && json.id !== stem) return `id '${json.id}' must equal the file name '${stem}'`;
   if ('label' in json && (typeof json.label !== 'string' || json.label.length < 1 || json.label.length > LABEL_MAX)) {
@@ -276,7 +277,7 @@ function listVoices(projectRoot) {
 
 /** -> { ok:true, entry, voice, scope, approved } | { ok:false, error }. */
 function resolveVoiceId(projectRoot, id) {
-  if (typeof id !== 'string' || !ID_RE.test(id)) return { ok: false, error: `unknown voice '${id}'` };
+  if (typeof id !== 'string' || !VOICE_ID_RE.test(id)) return { ok: false, error: `unknown voice '${id}'` };
   const approvals = readApprovals();
   let entry = null;
   for (const [scope, dir] of [['project', projectVoicesDir(projectRoot)], ['machine', machineVoicesDir()]]) {
@@ -307,4 +308,5 @@ module.exports = {
   readApprovals,
   validateVoiceEntry,
   KOKORO_V1_VOICES,
+  VOICE_ID_RE,
 };

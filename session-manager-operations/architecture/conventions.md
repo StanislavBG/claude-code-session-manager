@@ -123,11 +123,13 @@ while bilko.run/projects/session-manager kept serving the 2026-11-15 phone build
 `66eee675`), so its copy and features drifted from the desktop. After `npm publish`:
 
 1. Build `web/remote-app` from the release tag in a detached worktree
-   (`git worktree add --detach <path> v<version>`, then `npm ci && npm run build` in
-   `web/remote-app`). That build also copies `widget/v1` from `web/feedback-widget`
-   (`copy-widget.mjs`) and writes `manifest.json` (`emit-manifest.mjs`).
+   (`git worktree add --detach <path> v<version>`, then `npm ci` in `web/feedback-widget`
+   and in `web/remote-app`, then `npm run build` in `web/remote-app`). `copy-widget.mjs` runs
+   the widget's own vite build to copy `widget/v1`, so the widget needs its packages too; the
+   build also writes `manifest.json` (`emit-manifest.mjs`).
 2. Publish the built folder with bilko-host `publish_static_project` for slug `session-manager`.
-3. Confirm the live `manifest.json` `gitSha` is the tag's commit (`git rev-list -n1 v<version>`).
+3. Confirm the live `manifest.json` `gitSha` — a short SHA (`emit-manifest.mjs` uses
+   `git rev-parse --short HEAD`) — is a prefix of the tag's commit (`git rev-list -n1 v<version>`).
 
 One standing gate bypass: **golden** — the gate looks for `<repo root>/tests/golden.spec.ts`, but the
 phone's golden spec is `web/remote-app/tests/golden.spec.ts`. Every other gate must pass.

@@ -172,6 +172,17 @@ The executable spec is the test mock `src/main/lib/feedback-remote/__tests__/hel
   then sees 404 `box_not_found` and reports the box as gone).
 - **Project-feedback limits** on the same host: context ≤ 262144 bytes, description ≤ 5000.
 
+## Publishing
+
+- **The widget ships inside the session-manager static bundle at `widget/v1/`**, copied by
+  `web/remote-app/scripts/copy-widget.mjs` (run by `npm run build`).
+- **bilko-host `publish_static_project` swaps the whole `public/projects/session-manager/` folder**, so
+  every publish must be built from a SHA at or after `10cd59f2`, or overlay the widget onto an older phone
+  SHA — otherwise the live widget that sites embed (Three Winds) is deleted.
+- **Live:** https://bilko.run/projects/session-manager/widget/v1/feedback.js, plus `widget/v1/fonts/` and `widget/v1/demo/?key=`.
+- **First publish:** Bilko commit `236ba650` on 2026-11-24 — live phone `66eee675` rebuilt byte-identical, plus the widget built from `207cc9b1`.
+- **After any publish**, check that `feedback.js` answers 200 with `Access-Control-Allow-Origin: *`.
+
 ## Desktop stores
 
 | Store | Path | Owner module | Notes |

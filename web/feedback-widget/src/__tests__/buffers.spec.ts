@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BUFFER_SIZE, installBuffers, sanitizeUrl, type Buffers } from '../buffers';
+import { BUFFER_SIZE, MAX_STACK, installBuffers, sanitizeUrl, type Buffers } from '../buffers';
 
 // Minimal stand-in XHR: open/send on the prototype (what buffers patches), events via EventTarget.
 class FakeXHR extends EventTarget {
@@ -115,7 +115,8 @@ describe('console buffer', () => {
       source: 'https://app.example/app.js:7:3',
       count: 1,
     });
-    expect(e.stack).toBe(error.stack);
+    // Clipped like any stack: a long checkout path can push vitest's frames past MAX_STACK.
+    expect(e.stack).toBe(error.stack!.slice(0, MAX_STACK));
   });
 
   it('records unhandledrejection events', () => {

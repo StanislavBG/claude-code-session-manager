@@ -12,6 +12,7 @@ import { ProjectsWorkspace } from '../ProjectsWorkspace'
 import { useSessions } from '../../../state/sessions'
 import { useLayout } from '../../../state/layout'
 import { useToast } from '../../../state/toast'
+import { useEditor } from '../../../state/editor'
 import { revealInFileExplorer } from '../../../lib/revealInFileExplorer'
 import { flushAsync } from '../../../testUtils/domFlush'
 
@@ -60,6 +61,8 @@ const list = vi.fn(async (dir: string, showHidden: boolean) => {
   }
 })
 const open = vi.fn()
+const openFile = vi.fn()
+const realOpenFile = useEditor.getState().openFile
 const writeJson = vi.fn()
 let settingsPrefs: Record<string, unknown> | null = null
 const realScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
@@ -76,6 +79,8 @@ beforeEach(() => {
   writeJson.mockReset()
   writeJson.mockResolvedValue(undefined)
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
+  openFile.mockReset()
+  useEditor.setState({ openFile } as never)
   useSessions.setState({ tabs: [], activeTabId: null })
   useLayout.setState({ navFace: 'home', panelTabHint: null, focusedPanelId: 'overview' })
   Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, writable: true, value: vi.fn() })
@@ -97,6 +102,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root?.unmount())
+  useEditor.setState({ openFile: realOpenFile } as never)
   container?.remove()
   container = null
   root = null
@@ -191,5 +197,30 @@ describe('ProjectsWorkspace reveal:<path> hint', () => {
     expect(selectedPaths(c)).toEqual([])
     expect(open).not.toHaveBeenCalled()
     expect(c.querySelector('[data-testid="projects-file-tree-pane"]')).not.toBeNull()
+  })
+
+  it('a file reveal opens that file in the editor pane, once per reveal', async () => {
+    useSessions.setState({ tabs: [projectTab], activeTabId: 't1' })
+    useLayout.setState({ navFace: 'project' })
+    const c = await mount()
+
+    act(() => revealInFileExplorer(`${PROJECT}/src/main.ts`))
+
+    await until(() => expect(selectedPaths(c)).toEqual([`${PROJECT}/src/main.ts`]))
+    await until(() => expect(openFile).toHaveBeenCalledWith(`${PROJECT}/src/main.ts`))
+    await flushAsync()
+    expect(openFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('a folder reveal selects the folder and opens nothing in the editor', async () => {
+    useSessions.setState({ tabs: [projectTab], activeTabId: 't1' })
+    useLayout.setState({ navFace: 'project' })
+    const c = await mount()
+
+    act(() => revealInFileExplorer(`${PROJECT}/src`))
+
+    await until(() => expect(selectedPaths(c)).toEqual([`${PROJECT}/src`]))
+    await flushAsync()
+    expect(openFile).not.toHaveBeenCalled()
   })
 })

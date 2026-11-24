@@ -90,6 +90,11 @@ interface FileTreeProps {
   /** Called with the reveal's token once it was handled — shown, or toasted as not found. */
   onRevealDone?: (token: number) => void
   /**
+   * Called (before onRevealDone) when a reveal landed on a FILE — never for a
+   * folder or a failed reveal — with the tree's own (real) path for it.
+   */
+  onRevealFile?: (path: string, token: number) => void
+  /**
    * Browse only: no create / rename / delete (toolbar, context menu, inline
    * rename). Set for an unmerged Epic worktree root (ProjectsWorkspace).
    */
@@ -179,7 +184,7 @@ interface ContextMenuState {
   node: TreeNode
 }
 
-export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal, onRevealDone, readOnly = false }: FileTreeProps) {
+export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal, onRevealDone, onRevealFile, readOnly = false }: FileTreeProps) {
   const focusedRef = usePanelFocusRef()
   const focused = usePanelFocus()
   const [root, setRoot] = useState<TreeNode[]>([])
@@ -201,6 +206,8 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
   const [revealRetry, setRevealRetry] = useState(0)
   const onRevealDoneRef = useRef(onRevealDone)
   onRevealDoneRef.current = onRevealDone
+  const onRevealFileRef = useRef(onRevealFile)
+  onRevealFileRef.current = onRevealFile
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   // Live mirror of `expanded` so effects keyed on other deps (e.g. showHidden)
   // can read the current set without re-subscribing to every expand/collapse.
@@ -568,6 +575,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId, reveal
     setError(null) // a stale rename/create error hides the whole tree
     setSelected(target.path)
     setScrollRequest((n) => n + 1)
+    if (!target.isDirectory) onRevealFileRef.current?.(target.path, req.token)
     done()
   }, [cwd, showHidden, persistExpanded])
 

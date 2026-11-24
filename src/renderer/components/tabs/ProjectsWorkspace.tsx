@@ -202,6 +202,16 @@ function ProjectsWorkspaceComponent() {
     useEditor.getState().openFile(path)
   }, [])
 
+  // A revealed FILE also opens in the editor pane (the same path as a tree
+  // click), once per reveal token. FileTree reports file vs folder from the
+  // node it landed on; a folder reveal opens nothing.
+  const openedRevealTokenRef = useRef(0)
+  const handleRevealFile = useCallback((path: string, token: number) => {
+    if (openedRevealTokenRef.current === token) return
+    openedRevealTokenRef.current = token
+    openInline(path)
+  }, [openInline])
+
   const startResize = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
     layoutTouched.current = true
@@ -379,6 +389,7 @@ function ProjectsWorkspaceComponent() {
                 onPreviewFile={openInline}
                 reveal={reveal && reveal.root === rootCwd ? reveal : null}
                 onRevealDone={handleRevealDone}
+                onRevealFile={handleRevealFile}
               />
             </div>
           </>

@@ -23,10 +23,10 @@ function frontmatter(doc) {
   return fm;
 }
 
-test('builtin demo-video macro is v10 with the character + styles + length prompt', () => {
+test('builtin demo-video macro is v11 with the character + styles + length prompt', () => {
   const macro = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(macro.builtinVersion).toBe(10);
-  expect(macro.priorPrompts).toHaveLength(9);
+  expect(macro.builtinVersion).toBe(11);
+  expect(macro.priorPrompts).toHaveLength(10);
   expect(macro.builtinVersion).toBe(macro.priorPrompts.length + 1);
   for (const t of ['project_video_write', 'Video kind:', 'Video target:', 'Entry id']) expect(macro.prompt).toContain(t);
   expect(macro.prompt).toContain('Video length: 60');
@@ -157,8 +157,8 @@ test('built-in macros declare a frozen background job', () => {
   expect(home.prompt).toContain('project_page_write');
   expect(home.prompt).toContain("'Page:");
   expect(home.prompt).toContain("'Entry id'");
-  expect(demo.builtinVersion).toBe(10);
-  expect(demo.priorPrompts).toHaveLength(9);
+  expect(demo.builtinVersion).toBe(11);
+  expect(demo.priorPrompts).toHaveLength(10);
 });
 
 // The Project Home Generate composer always sends these lines (design-mocks/project-home-v2/DESIGN_SPEC.md
@@ -184,8 +184,8 @@ test('Project Home v3 honours the Audience, Length and Read from lines and keeps
 
 test('Demo Video v7+ honours Video kind/style/length and Character on|off lines and keeps every v6 clause', () => {
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(demo.builtinVersion).toBe(10);
-  expect(demo.priorPrompts).toHaveLength(9);
+  expect(demo.builtinVersion).toBe(11);
+  expect(demo.priorPrompts).toHaveLength(10);
   // priorPrompts[5] is the shipped v6 prompt, byte for byte; v7 kept every v6 clause
   expect(sha256(demo.priorPrompts[5])).toBe('5b6696fc59a315f04158e191b48b8cdf375b5deaafd87f9d99fed523661ccc49');
   for (const clause of priorClauses(demo.priorPrompts[5]).slice(1)) expect(demo.prompt).toContain(clause);
@@ -229,13 +229,29 @@ test('Demo Video v9 adds the no-target and target-claims rules and keeps every v
 test('Demo Video v10 names the TikTok and Marketing kinds and the project persona voice, and keeps every v9 clause', () => {
   const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
   const v9 = demo.priorPrompts[8];
+  const v10 = demo.priorPrompts[9];
   // priorPrompts[8] is the shipped v9 prompt, byte for byte
   expect(sha256(v9)).toBe('a6cb8cbd45475025db8aec5248b74d66afefde22f57c933042d5ac53a26b1989');
-  for (const clause of priorClauses(v9)) expect(demo.prompt).toContain(clause);
+  for (const clause of priorClauses(v9)) expect(v10).toContain(clause);
   for (const t of ["'Video kind: TikTok'", "'Video kind: Marketing'", 'kind-tiktok.md', 'kind-marketing.md', 'kind tiktok', 'kind marketing',
     'MP4', 'poster', 'post caption', 'never falls back to a Project demo', "saved project persona's voice", 'no fallback', 'a failure fails the run', 'Kokoro']) {
-    expect(demo.prompt).toContain(t);
+    expect(v10).toContain(t);
   }
+});
+
+const V11_INSERT = "When the saved persona has a cast, every line is spoken in its own speaker's voice, the host's or that cast member's, with the same no-fallback rule, and a cast member with no voice never speaks.";
+
+test('Demo Video v11 speaks every line in its own speaker\'s voice when the persona has a cast, and keeps every v10 clause', () => {
+  const demo = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
+  const v10 = demo.priorPrompts[9];
+  // priorPrompts[9] is the shipped v10 prompt, byte for byte
+  expect(sha256(v10)).toBe('e144c7cc0cce7a719c0b6c0a9356b711e96c0455e5d19dcb2543ea61d66d9fa2');
+  expect(demo.priorPrompts.at(-1)).toBe(v10);
+  for (const clause of priorClauses(v10)) expect(demo.prompt).toContain(clause);
+  // v11 is v10 with exactly the inserted sentence after the Kokoro persona voice clause
+  const anchor = 'a Kokoro persona voice uses its own voice id.';
+  expect(v10.split(anchor)).toHaveLength(2);
+  expect(demo.prompt).toBe(v10.replace(anchor, `${anchor} ${V11_INSERT}`));
 });
 
 test('every built-in macro keeps builtinVersion === priorPrompts.length + 1', () => {
@@ -247,7 +263,7 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   const { MacroSchema, renderMacroPrompt, defaultMacroValues, ensureBuiltins } = require('../macroLibrary.cjs');
   const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
   expect(sha('builtin-project-home')).toBe('86684a527edca103fb7ae9612d412b86d5d4f546b122e6cc900fa9e6d2492113');
-  expect(sha('builtin-demo-video')).toBe('551f50b8e6278d7c5c5096630808fb79ce4694e422b7624cf606822230440587');
+  expect(sha('builtin-demo-video')).toBe('42211c0577a0024f94fdb95cccb6f0f5f065f4e4f3608e3e836fc61cffa63b9b');
   expect(sha('builtin-review-md-network')).toBe('418edb3291360ed3e49462246daf140607c0bb53e53a6cf5854d1e024033bced');
 
   const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');
@@ -410,6 +426,19 @@ test('persona v15: the project persona hosts the video and its command voice has
   for (const needle of ["`voice.engine: 'command'`", 'character.cjs speak', '$SM_PROJECT_ROOT', 'Never use Kokoro', 'the run fails', "`voice.engine: 'kokoro'`", '`voice.id`', 'af_heart']) {
     expect(audio).toContain(needle);
   }
+  for (const banned of ['Burrow', 'Bilko']) expect(raw).not.toContain(banned);
+});
+
+test('persona v19: a saved cast points the builder at cast.md and each line names its speaker', () => {
+  const raw = fs.readFileSync(personaPath, 'utf8');
+  expect(Number(frontmatter(raw).seedVersion) >= 19).toBe(true);
+  expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(27000);
+  const pp = personaSection('project_persona');
+  for (const needle of ['`cast`', '`<kit>/cast.md`', 'before writing the script', '409', '`replace`', 'build unsaved']) expect(pp).toContain(needle);
+  expect(personaSection('kit')).toContain('lines: [{ text, out, speaker? }]');
+  const audio = personaSection('audio_policy');
+  for (const needle of ["cast member's line", 'own `voice`', 'no fallback to the host voice']) expect(audio).toContain(needle);
+  expect(personaSection('when_things_fail')).toContain('never build a replacement for a failed kit tool');
   for (const banned of ['Burrow', 'Bilko']) expect(raw).not.toContain(banned);
 });
 

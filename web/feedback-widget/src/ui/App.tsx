@@ -36,6 +36,7 @@ import { MarksLayer, useMarks } from './MarksLayer';
 import { DEFAULT_MARK_COLOR, type Mark, type MarkColor } from './marks';
 import { DEFAULT_TYPE, Panel } from './Panel';
 import { PanelContext } from './PanelContext';
+import { type PanelSide } from './shared';
 import { Toolbar } from './Toolbar';
 import { baseSheet, loadFonts } from './tokens';
 
@@ -100,6 +101,15 @@ export function snapshotPage(): ReportPage {
       scrollY: window.scrollY,
     },
   };
+}
+
+/** Hostname of the page the report is about (the docked eyebrow), falling back to the live one. */
+export function hostnameOf(url: string | undefined): string {
+  try {
+    return new URL(url ?? location.href).hostname;
+  } catch {
+    return location.hostname;
+  }
 }
 
 function tagFromSelector(selector: string): string {
@@ -191,6 +201,8 @@ export function App(props: AppProps) {
   switchesRef.current = switches;
   const [progress, setProgress] = useState(0);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  /** Flow `docked`: side of the panel column (§5.6 Swap side); kept across opens. */
+  const [panelSide, setPanelSide] = useState<PanelSide>('right');
   /** One clientReportId per report: kept across Retry now, dropped on a new session. */
   const reportIdRef = useRef<string | null>(null);
 
@@ -405,7 +417,7 @@ export function App(props: AppProps) {
   return (
     <>
       <Launcher state={state} variant={config.launcher} capturing={capturing} onOpen={requestOpen} />
-      <CaptureChrome state={state} dispatch={dispatch} capture={capture} toolbar={config.toolbar}>
+      <CaptureChrome state={state} dispatch={dispatch} capture={capture} toolbar={config.toolbar} panelSide={panelSide}>
         <MarksLayer
           marks={marks.marks}
           tool={state.tool}
@@ -447,6 +459,7 @@ export function App(props: AppProps) {
           color={color}
           offset={state.toolbarPos}
           flow={state.config.flow}
+          panelSide={panelSide}
           placement={config.toolbar}
           onTool={(tool) => apply({ type: 'setTool', tool })}
           onColor={setColor}
@@ -465,6 +478,9 @@ export function App(props: AppProps) {
           reportType={reportType}
           onType={setReportType}
           mini={config.launcher === 'mini'}
+          side={panelSide}
+          onSwap={setPanelSide}
+          hostname={hostnameOf(session?.page.url)}
           attached={{
             width: shot.width,
             height: shot.height,

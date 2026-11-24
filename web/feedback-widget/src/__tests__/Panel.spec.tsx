@@ -3,11 +3,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
+import { useState } from 'preact/hooks';
 import {
   BACK_LABEL,
   DETAILS_MAX,
+  DOCKED_HEADLINE,
   EYEBROW,
   HEADLINE,
+  SWAP_TITLE,
+  dockedEyebrow,
   Panel,
   TITLE_ERROR,
   TITLE_MAX,
@@ -19,7 +23,11 @@ import {
   titleValid,
   type PanelProps,
 } from '../ui/Panel';
-import { initialState, reduce, type Event, type State } from '../ui/machine';
+import { initialState, reduce, toolbarVisible, type Event, type State } from '../ui/machine';
+import { CaptureChrome } from '../ui/CaptureChrome';
+import { PANEL_COLUMN, freeArea, type PanelSide } from '../ui/shared';
+import { Toolbar } from '../ui/Toolbar';
+import { DEFAULT_MARK_COLOR } from '../ui/marks';
 
 if (!('adoptedStyleSheets' in ShadowRoot.prototype)) {
   const sheets = new WeakMap<ShadowRoot, CSSStyleSheet[]>();
@@ -326,5 +334,163 @@ describe('reporter footer', () => {
     expect(q('[data-part="sub"]')!.textContent).toBe('from site login');
     expect(reporterView({ name: 'Cher' }).initials).toBe('CH');
     expect(reporterView({ email: 'jo.doe@example.com' })).toEqual({ initials: 'JD', name: 'jo.doe@example.com', sub: 'from site login' });
+  });
+});
+
+// ── Flow docked (§5.6 "docked — side panel", Swap side; §5.3 Free area) ─────────────────────
+
+const dockedRun = (...events: Event[]): State => events.reduce(reduce, initialState({ flow: 'docked' }));
+const dockedOpen = () => dockedRun(OPEN);
+const dockedSending = () => dockedRun(OPEN, { type: 'draft', title: 'Broken' }, { type: 'send' });
+
+describe('flow docked — geometry', () => {
+  const css = panelCss();
+  it('side panel: top 16, bottom 16, right 16, width 380; left 16 after a swap', () => {
+    const base = css.split('\n').find((l) => l.startsWith('.fw-panel{'))!;
+    expect(base).toContain('width:380px');
+    expect(css).toContain('.fw-panel--docked{top:16px;bottom:16px;right:16px;left:auto;max-height:none;');
+    expect(css).toContain('.fw-panel--docked.fw-panel--left{right:auto;left:16px;');
+  });
+
+  it('enters from translateX(+24px) on the right, translateX(-24px) on the left', () => {
+    expect(css).toContain('.fw-panel--docked.fw-panel--hidden{transform:translateX(24px)}');
+    expect(css).toContain('.fw-panel--docked.fw-panel--left.fw-panel--hidden{transform:translateX(-24px)}');
+    // Reduced motion drops the slide for both sides.
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion:reduce)'));
+    expect(reduced).toContain('.fw-panel--docked.fw-panel--hidden');
+    expect(reduced).toContain('.fw-panel--docked.fw-panel--left.fw-panel--hidden{transform:none}');
+  });
+
+  it('is visible from open onward (annotate, sending, error), hidden when idle', () => {
+    expect(mount({ state: initialState({ flow: 'docked' }) }).className).toContain('fw-panel--hidden');
+    const el = mount({ state: dockedOpen() });
+    expect(el.className).toContain('fw-panel--docked');
+    expect(el.className).not.toContain('fw-panel--hidden');
+    expect(el.dataset.side).toBe('right');
+    expect(mount({ state: dockedSending() }).className).not.toContain('fw-panel--hidden');
+    expect(mount({ state: reduce(dockedSending(), { type: 'sendFail' }) }).className).not.toContain('fw-panel--hidden');
+  });
+
+  it('ignores the mini launcher (that only moves the annotate corner card)', () => {
+    const el = mount({ state: dockedOpen(), mini: true });
+    expect(el.className).not.toContain('fw-panel--mini');
+  });
+
+  it('controlled side=left renders on the left', () => {
+    const el = mount({ state: dockedOpen(), side: 'left' });
+    expect(el.className).toContain('fw-panel--left');
+    expect(el.dataset.side).toBe('left');
+  });
+});
+
+describe('flow docked — header', () => {
+  it("eyebrow 'Feedback · {hostname}', headline \"What's going on?\"", () => {
+    mount({ state: dockedOpen(), hostname: 'stays.example.com' });
+    expect(q('.fw-pn-eyebrow')!.textContent).toBe('Feedback · stays.example.com');
+    expect(dockedEyebrow('a.b')).toBe('Feedback · a.b');
+    expect(q('.fw-pn-headline')!.textContent).toBe(DOCKED_HEADLINE);
+    expect(DOCKED_HEADLINE).toBe("What's going on?");
+  });
+
+  it('hostname defaults to location.hostname', () => {
+    mount({ state: dockedOpen() });
+    expect(q('.fw-pn-eyebrow')!.textContent).toBe(`Feedback · ${location.hostname}`);
+  });
+
+  it('no ← Marks in docked, even in error', () => {
+    mount({ state: reduce(dockedSending(), { type: 'sendFail' }) });
+    expect(q('[data-part="back"]')).toBeNull();
+  });
+
+  it('annotate flow has no swap button', () => {
+    mount({ state: review() });
+    expect(q('[data-part="swap"]')).toBeNull();
+  });
+});
+
+describe('flow docked — swap side', () => {
+  it('30×30 button titled "Move panel to the other side", ⇄ icon 17, hover #e3dcc8', () => {
+    mount({ state: dockedOpen() });
+    const b = q<HTMLButtonElement>('[data-part="swap"]')!;
+    expect(b.title).toBe(SWAP_TITLE);
+    expect(SWAP_TITLE).toBe('Move panel to the other side');
+    const css = panelCss();
+    expect(css).toMatch(/\.fw-pn-swap\{[^}]*width:30px;height:30px;[^}]*color:#5d5648/);
+    expect(css).toContain('.fw-pn-swap:hover{background:#e3dcc8}');
+    expect(css).toMatch(/\.fw-pn-swap svg\{width:17px;height:17px/);
+  });
+
+  it('moves the panel to the other side and back, resetting the toolbar position each time', () => {
+    const onSwap = vi.fn();
+    const p = live(dockedRun(OPEN, { type: 'moveToolbar', pos: { x: 40, y: 12 } }), { onSwap });
+    expect(p.state.toolbarPos).toEqual({ x: 40, y: 12 });
+    act(() => q<HTMLButtonElement>('[data-part="swap"]')!.click());
+    expect(q('.fw-panel')!.className).toContain('fw-panel--left');
+    expect(onSwap).toHaveBeenLastCalledWith('left');
+    expect(p.events).toContainEqual({ type: 'moveToolbar', pos: null });
+    expect(p.state.toolbarPos).toBeNull();
+    act(() => q<HTMLButtonElement>('[data-part="swap"]')!.click());
+    expect(q('.fw-panel')!.className).not.toContain('fw-panel--left');
+    expect(onSwap).toHaveBeenLastCalledWith('right');
+  });
+
+  it('is hidden while sending and back on error', () => {
+    mount({ state: dockedSending() });
+    expect(q('[data-part="swap"]')).toBeNull();
+    mount({ state: reduce(dockedSending(), { type: 'sendFail' }) });
+    expect(q('[data-part="swap"]')).not.toBeNull();
+  });
+});
+
+describe('flow docked — free area (§5.3)', () => {
+  it('excludes the 412 px panel column on the panel side', () => {
+    expect(PANEL_COLUMN).toBe(412);
+    expect(freeArea(1280, 'docked', 'right')).toEqual({ x0: 0, x1: 868 });
+    expect(freeArea(1280, 'docked', 'left')).toEqual({ x0: 412, x1: 1280 });
+    expect(freeArea(1280, 'annotate', 'left')).toEqual({ x0: 0, x1: 1280 });
+  });
+
+  /** App's wiring in miniature: one panel side shared by Panel, Toolbar and the hint chip. */
+  function Docked({ start }: { start: State }) {
+    const [s, setS] = useState(start);
+    const [side, setSide] = useState<PanelSide>('right');
+    const dispatch = (e: Event) => setS((cur) => reduce(cur, e));
+    return (
+      <>
+        <CaptureChrome state={s} dispatch={dispatch} capture={null} panelSide={side} />
+        <Toolbar
+          visible={toolbarVisible(s)}
+          tool={s.tool}
+          color={DEFAULT_MARK_COLOR}
+          offset={s.toolbarPos}
+          flow={s.config.flow}
+          panelSide={side}
+          viewportWidth={window.innerWidth}
+          viewportHeight={window.innerHeight}
+          onTool={() => {}}
+          onColor={() => {}}
+          onUndo={() => {}}
+          onDescribe={() => {}}
+          onClose={() => {}}
+          onMove={(pos) => dispatch({ type: 'moveToolbar', pos })}
+        />
+        <Panel state={s} dispatch={dispatch} side={side} onSwap={setSide} hostname="h" />
+      </>
+    );
+  }
+
+  it('toolbar and hint centre on the free area, and follow a swap', () => {
+    const W = window.innerWidth;
+    act(() => render(<Docked start={dockedRun(OPEN, { type: 'moveToolbar', pos: { x: 30, y: 5 } })} />, shadow as unknown as Element));
+    const tb = () => q<HTMLDivElement>('.fw-tb')!;
+    const hint = () => q<HTMLDivElement>('.fw-hint')!;
+    // Dragged toolbar: offset applied on top of the free-area centre.
+    expect(tb().style.left).toBe(`${(W - PANEL_COLUMN) / 2 + 30}px`);
+    expect(hint().style.left).toBe(`${(W - PANEL_COLUMN) / 2}px`);
+    act(() => q<HTMLButtonElement>('[data-part="swap"]')!.click());
+    // Swapped left: free area [412, W]; toolbar back at rest.
+    expect(tb().style.left).toBe(`${(PANEL_COLUMN + W) / 2}px`);
+    expect(tb().style.top).toBe('16px');
+    expect(hint().style.left).toBe(`${(PANEL_COLUMN + W) / 2}px`);
   });
 });

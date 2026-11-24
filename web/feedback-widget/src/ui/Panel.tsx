@@ -1,5 +1,5 @@
-// Panel, flow `annotate` — the corner card of handoff README §5.6: Container, Geometry
-// "annotate — corner card", Header, Body (Type · Title · Details) and Footer (reporter + Send
+// Panel, flows `annotate` and `docked` — handoff README §5.6: Container, Geometry
+// "annotate — corner card" and "docked — side panel" (with Swap side), Header, Body (Type · Title · Details) and Footer (reporter + Send
 // with upload progress). Visibility from §2 (machine.panelVisible); the Send/Esc/⌘↵ semantics
 // stay in the machine — this component only dispatches.
 //
@@ -16,7 +16,7 @@ import type { FeedbackUser } from '../host';
 import type { ReportType } from '../report';
 import { panelVisible, type Event, type State } from './machine';
 import { Receipt, receiptCss } from './Receipt';
-import { adoptInto } from './shared';
+import { adoptInto, type PanelSide } from './shared';
 import { colors, fonts, motion } from './tokens';
 
 // ── Copy & rules (§5.6) ───────────────────────────────────────────────────────
@@ -24,6 +24,17 @@ import { colors, fonts, motion } from './tokens';
 export const EYEBROW = 'Step 2 of 2 · Describe';
 export const HEADLINE = 'Describe what you marked';
 export const BACK_LABEL = '← Marks';
+/** Flow `docked` header copy (§5.6). */
+export const DOCKED_HEADLINE = "What's going on?";
+export const SWAP_TITLE = 'Move panel to the other side';
+
+export function dockedEyebrow(hostname: string): string {
+  return `Feedback · ${hostname}`;
+}
+
+function currentHostname(): string {
+  return typeof location === 'undefined' ? '' : location.hostname;
+}
 export const TITLE_ERROR = 'Add a short title so the team can find this.';
 export const TITLE_MIN = 3;
 export const TITLE_MAX = 120;
@@ -121,6 +132,12 @@ export function panelCss(): string {
       `transition:opacity 280ms ${ease}, transform 400ms ${ease}, visibility 400ms ${ease}, left 400ms ${ease}, top 400ms ${ease}}`,
     `.fw-panel--mini{right:auto;left:20px;transform-origin:left bottom}`,
     `.fw-panel--hidden{opacity:0;visibility:hidden;transform:translateY(16px) scale(.98);pointer-events:none}`,
+    // Flow docked — side panel: top 16, bottom 16, right 16 (left 16 after a swap), width 380;
+    // enters from translateX(±24px), sliding in from its own edge.
+    `.fw-panel--docked{top:16px;bottom:16px;right:16px;left:auto;max-height:none;transform-origin:right center}`,
+    `.fw-panel--docked.fw-panel--left{right:auto;left:16px;transform-origin:left center}`,
+    `.fw-panel--docked.fw-panel--hidden{transform:translateX(24px)}`,
+    `.fw-panel--docked.fw-panel--left.fw-panel--hidden{transform:translateX(-24px)}`,
     `.fw-pn-progress{position:absolute;top:0;left:0;height:3px;width:0;background:${c.accent};z-index:1;transition:width 200ms ${ease}}`,
     // Header
     // Design review scene: one row — [eyebrow over headline] beside [← Marks][×], top-aligned. The
@@ -134,6 +151,9 @@ export function panelCss(): string {
     `.fw-pn-back:hover{background:${c['paper-2']}}`,
     `.fw-pn-close{flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;color:${c['ink-3']}}`,
     `.fw-pn-close:hover{background:${c['paper-3']}}`,
+    `.fw-pn-swap{flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;color:${c['ink-3']}}`,
+    `.fw-pn-swap:hover{background:${c['paper-3']}}`,
+    `.fw-pn-swap svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}`,
     `.fw-pn-close svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}`,
     // Body
     `.fw-pn-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:16px;padding:16px 20px 18px}`,
@@ -180,7 +200,7 @@ export function panelCss(): string {
     // §4 reduced motion: no translate/scale, fades capped at 150 ms.
     `@media (prefers-reduced-motion:reduce){` +
       `.fw-panel{transition:opacity 150ms, visibility 150ms}` +
-      `.fw-panel--hidden{transform:none}}`,
+      `.fw-panel--hidden,.fw-panel--docked.fw-panel--hidden,.fw-panel--docked.fw-panel--left.fw-panel--hidden{transform:none}}`,
   ].join('\n');
 }
 
@@ -212,8 +232,14 @@ export interface PanelProps {
   /** Controlled report type; omitted → the panel keeps its own (default Bug, reset per open). */
   reportType?: ReportType;
   onType?: (t: ReportType) => void;
-  /** Launcher variant `mini` puts the card bottom-left. */
+  /** Launcher variant `mini` puts the card bottom-left (flow annotate only). */
   mini?: boolean;
+  /** Flow `docked`: which side the panel sits on. Omitted → the panel keeps its own (default right). */
+  side?: PanelSide;
+  /** Flow `docked`: Swap side was pressed; receives the new side. */
+  onSwap?: (side: PanelSide) => void;
+  /** Eyebrow hostname for flow `docked` (defaults to location.hostname). */
+  hostname?: string;
   /** Override for the shortcut chip platform test (defaults to navigator.platform). */
   platform?: string;
   /** Receipt "Screenshot" / "Console" / "Network" rows (§5.7); defaults: viewport size, nothing captured. */
@@ -244,9 +270,15 @@ export function Panel(props: PanelProps) {
   const type = props.reportType ?? (ownType.session === state.session ? ownType.type : DEFAULT_TYPE);
   const spec = TYPES.find((t) => t.id === type) ?? TYPES[0]!;
 
-  const visible = state.config.flow === 'annotate' && panelVisible(state);
+  const [ownSide, setOwnSide] = useState<PanelSide>('right');
+  const flow = state.config.flow;
+  const docked = flow === 'docked';
+  const side = props.side ?? ownSide;
+  const visible = (flow === 'annotate' || docked) && panelVisible(state);
   const sending = state.mode === 'sending';
-  const showBack = state.mode === 'review' || state.mode === 'error';
+  const showBack = flow === 'annotate' && (state.mode === 'review' || state.mode === 'error');
+  const eyebrow = docked ? dockedEyebrow(props.hostname ?? currentHostname()) : EYEBROW;
+  const headline = docked ? DOCKED_HEADLINE : HEADLINE;
   const invalid = !titleValid(state.draft.title);
   const reporter = reporterView(user);
   const showReceipt = state.mode === 'sent' && state.config.success === 'receipt';
@@ -274,6 +306,15 @@ export function Panel(props: PanelProps) {
     return () => clearTimeout(t);
   }, [state.focusTitleSeq, state.titleError]);
 
+  /** §5.6 Swap side: move the panel and put the toolbar back at its rest position. */
+  const swap = () => {
+    if (sending) return;
+    const next: PanelSide = side === 'right' ? 'left' : 'right';
+    setOwnSide(next);
+    props.onSwap?.(next);
+    dispatch({ type: 'moveToolbar', pos: null });
+  };
+
   const pickType = (t: ReportType) => {
     if (sending) return;
     setOwnType({ session: state.session, type: t });
@@ -283,7 +324,8 @@ export function Panel(props: PanelProps) {
   return (
     <div
       ref={ref}
-      class={`fw-panel${mini ? ' fw-panel--mini' : ''}${visible ? '' : ' fw-panel--hidden'}`}
+      class={`fw-panel${docked ? ` fw-panel--docked${side === 'left' ? ' fw-panel--left' : ''}` : mini ? ' fw-panel--mini' : ''}${visible ? '' : ' fw-panel--hidden'}`}
+      data-side={docked ? side : undefined}
       role="region"
       aria-label={showReceipt ? 'Feedback received' : 'Describe your feedback'}
       aria-hidden={visible ? undefined : 'true'}
@@ -307,12 +349,19 @@ export function Panel(props: PanelProps) {
       <>
       <div class="fw-pn-head">
         <div class="fw-pn-headtext">
-          <div class="fw-pn-eyebrow">{EYEBROW}</div>
-          <h2 class="fw-pn-headline" data-part="headline">{HEADLINE}</h2>
+          <div class="fw-pn-eyebrow">{eyebrow}</div>
+          <h2 class="fw-pn-headline" data-part="headline">{headline}</h2>
         </div>
         {showBack && (
           <button type="button" class="fw-pn-back" data-part="back" onClick={() => dispatch({ type: 'backToMarks' })}>
             {BACK_LABEL}
+          </button>
+        )}
+        {docked && !sending && (
+          <button type="button" class="fw-pn-swap" data-part="swap" title={SWAP_TITLE} aria-label={SWAP_TITLE} onClick={swap}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 8h15M15 4l4 4-4 4M20 16H5M9 12l-4 4 4 4" />
+            </svg>
           </button>
         )}
         <button

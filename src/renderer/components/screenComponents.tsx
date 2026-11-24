@@ -54,7 +54,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
   'memory':        { title: 'Claude config',             intro: 'This project\'s own Claude Code files — its memory folder, CLAUDE.md and CLAUDE.local.md, .claude/settings.json and settings.local.json, .mcp.json and .claude/skills/. Each tab edits the real file the claude CLI reads when a session starts here; ~/.claude is edited from Home.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
-  'app-settings':  { title: 'App Settings',              intro: 'Session Manager\'s own preferences — voice, appearance, telemetry, phone remote, updates and the storage map.' },
+  'app-settings':  { title: 'App Settings',              intro: 'Session Manager\'s own preferences — voice, appearance, telemetry, web remote, updates and the storage map.' },
 }
 
 /**

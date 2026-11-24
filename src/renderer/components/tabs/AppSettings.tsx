@@ -22,7 +22,7 @@ const TABS = [
   { key: 'voice', label: 'Voice' },
   { key: 'appearance', label: 'Appearance' },
   { key: 'telemetry', label: 'Telemetry' },
-  { key: 'remote', label: 'Phone remote' },
+  { key: 'remote', label: 'Web remote' },
   { key: 'updates', label: 'Updates & retention' },
   { key: 'startup', label: 'Startup' },
   { key: 'storage', label: 'Storage map' },

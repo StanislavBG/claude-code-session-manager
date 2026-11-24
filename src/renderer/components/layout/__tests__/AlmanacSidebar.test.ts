@@ -219,7 +219,7 @@ describe('AlmanacSidebar', () => {
 
       expect(text).toContain('Session Manager')
       expect(text).toContain('App Settings')
-      expect(text).toContain('Voice, appearance, telemetry, phone remote, updates, storage map')
+      expect(text).toContain('Voice, appearance, telemetry, web remote, updates, storage map')
     } finally {
       act(() => root.unmount())
       container.remove()

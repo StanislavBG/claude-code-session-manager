@@ -52,14 +52,14 @@ const chips = () => Array.from(container.querySelectorAll('[data-testid="source-
 describe('AppSettings', () => {
   it('offers the seven tabs', () => {
     const labels = Array.from(container.querySelectorAll('button')).map((b) => b.textContent).slice(0, 7)
-    expect(labels).toEqual(['Voice', 'Appearance', 'Telemetry', 'Phone remote', 'Updates & retention', 'Startup', 'Storage map'])
+    expect(labels).toEqual(['Voice', 'Appearance', 'Telemetry', 'Web remote', 'Updates & retention', 'Startup', 'Storage map'])
   })
 
   const cases: Array<[string, string[], string[]]> = [
     ['Voice', ['stub-voice'], ['voice.json']],
     ['Appearance', ['stub-terminal'], ['ui-settings-prefs.json', 'ui-chrome-prefs.json']],
     ['Telemetry', ['stub-telemetry'], ['telemetry.json', 'otel.json']],
-    ['Phone remote', ['stub-remote'], ['web-remote.json']],
+    ['Web remote', ['stub-remote'], ['web-remote.json']],
     ['Updates & retention', ['stub-updates', 'stub-retention'], ['updater.json', 'ops-retention.json']],
     ['Storage map', ['stub-datamodel'], []],
   ]

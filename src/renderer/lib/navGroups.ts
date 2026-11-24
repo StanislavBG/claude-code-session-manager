@@ -76,7 +76,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'memory',         group: 'Claude Code', label: 'Claude config',  icon: 'settings',       hint: 'This project\'s own files — CLAUDE.md, CLAUDE.local.md, settings, MCP, skills', faces: PROJECT },
 
   // Session Manager — this app's own preferences
-  { key: 'app-settings', group: 'Session Manager', label: 'App Settings', icon: 'compass', hint: 'Voice, appearance, telemetry, phone remote, updates, storage map', faces: HOME },
+  { key: 'app-settings', group: 'Session Manager', label: 'App Settings', icon: 'compass', hint: 'Voice, appearance, telemetry, web remote, updates, storage map', faces: HOME },
 ]
 
 /**

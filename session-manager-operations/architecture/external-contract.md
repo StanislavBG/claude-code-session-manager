@@ -36,7 +36,23 @@ A missing or wrong token answers `401 { "ok": false, "error": "unauthorized" }`.
 
 ### Health
 
-`GET /__admin/health` → `200 { "ok": true, "contractVersion": 1, "appVersion": "0.138.0" }`.
+`GET /__admin/health` answers `200` with `healthInfo()` (`src/main/lib/externalContract.cjs`):
+
+```json
+{
+  "ok": true,
+  "contractVersion": 1,
+  "appVersion": "0.141.0",
+  "taskBodyKeys": ["cwd", "agent", "missionId", "prompt", "timeoutSec", "slotWaitSec", "priority", "caller", "runtime", "stream"],
+  "taskRuntimeKeys": ["outputFormat", "settingSources", "mcpConfig", "strictMcpConfig", "allowedTools", "tools", "maxTurns", "systemPrompt", "appendSystemPrompt", "disallowedTools", "skipPermissions", "disableAutoMemory", "sessionId", "resume", "persistSession", "cwd"],
+  "taskGetKeys": ["cwd", "id", "after"]
+}
+```
+
+The three lists are the keys `POST /admin/tasks` accepts at the top level (`taskBodyKeys`) and under
+`runtime` (`taskRuntimeKeys`), and the query keys of `GET /admin/task` (`taskGetKeys`). The Task schemas are
+strict, so an older app answers `400 invalid_request` to a key it does not know. **Before you rely on an
+additive Task key, check it is in the matching list.** New keys are additive: `contractVersion` stays `1`.
 
 An unknown route answers `404` with `error: "not found"`, `unknownRoute` (for example `"GET /admin/nope"`),
 `contractVersion` and `appVersion`. A route's own "not found" (for example an unknown Epic) has no
@@ -682,31 +698,57 @@ Tasks** for the project on the Scheduler → Tasks page. Code: `src/main/lib/tas
 
 | Route | Body | Answer |
 | --- | --- | --- |
-| `POST /admin/tasks` | `{ cwd, agent, missionId, prompt, timeoutSec?, slotWaitSec?, priority?, caller?, runtime? }` | `200 { ok: true, taskId, status, stdout, envelope, usage, costUsd, cliCostUsd, durationMs, slotWaitMs, exitCode, model, effort, sessionId, quota }` |
+| `POST /admin/tasks` | `{ cwd, agent, missionId, prompt, timeoutSec?, slotWaitSec?, priority?, caller?, runtime?, stream? }` | `200 { ok: true, taskId, status, stdout, envelope, usage, costUsd, cliCostUsd, durationMs, slotWaitMs, exitCode, model, effort, sessionId, quota }` |
 
 - `cwd` is the absolute project root. `agent` names a persona; its `model` and `effort` are used, never its
   body. `timeoutSec` 1-3600 (default 600), `slotWaitSec` 0-3600 (default 120), `priority` `interactive` or
   `batch` (default). `caller` is `{ pipeline?, runId?, step?, attempt? }`.
 - `runtime` is `{ outputFormat?: json|text|stream-json, settingSources?, mcpConfig?: string[] (relative to
   cwd), strictMcpConfig?, allowedTools?: string[], tools?: string[] (an empty array denies all), maxTurns?
-  1-200, systemPrompt? (≤ 100 KiB, replaces the system prompt), skipPermissions?, disableAutoMemory?,
-  sessionId? (uuid), resume? (uuid), persistSession?, cwd? (absolute dir to run in) }`. Unknown keys are
-  rejected. No caller environment variable reaches the child.
+  1-200, systemPrompt? (≤ 100 KiB, replaces the system prompt), appendSystemPrompt?, disallowedTools?,
+  skipPermissions?, disableAutoMemory?, sessionId? (uuid), resume? (uuid), persistSession?, cwd? (absolute
+  dir to run in) }`. Unknown keys are rejected. No caller environment variable reaches the child.
+- `runtime.appendSystemPrompt` is at most 100 KiB (UTF-8). It becomes `--append-system-prompt <text>`: it is
+  appended after Claude Code's default system prompt, or after `systemPrompt` when both are given.
+- `runtime.disallowedTools` is a list of at most 50 permission deny rules, for example
+  `"WebFetch(domain:localhost)"`. Each rule must be non-empty after trimming, at most 500 chars, with no control
+  characters; a rule with `(` needs a tool name before it, a trailing `)` and balanced parentheses. A rule that
+  fails gives `400 invalid_request` (`invalid tool rule`). Each rule reaches the CLI as its **own** argv
+  element after `--disallowedTools`, so one rule can never swallow the next. An empty array sends nothing.
 - Errors: `400 invalid_request` (with `details`; also `sessionId` with `resume`, or `resume` with
   `persistSession: false`), `400 mcp_config_missing`, `403 tasks_disabled` (with `hint`), `404 unknown_agent`,
   `409 session_busy`, `422 model_unresolved` / `effort_unresolved`, `429 too_many_waiting`, `503 slot_timeout`.
 - `status` in a `200` is the run's outcome: `ok`, `error`, `rate_limited`, `timeout`, `spawn_failed`. Closing
   the connection before the answer cancels the wait or the run (ledger status `caller_gone`).
 
+#### Stream mode: `stream: true`
+
+With `stream: true`, every refusal before the ledger start line keeps its normal status and JSON body (the
+`400`, `403`, `404`, `409` and `422` answers above). After the start line the route answers
+`200 application/x-ndjson`, one JSON object per line, in this order:
+
+| Line | When |
+| --- | --- |
+| `{ type: 'sm_task_started', taskId, model, effort, sessionId, startedAt }` | Right after the start line, before the slot wait |
+| `{ type: 'sm_task_running', slotWaitMs }` | Once the slot is granted |
+| each child stdout line, as-is | The line parses as a JSON object (for example a `stream-json` event) |
+| `{ type: 'sm_task_stdout', text }` | Any other child stdout line |
+| `{ type: 'sm_task_result', ... }` | Last. The non-stream `200` answer plus `droppedLines`, or the error object the JSON answer would carry (for example `ok: false, error: 'slot_timeout', taskId, slotWaitMs`) |
+
+- Closing the connection before the `sm_task_result` line cancels the wait or the run (`caller_gone`).
+- While more than 8 MiB of the answer is unsent (the caller stopped reading), output lines are skipped and
+  counted in `droppedLines`. The result line is still written.
+- The stream never carries stderr, env or argv.
+
 ### Reading Tasks and importing direct calls
 
 | Route | MCP tool | Query / body | Answer |
 | --- | --- | --- | --- |
 | `GET /admin/tasks` | `task_list` | `?cwd=&since=&until=&pipeline=&runId=&step=&agent=&status=&source=&limit=&offset=` | `200 { ok: true, tasks, total, hasMore }` |
-| `GET /admin/task` | `task_get` | `?cwd=&id=` | `200 { ok: true, task }` |
+| `GET /admin/task` | `task_get` | `?cwd=&id=&after=` | `200 { ok: true, task }` |
 | `POST /admin/tasks/import` | — | `{ cwd, records: [...] }` (1-100 records, body ≤ 8 MiB) | `200 { ok: true, imported, alreadyImported, rejected: [{ index, error }] }` |
 
-- `task_list` (required `cwd`) and `task_get` (required `cwd`, `id`) are read-only MCP wrappers of the two
+- `task_list` (required `cwd`) and `task_get` (required `cwd`, `id`; optional `after`) are read-only MCP wrappers of the two
   read routes: same arguments, same JSON answer. No MCP tool runs or imports a Task.
 
 - `cwd` must be the absolute project root (`400 invalid_request` otherwise). The two read routes work whatever
@@ -716,7 +758,14 @@ Tasks** for the project on the Scheduler → Tasks page. Code: `src/main/lib/tas
   `limit` 1-200 (default 50), `offset` ≥ 0. Each task has exactly the `taskFields` keys of
   `externalContract.cjs` (absent values are `null`) and never prompt or output text.
 - `GET /admin/task` adds `prompt`, `promptTruncated`, `output`, `outputTruncated`, `stderrTail`, `envelope`
-  (each text capped at 1 MiB). An unknown id answers `404 unknown_task`.
+  (each text capped at 1 MiB) and `live`. An unknown id answers `404 unknown_task`.
+- `GET /admin/task` follows a running Task. While this app is still running the Task, `status` is `running`,
+  `output` is the captured stdout lines from byte offset `after` (default 0), at most 1 MiB cut at a line
+  boundary, `outputTruncated` is `true` when more lines remain, `stderrTail` and `envelope` are `null`, and
+  `live` is `{ slotAcquired, outputEnd, outputCapped }`. Pass `outputEnd` as the next `after` to get only newer
+  lines. `outputCapped` is `true` once the 8 MiB capture cap is reached. For any other Task `live` is `null`,
+  and `after` slices the stored output by bytes, rounded forward to the next line boundary. `GET /admin/tasks`
+  also reports a Task this app is still running as `running`, never `interrupted`.
 - Import hands over the `claude -p` calls a caller made itself while Session Manager was down. A record is
   `{ importId, agent?, model, effort?, missionId, caller?, startedAt (ISO), durationMs, status, exitCode?,
   usage?, costUsd?, sessionId? (uuid), persisted?, prompt?, output?, envelope? }`; `status` is one of `ok`,

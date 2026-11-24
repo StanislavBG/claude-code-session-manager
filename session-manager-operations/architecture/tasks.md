@@ -131,6 +131,7 @@ The body is JSON, at most **4 MiB**. The schema is strict: an unknown key at any
 | `priority` | `'interactive'` \| `'batch'` | `'batch'` | Slot lane `task-interactive` / `task-batch`. Interactive waiters are served first. |
 | `caller` | object | `{}` | Strict. `pipeline`, `runId`, `step` (strings ≤ 200) and `attempt` (int ≥ 0). Stored, and filterable in `GET /admin/tasks`. |
 | `runtime` | object | `{ outputFormat: 'json' }` | Strict. See the next table. |
+| `stream` | boolean | absent | `true` → the answer is NDJSON lines while the Task runs (see [Following a running Task](#following-a-running-task)). |
 
 `runtime` fields (all optional):
 
@@ -139,11 +140,13 @@ The body is JSON, at most **4 MiB**. The schema is strict: an unknown key at any
 | `outputFormat` | `'json'` \| `'text'` \| `'stream-json'` | Default `'json'`. The `text` format still runs the CLI with `--output-format json` (see [text output](#text-output)). |
 | `settingSources` | string | `--setting-sources <value>`. |
 | `mcpConfig` | string[] (each non-empty) | Each path is resolved against the **project cwd** (relative paths included). A missing file gives `400 mcp_config_missing` with `details` = the missing absolute paths. |
-| `strictMcpConfig` | boolean | `true` → `--strict-mcp-config`. |
+| `strictMcpConfig` | boolean | Accepted. `--strict-mcp-config` is sent on every Task whatever its value (MCP is always strict). |
 | `allowedTools` | string[] | `--allowedTools a,b`. An **empty array** is valid and denies all tools (see [argv](#the-argv-a-task-runs-with)). |
 | `tools` | string[] | `--tools a,b`. The empty-array rule is the same. |
 | `maxTurns` | int | 1–200 → `--max-turns`. |
-| `systemPrompt` | string | ≤ 100 KiB (UTF-8) → `--system-prompt`, which **replaces** the system prompt. It never uses `--append-system-prompt`. |
+| `systemPrompt` | string | ≤ 100 KiB (UTF-8) → `--system-prompt`, which **replaces** the system prompt. |
+| `appendSystemPrompt` | string | ≤ 100 KiB (UTF-8) → `--append-system-prompt`. It is appended after Claude Code's default system prompt, or after `systemPrompt` when both are given. |
+| `disallowedTools` | string[] | ≤ 50 permission deny rules, e.g. `"WebFetch(domain:localhost)"` → `--disallowedTools` then each rule as its **own** argv element. An empty array sends nothing. Each rule is checked (see [argv](#the-argv-a-task-runs-with)); a bad one gives `400 invalid_request` (`invalid tool rule`). |
 | `skipPermissions` | boolean | `true` → `--dangerously-skip-permissions` plus whatever headless permission args the CLI-caps probe adds. |
 | `disableAutoMemory` | boolean | `true` → the child gets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (see [environment](#environment)). |
 | `sessionId` | uuid | `--session-id <uuid>`. You cannot send it together with `resume`. |
@@ -214,7 +217,7 @@ Content-Type: application/json
 | `taskId` | A new UUID. Use it as the key for `GET /admin/task`. |
 | `status` | `ok`, `error`, `timeout`, `rate_limited`, `caller_gone` or `spawn_failed` (see [statuses](#task-statuses)). |
 | `stdout` | The CLI's stdout, capped at 8 MiB. For `outputFormat: 'text'` it is `envelope.result + "\n"` instead. |
-| `envelope` | The parsed JSON result object. For stream-json it is the last `type: "result"` line. It is `null` if nothing parsed. |
+| `envelope` | The parsed JSON result object. For stream-json it is the last `type: "result"` line. It is `null` if nothing parsed. The result line is kept past the 8 MiB stdout cap: when the cap cuts stdout (`runTask`'s `stdoutCapped: true`), every line is still read one by one, the last `type: "result"` line seen becomes the envelope, and a rejected `rate_limit_event` after the cap still sets `quota`. |
 | `usage` | `envelope.usage`, or `null`. |
 | `costUsd` | Session Manager's price: `costOfUsage` on the first model in `envelope.modelUsage`, else on the model it passed. It is `null` without usage. |
 | `cliCostUsd` | The CLI's own `total_cost_usd`, or `null`. |
@@ -259,7 +262,7 @@ Statuses are stored on the `end` (or `imported`) line. `GET` routes return them 
 | `rate_limited` | The output or envelope shows a rate limit (`rateLimitDetect.cjs`). See `quota.resetsAt`. |
 | `caller_gone` | The HTTP caller disconnected during the wait or the run; the child was killed. |
 | `spawn_failed` | The `claude` binary could not be spawned (ENOENT, EACCES, …); the reason is in `stderrTail`. |
-| `interrupted` | Read-time only. A start line with no end line, whose `startedAt + timeoutSec + 120 s` has passed (for example, the app quit mid-run). |
+| `interrupted` | Read-time only. A start line with no end line, whose `startedAt + slotWaitSec + timeoutSec + 120 s` has passed (for example, the app quit mid-run). `startedAt` is stamped before the slot wait, so the window counts it; a missing `slotWaitSec` counts as 0. A Task this app is still running reads `running` instead. |
 | `running` | Read-time only. A start line with no end line that is still inside that window. |
 
 `too_many_waiting` can also be stored as an end status (the 429 case). An import may carry it too.
@@ -275,13 +278,15 @@ argv.
 [--resume <uuid>]                           # runtime.resume
 [--no-session-persistence]                  # unless persistSession === true or resume is set
 [--setting-sources <s>]
-[--strict-mcp-config]
+--strict-mcp-config                         # always
 [--max-turns <n>]
 [--system-prompt <text>]                    # replaces the system prompt
+[--append-system-prompt <text>]             # runtime.appendSystemPrompt; single-valued, so before the variadic block
 [--dangerously-skip-permissions <headless permission args>]
 [--mcp-config <abs path>...]                # each path.resolve(projectCwd, p)
 [--allowedTools <a,b>]                      # present whenever the array is given
 [--tools <a,b>]
+[--disallowedTools <rule> <rule>...]        # one argv element per rule; absent for an empty array
 --output-format json | --output-format stream-json --verbose
 ```
 
@@ -294,9 +299,17 @@ argv.
   it is an **empty array**, the flag is sent with an empty value (`--allowedTools ""`), which denies all tools.
   These variadic flags come after `--mcp-config` and before `--output-format`, so the next flag always ends
   their list.
+- **Deny rules.** `disallowedTools` is sent only when the array is non-empty: `--disallowedTools`, then each
+  rule as its own argv element. The CLI splits one element on commas and spaces outside parentheses, so
+  joined rules would let one bad rule swallow the rest. The route checks each rule first: non-empty after
+  trimming, at most 500 chars, no control characters, and when it has `(`, a tool name before it, a trailing
+  `)` and balanced parentheses. An unbalanced rule would become a deny that silently never applies, so it is
+  refused, never passed on.
 - **MCP config.** Relative `mcpConfig` paths are resolved against the **project cwd**, even when `runtime.cwd`
   points somewhere else.
-- **System prompt.** `systemPrompt` becomes `--system-prompt`, which **replaces** the system prompt. No persona
+- **System prompt.** `systemPrompt` becomes `--system-prompt`, which **replaces** the system prompt.
+  `appendSystemPrompt` becomes `--append-system-prompt`, which is appended after the default system prompt, or
+  after `systemPrompt` when both are given. `--append-system-prompt` carries only the caller's text: no persona
   body is ever added.
 - **Output.** `stream-json` adds `--verbose`, which the CLI needs for that format. `json` and `text` both run
   `--output-format json`.
@@ -364,7 +377,8 @@ Errors: `400 invalid_request` (`details`) and `500 ledger_read_failed`.
 
 ## `GET /admin/task` — one Task with its text
 
-Query: `cwd` (must be a project root) and `id` (the taskId, ≤ 200 chars).
+Query: `cwd` (must be a project root), `id` (the taskId, ≤ 200 chars) and optional `after` (a byte offset into
+the Task's stdout, int ≥ 0; see [Following a running Task](#following-a-running-task)).
 
 ```http
 GET /admin/task?cwd=%2Fhome%2Fme%2FProjects%2FBurrow&id=6d1c2f8e-3b0a-4f7e-9d52-1a2b3c4d5e6f
@@ -380,7 +394,8 @@ GET /admin/task?cwd=%2Fhome%2Fme%2FProjects%2FBurrow&id=6d1c2f8e-3b0a-4f7e-9d52-
     "output": "{\"type\":\"result\",…}",
     "outputTruncated": false,
     "stderrTail": "",
-    "envelope": { "type": "result", "result": "- note one\n…" }
+    "envelope": { "type": "result", "result": "- note one\n…" },
+    "live": null
   }
 }
 ```
@@ -388,8 +403,54 @@ GET /admin/task?cwd=%2Fhome%2Fme%2FProjects%2FBurrow&id=6d1c2f8e-3b0a-4f7e-9d52-
 The text comes from `tasks/bodies/<taskId>.json`. `prompt` and `output` are each capped at **1 MiB**, and the
 `*Truncated` flags say when the cap cut them. The byte counts and hashes in the summary are of the full text.
 `stderrTail` is the last 16 KiB of stderr. If the body file has been pruned, the text fields are `null`.
+`live` is `null` unless this app is still running the Task (next section). For a finished Task, `after` slices
+the stored `output` by bytes, rounded forward to the next line boundary; an offset at or past the end gives `""`.
 
 Errors: `400 invalid_request`, `404 unknown_task` (`id`) and `500 ledger_read_failed`.
+
+## Following a running Task
+
+There are two ways to see a Task's output before it ends. Both read the same in-process live registry
+(`taskAdminRoutes.cjs`), filled from every `POST /admin/tasks` run's stdout lines, from the ledger start line
+until the end line. It is never persisted: after an app restart a Task with no end line is not live.
+
+### Stream mode: `stream: true`
+
+Send `"stream": true` in the `POST /admin/tasks` body. Every refusal before the ledger start line keeps its
+normal status and JSON body (see [the order of checks](#the-order-of-checks)). After the start line the route
+answers `200` with `Content-Type: application/x-ndjson`, one JSON object per line:
+
+| Line | When |
+| --- | --- |
+| `{ "type": "sm_task_started", taskId, model, effort, sessionId, startedAt }` | Right after the start line, before the slot wait |
+| `{ "type": "sm_task_running", slotWaitMs }` | Once the slot is granted |
+| each child stdout line, as-is | The line parses as a JSON object (for example a `stream-json` event) |
+| `{ "type": "sm_task_stdout", text }` | Any other child stdout line |
+| `{ "type": "sm_task_result", ... }` | Last. The non-stream `200` body plus `droppedLines`, or the error object the JSON answer would carry (for example `ok: false, error: "slot_timeout", taskId, slotWaitMs`) |
+
+- Closing the connection before the `sm_task_result` line cancels the slot wait or the run (`caller_gone`).
+- While more than 8 MiB of the answer is unsent (the caller stopped reading), output lines are skipped and
+  counted in `droppedLines`, so memory cannot grow. The result line is still written.
+- The stream never carries stderr, env or argv.
+- Use `outputFormat: 'stream-json'` to get the CLI's events as they happen. With `json` or `text` the child
+  prints its one result object at the end.
+
+### Paged live reads: `GET /admin/task?after=`
+
+While this app is still running the Task, `GET /admin/task` answers with:
+
+| Field | Value |
+| --- | --- |
+| `status` | `running` |
+| `output` | The captured stdout lines from byte offset `after` (default `0`), at most 1 MiB, cut at a line boundary. One line longer than 1 MiB is still sent alone, so a reader always moves on. |
+| `outputTruncated` | `true` when more captured lines remain after this page |
+| `stderrTail`, `envelope` | `null` |
+| `live` | `{ slotAcquired, outputEnd, outputCapped }` |
+
+`slotAcquired` is `false` during the slot wait. `outputEnd` is the byte offset just past this page; pass it as
+the next `after` to get only newer lines (it equals `after` when nothing is new). `outputCapped` is `true` once
+the 8 MiB capture cap is reached; later lines are not captured. A live Task also reads `running`, never
+`interrupted`, in `GET /admin/tasks`.
 
 ## `POST /admin/tasks/import` — record direct runs
 
@@ -464,6 +525,8 @@ the same parameters and the same responses:
 - `task_list({ cwd, since?, until?, pipeline?, runId?, step?, agent?, status?, source?, limit?, offset? })` →
   `GET /admin/tasks`. If `hasMore` is true, it adds a `note`: `partial list: returned N of TOTAL Tasks — pass a
   higher offset to see more`.
-- `task_get({ cwd, id })` → `GET /admin/task`. If `id` is missing, the tool errors before it calls the route.
+- `task_get({ cwd, id, after? })` → `GET /admin/task`. If `id` is missing, or `after` is not an integer ≥ 0, the
+  tool errors before it calls the route. Pass a running Task's `live.outputEnd` as `after` to get only newer
+  lines.
 
 There is no MCP tool to run or import a Task. Those are HTTP-only, for scripts.

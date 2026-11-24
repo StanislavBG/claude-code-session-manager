@@ -59,38 +59,56 @@ function entryPercent(l) {
 }
 
 /**
- * Which window is actually binding dispatch. The real /api/oauth/usage
+ * Every window bindingWindow chooses among, in payload order, as
+ * `{ name, utilization, resets_at, is_active }`. The real /api/oauth/usage
  * `limits[]` entries carry `kind` / `group` / `percent` / `severity` /
  * `resets_at` / `scope` / `is_active` (percent is 0-100, may exceed 100).
- * Only UNSCOPED entries (`scope == null`) are candidates — a scoped entry
- * (e.g. `weekly_scoped` for one model) does not bind dispatch generally. Among
- * them the HIGHEST finite percent wins ("binding" = closest to blocking us);
- * `is_active` only breaks ties, because the API sets it on group precedence
- * and trusting it alone would pick weekly_all 64 over session 95. With no
- * usable unscoped entry, falls back to the flat `five_hour`. Pure, no I/O.
+ * Only UNSCOPED entries (`scope == null`) with a finite percent count — a
+ * scoped entry (e.g. `weekly_scoped` for one model) does not bind dispatch
+ * generally. A null `resets_at` backfills from the matching flat window. With
+ * no such entry, the flat `five_hour` is the one window if its utilization is
+ * finite; anything else is []. Pure, no I/O.
  */
-function bindingWindow(payload) {
+function usageWindows(payload) {
+  const out = [];
   if (payload && Array.isArray(payload.limits)) {
-    let best = null;
-    let bestPct = -Infinity;
     for (const l of payload.limits) {
       if (!l || l.scope != null) continue;
       const pct = entryPercent(l);
       if (!Number.isFinite(pct)) continue;
-      if (pct > bestPct || (pct === bestPct && l.is_active === true && !(best && best.is_active === true))) {
-        best = l;
-        bestPct = pct;
-      }
-    }
-    if (best) {
-      const flat = payload[FLAT_WINDOW_BY_KIND[best.kind]];
-      return {
-        name: best.kind || best.type || best.name || 'unknown',
-        utilization: bestPct,
-        resets_at: best.resets_at ?? (flat ? flat.resets_at ?? null : null),
-      };
+      const flat = payload[FLAT_WINDOW_BY_KIND[l.kind]];
+      out.push({
+        name: l.kind || l.type || l.name || 'unknown',
+        utilization: pct,
+        resets_at: l.resets_at ?? (flat ? flat.resets_at ?? null : null),
+        is_active: l.is_active === true,
+      });
     }
   }
+  if (out.length > 0) return out;
+  const fh = payload && payload.five_hour;
+  if (fh && Number.isFinite(fh.utilization)) {
+    return [{ name: 'five_hour', utilization: fh.utilization, resets_at: fh.resets_at ?? null, is_active: fh.is_active === true }];
+  }
+  return [];
+}
+
+/**
+ * Which window is actually binding dispatch, picked from usageWindows() so
+ * the two never disagree. The HIGHEST finite percent wins ("binding" =
+ * closest to blocking us); `is_active` only breaks ties, because the API sets
+ * it on group precedence and trusting it alone would pick weekly_all 64 over
+ * session 95. With no usable window, falls back to the flat `five_hour`
+ * (utilization possibly undefined). Pure, no I/O.
+ */
+function bindingWindow(payload) {
+  let best = null;
+  for (const w of usageWindows(payload)) {
+    if (!best || w.utilization > best.utilization || (w.utilization === best.utilization && w.is_active && !best.is_active)) {
+      best = w;
+    }
+  }
+  if (best) return { name: best.name, utilization: best.utilization, resets_at: best.resets_at };
   const fh = payload && payload.five_hour;
   return {
     name: 'five_hour',
@@ -242,6 +260,7 @@ module.exports = {
   backoffWithJitter,
   isResetFresh,
   bindingWindow,
+  usageWindows,
   degradedBudget,
   meterFailureBudget,
   degradedConcurrencyCap,

@@ -14,6 +14,7 @@ const {
   backoffWithJitter,
   isResetFresh,
   bindingWindow,
+  usageWindows,
   degradedBudget,
   singleFlight,
 } = require('../usageCircuit.cjs');
@@ -351,4 +352,37 @@ test('singleFlight: de-dupes even when fn rejects, next call gets a fresh attemp
   const p3 = wrapped();
   assert.strictEqual(await p3, 'ok');
   assert.strictEqual(calls, 2);
+});
+
+test('usageWindows: two unscoped entries plus a scoped one give the two unscoped windows in payload order', () => {
+  const payload = {
+    seven_day: { utilization: 92, resets_at: '2026-11-26T17:00:00Z' },
+    limits: [
+      { kind: 'session', percent: 97, resets_at: '2026-11-23T20:00:00Z', scope: null, is_active: true },
+      { kind: 'weekly_scoped', percent: 99, resets_at: null, scope: { model: { display_name: 'Fable' } } },
+      { kind: 'weekly_all', percent: 92, resets_at: null, scope: null },
+    ],
+  };
+  assert.deepStrictEqual(usageWindows(payload), [
+    { name: 'session', utilization: 97, resets_at: '2026-11-23T20:00:00Z', is_active: true },
+    { name: 'weekly_all', utilization: 92, resets_at: '2026-11-26T17:00:00Z', is_active: false },
+  ]);
+  assert.strictEqual(bindingWindow(payload).name, 'session');
+});
+
+test('usageWindows: a flat-only payload gives [five_hour]', () => {
+  assert.deepStrictEqual(usageWindows({ five_hour: { utilization: 42, resets_at: '2026-09-13T15:00:00Z' } }), [
+    { name: 'five_hour', utilization: 42, resets_at: '2026-09-13T15:00:00Z', is_active: false },
+  ]);
+});
+
+test('usageWindows: null and a payload with no usable window give []', () => {
+  assert.deepStrictEqual(usageWindows(null), []);
+  assert.deepStrictEqual(usageWindows({
+    five_hour: { resets_at: null },
+    limits: [
+      { kind: 'weekly_scoped', percent: 81, resets_at: null, scope: { model: { display_name: 'Fable' } } },
+      { kind: 'session', resets_at: null, scope: null },
+    ],
+  }), []);
 });

@@ -99,7 +99,7 @@ const { checkMainDependencyHealth, repairMainDependencies } = require('./lib/git
 const mainDepsRepairAt = new Map();
 const MAIN_DEPS_REPAIR_COOLDOWN_MS = 10 * 60_000;
 const { resolveBindingRateLimitReset } = require('./lib/claude/rateLimitWindow.cjs');
-const { isResetFresh, bindingWindow, degradedBudget, meterFailureBudget } = require('./lib/claude/usageCircuit.cjs');
+const { isResetFresh, bindingWindow, usageWindows, degradedBudget, meterFailureBudget } = require('./lib/claude/usageCircuit.cjs');
 const { computeQueueHealth } = require('./lib/scheduler/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/scheduler/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/process/childWithLog.cjs');
@@ -893,12 +893,22 @@ function loadSchedulerState() {
     if (typeof s.backoffNextAt === 'number' || s.backoffNextAt === null) backoffNextAt = s.backoffNextAt;
     if (typeof s.cachedUtilization === 'number' || s.cachedUtilization === null) cachedUtilization = s.cachedUtilization;
     if (typeof s.cachedBindingWindowName === 'string' || s.cachedBindingWindowName === null) cachedBindingWindowName = s.cachedBindingWindowName;
+    // A pre-provenance file has no flag: a restored number was a real reading.
+    cachedUtilizationKnown = typeof s.cachedUtilizationKnown === 'boolean'
+      ? s.cachedUtilizationKnown
+      : typeof cachedUtilization === 'number';
+    restoredUsageWindows = isValidUsageWindowList(s.usageWindows) ? s.usageWindows : null;
   } catch { /* first boot or corrupt — start fresh */ }
 }
 
 /** Test-only seam: the module-level fields loadSchedulerState() restores that have no other exported reader. */
 function getSchedulerStateSnapshot() {
   return { lastPollOk, lastFailureKind, backoffNextAt, cachedUtilization, cachedBindingWindowName };
+}
+
+/** A persisted usageWindows list is trusted only if every entry names a window with a finite percent. */
+function isValidUsageWindowList(v) {
+  return Array.isArray(v) && v.every((w) => w && typeof w.window === 'string' && Number.isFinite(w.percent));
 }
 
 function persistSchedulerState() {
@@ -937,6 +947,12 @@ function persistSchedulerState() {
       backoffNextAt,
       cachedUtilization,
       cachedBindingWindowName,
+      // Real reading vs the 100% "no reading ever" placeholder, and every
+      // unscoped window of the last real reading — so a restart during a
+      // non-429 outage (no payload held) still knows weekly_all, not only
+      // the binding session window.
+      cachedUtilizationKnown,
+      usageWindows: utilizationReading().windows,
     });
   } catch (e) {
     console.warn('[scheduler] failed to persist scheduler state', e?.message);
@@ -1249,6 +1265,7 @@ function heartbeatTick(deps = {}) {
         // Which window `utilization` (and nextReset) refer to — a reader of
         // this log can't otherwise tell a 5h hold from a weekly one.
         utilizationWindow: cachedBindingWindowName,
+        utilizationHold,
         consecutiveFailures,
         // State/consecutiveFailures/degraded-budget snapshot of the shared
         // usage-meter breaker, so a human reading only the heartbeat log can
@@ -1257,6 +1274,9 @@ function heartbeatTick(deps = {}) {
           state: billing.usageCircuit.state(),
           consecutiveFailures,
           degradedBudget: computeDegradedBudget(),
+          // The cap tickQueue actually applies (degradedBudget above is a
+          // display recompute); null = the full slot pool.
+          appliedConcurrencyCap: degradedConcurrencyCapValue,
         },
       };
     });
@@ -2416,6 +2436,12 @@ async function reconcilePass(state) {
 let cachedNextReset = null; // bare ISO string or null
 let cachedUtilization = null; // binding-window utilization %, 0–100, or null if unknown
 let cachedBindingWindowName = null; // name/kind of the window cachedUtilization reads (e.g. 'five_hour', 'weekly_all')
+// true when cachedUtilization is a real reading (poll, fresh/stale meter cache,
+// no-meter 0, restored number); false for the 100% "no reading ever" placeholder.
+let cachedUtilizationKnown = false;
+// Window list restored from scheduler-state.json — read by utilizationReading()
+// only while no payload is held (after a restart). Never updated per poll.
+let restoredUsageWindows = null;
 // Non-null while maybeLaunchWhenAvailable is holding the queue on the
 // utilization gate: { window, percent, threshold, resetsAt }. Snapshot-level.
 let utilizationHold = null;
@@ -2476,10 +2502,38 @@ function computeDegradedBudget() {
  */
 function applyDegradedBudget() {
   const budget = computeDegradedBudget();
-  cachedUtilization = budget.utilization;
-  cachedBindingWindowName = bindingWindow(lastGoodUsagePayload).name;
+  if (lastGoodUsagePayload) {
+    cachedUtilization = budget.utilization;
+    cachedBindingWindowName = bindingWindow(lastGoodUsagePayload).name;
+    cachedUtilizationKnown = true;
+  } else if (!(cachedUtilizationKnown && Number.isFinite(cachedUtilization))) {
+    // No payload and no real reading ever: the conservative placeholder.
+    cachedUtilization = budget.utilization;
+    cachedBindingWindowName = bindingWindow(lastGoodUsagePayload).name;
+    cachedUtilizationKnown = false;
+  }
+  // else: no payload held (e.g. after a restart) but a known reading was
+  // restored — keep it rather than replacing it with the 100 placeholder.
   degradedConcurrencyCapValue = budget.concurrencyCap;
   return budget;
+}
+
+/**
+ * The current utilization reading and its provenance. `windows` is derived on
+ * each call: every unscoped window of the held payload, else the list
+ * restored from scheduler-state.json, else null.
+ */
+function utilizationReading() {
+  const windows = lastGoodUsagePayload
+    ? usageWindows(lastGoodUsagePayload).map((w) => ({ window: w.name, percent: w.utilization, resetsAt: w.resets_at }))
+    : restoredUsageWindows;
+  return {
+    percent: cachedUtilization,
+    window: cachedBindingWindowName,
+    resetsAt: cachedNextReset,
+    known: cachedUtilizationKnown,
+    windows,
+  };
 }
 
 /** Fetches latest usage from billing API. Throws on any error — callers handle it. */
@@ -2495,6 +2549,7 @@ async function refreshNextReset() {
   recordObservedReset(window.resets_at ?? null);
   cachedUtilization = window.utilization;
   cachedBindingWindowName = window.name;
+  cachedUtilizationKnown = true;
   lastGoodUsagePayload = r.data?.usage ?? lastGoodUsagePayload;
   return cachedNextReset;
 }
@@ -10912,6 +10967,11 @@ async function pollLoop() {
       // YELLOW/RED forever even though nothing is actually degraded.
       if (billing.usageCircuit.state() !== 'closed') billing.usageCircuit.recordSuccess({});
       cachedUtilization = NO_METER_UTILIZATION;
+      cachedUtilizationKnown = true;
+      // A reading left from an earlier consumer login must never hold a
+      // machine that has no meter.
+      lastGoodUsagePayload = null;
+      restoredUsageWindows = null;
       degradedConcurrencyCapValue = null;
       consecutiveFailures = 0;
       backoffMs = 0;
@@ -10976,6 +11036,7 @@ async function pollLoop() {
       recordObservedReset(window.resets_at ?? null);
       cachedUtilization = window.utilization;
       cachedBindingWindowName = window.name;
+      cachedUtilizationKnown = true;
       lastGoodUsagePayload = r.data?.usage ?? lastGoodUsagePayload;
       degradedConcurrencyCapValue = null;
       consecutiveFailures = 0;
@@ -11021,8 +11082,12 @@ async function pollLoop() {
         lastGoodUsagePayload = r.cached;
         cachedUtilization = cachedBudget.utilization;
         cachedBindingWindowName = cachedBudget.name;
+        cachedUtilizationKnown = true;
         degradedConcurrencyCapValue = null;
       } else {
+        // A stale cache is still the last real reading: carry it (cap 2)
+        // rather than the 100% placeholder.
+        if (r.cached) lastGoodUsagePayload = r.cached;
         applyDegradedBudget();
       }
       console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on ${cachedBudget ? 'cached' : 'degraded'} budget (util=${cachedUtilization}%, cap=${degradedConcurrencyCapValue}) (failure #${consecutiveFailures}); retry in ${backoffMs / 1000}s`);
@@ -14188,6 +14253,7 @@ module.exports = {
   persistSchedulerState,
   getSchedulerStateSnapshot,
   computeDegradedBudget,
+  utilizationReading,
   writeQueue,
   _setPeriodicReverifyEnabledForTests,
   _setLoadGateForTests,

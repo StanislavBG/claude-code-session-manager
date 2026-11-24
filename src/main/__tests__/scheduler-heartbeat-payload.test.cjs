@@ -138,3 +138,11 @@ test('dispatch.quietLeaseHolder is null when free and names the slug when held',
     lease.__resetForTests();
   }
 });
+
+test('heartbeat carries utilizationHold and the applied concurrency cap beside the display degradedBudget', () => {
+  const entry = scheduler.heartbeatTick({ readQueueSync: () => ({ jobs: [], unreadable: true, paused: null }) });
+  expect(entry).toHaveProperty('utilizationHold', null);
+  expect(entry.usageMeter).toHaveProperty('appliedConcurrencyCap', null);
+  expect(entry.usageMeter.degradedBudget).toEqual(expect.objectContaining({ concurrencyCap: expect.any(Number) }));
+  expect(lastLine().usageMeter).toHaveProperty('appliedConcurrencyCap', null);
+});

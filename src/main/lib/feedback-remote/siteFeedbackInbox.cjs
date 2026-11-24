@@ -163,28 +163,55 @@ function isStrictAncestor(parent, child) {
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+/** @param {string} p @returns {string | null} canonical real path, or null when it does not resolve */
+function realOrNull(p) {
+  try { return fs.realpathSync(p); } catch { return null; }
+}
+
+/**
+ * One operation's keystore view: the box list is read at most once per scope and never cached
+ * across calls (a fresh scope per writeItem/updateMeta/... call).
+ * @typedef {{ boxes: () => Promise<Array<{ projectCwd?: unknown }>> }} RootScope
+ * @returns {RootScope}
+ */
+function rootScope() {
+  /** @type {Promise<Array<{ projectCwd?: unknown }>> | null} */
+  let pending = null;
+  return { boxes: () => (pending ||= feedbackBoxKeys.listBoxes()) };
+}
+
 /**
  * Widen config.cjs's write boundary to this project root right before a write, as
  * projectHomeAdminRoutes.cjs does: the drain reaches projects no pty/route registered this
  * session. Only a known widget project is registered: cwd must be absolute, an existing
  * directory, and either the projectCwd of a box in feedbackBoxKeys or already hold a
- * session-manager-operations/feedback-inbox/ namespace. The home directory, the filesystem root
- * and (for the namespace case) any ancestor of a box's project are never registered. Anything
- * else throws `unknown_project` before the boundary is touched.
+ * session-manager-operations/feedback-inbox/ namespace. Paths compare as fs.realpathSync
+ * canonical paths, so a symlink to a known project is known; a box projectCwd that does not
+ * resolve matches nothing. The home directory, the filesystem root and (for the namespace case)
+ * any ancestor of a box's project are never registered. Anything else throws `unknown_project`
+ * before the boundary is touched.
  * @param {unknown} cwd
- * @returns {Promise<string>}
+ * @param {RootScope} [scope] reuse one keystore read across a single operation's re-registrations
+ * @returns {Promise<string>} the canonical root registered
  */
-async function registerRoot(cwd) {
+async function registerRoot(cwd, scope = rootScope()) {
   if (typeof cwd !== 'string' || !cwd || !path.isAbsolute(cwd)) {
     throw new Error('siteFeedbackInbox: cwd must be an absolute path');
   }
   if (!isDirSync(cwd)) throw new Error('siteFeedbackInbox: cwd does not exist or is not a directory');
-  const abs = path.resolve(cwd);
-  if (abs === path.resolve(os.homedir()) || abs === path.parse(abs).root) {
+  const abs = realOrNull(cwd);
+  if (!abs) throw unknownProject('cwd does not resolve to a real path');
+  const home = realOrNull(os.homedir()) || path.resolve(os.homedir());
+  if (abs === home || abs === path.resolve(os.homedir()) || abs === path.parse(abs).root) {
     throw unknownProject('the home directory or filesystem root is never a feedback project');
   }
-  const boxes = await feedbackBoxKeys.listBoxes();
-  const projects = boxes.map((b) => path.resolve(b.projectCwd));
+  const boxes = await scope.boxes();
+  /** @type {string[]} */
+  const projects = [];
+  for (const b of boxes) {
+    const real = b && typeof b.projectCwd === 'string' ? realOrNull(b.projectCwd) : null;
+    if (real) projects.push(real);
+  }
   let known = projects.includes(abs);
   if (!known && !projects.some((p) => isStrictAncestor(abs, p))) {
     let ns = '';
@@ -232,9 +259,9 @@ async function loadIndex(cwd) {
   return rebuilt;
 }
 
-/** @param {string} cwd @param {ClientIdIndex} index */
-async function saveIndex(cwd, index) {
-  await registerRoot(cwd);
+/** @param {string} cwd @param {ClientIdIndex} index @param {RootScope} [scope] */
+async function saveIndex(cwd, index, scope) {
+  await registerRoot(cwd, scope);
   await writeJson(indexPath(cwd), { version: 1, byClientReportId: { ...index } });
 }
 
@@ -272,7 +299,8 @@ async function writeItem(args) {
   const clientReportId = requireString(report.clientReportId, 'report.clientReportId');
   requireBuffer(screenshot, 'screenshot');
   requireBuffer(annotated, 'annotated');
-  await registerRoot(cwd);
+  const scope = rootScope();
+  await registerRoot(cwd, scope);
   return serialize(async () => {
     const index = await loadIndex(cwd);
     const known = index[clientReportId];
@@ -289,8 +317,8 @@ async function writeItem(args) {
       throw err;
     }
     index[clientReportId] = hostId;
-    await saveIndex(cwd, index);
-    await registerRoot(cwd);
+    await saveIndex(cwd, index, scope);
+    await registerRoot(cwd, scope);
     await config.writeBinaryAtomic(itemPath(cwd, hostId, 'screenshot.png'), screenshot, { writer: WRITER });
     await config.writeBinaryAtomic(itemPath(cwd, hostId, 'annotated.png'), annotated, { writer: WRITER });
     await writeJson(itemPath(cwd, hostId, 'report.json'), report);
@@ -323,7 +351,8 @@ async function appendRejected(args) {
   if (typeof hostId !== 'string') throw new Error('siteFeedbackInbox: hostId must be a string');
   if (typeof code !== 'string' || !REJECT_CODE_RE.test(code)) throw new Error('siteFeedbackInbox: code must be a short snake_case code');
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) throw new Error('siteFeedbackInbox: bytes must be a non-negative number');
-  await registerRoot(cwd);
+  const scope = rootScope();
+  await registerRoot(cwd, scope);
   const line = JSON.stringify({ at, boxId, hostId: hostId.slice(0, 64), code, bytes }) + '\n';
   const file = path.join(nsRoot(cwd), 'rejected.jsonl');
   return serialize(async () => {
@@ -331,7 +360,7 @@ async function appendRejected(args) {
     let prev = '';
     try { prev = await fsp.readFile(file, 'utf8'); } catch { /* first line */ }
     if (prev && !prev.endsWith('\n')) prev += '\n';
-    await registerRoot(cwd);
+    await registerRoot(cwd, scope);
     await config.writeTextAtomic(file, prev + line, { writer: WRITER });
     ensureIgnore(cwd);
   });
@@ -407,12 +436,13 @@ async function get(cwd, hostId) {
  */
 async function updateMeta(cwd, hostId, patch) {
   assertHostId(hostId);
-  await registerRoot(cwd);
+  const scope = rootScope();
+  await registerRoot(cwd, scope);
   return serialize(async () => {
     const meta = await readMeta(cwd, hostId);
     if (!meta) throw new Error(`siteFeedbackInbox: no item ${hostId}`);
     const next = patch(meta);
-    await registerRoot(cwd);
+    await registerRoot(cwd, scope);
     await writeJson(itemPath(cwd, hostId, 'meta.json'), next);
     ensureIgnore(cwd);
     return next;
@@ -449,10 +479,10 @@ async function linkEpic(cwd, hostId, epicId) {
   return updateMeta(cwd, hostId, (m) => ({ ...m, epicId }));
 }
 
-/** @param {string} cwd @param {string} hostId */
-async function removeNow(cwd, hostId) {
+/** @param {string} cwd @param {string} hostId @param {RootScope} [scope] */
+async function removeNow(cwd, hostId, scope) {
   const dir = itemPath(cwd, hostId);
-  await registerRoot(cwd);
+  await registerRoot(cwd, scope);
   assertOpsWrite(dir, WRITER);
   await fsp.rm(dir, { recursive: true, force: true });
 }
@@ -461,14 +491,15 @@ async function removeNow(cwd, hostId) {
  * Remove index entries pointing at removed hostIds. Call only inside serialize().
  * @param {string} cwd
  * @param {Set<string>} hostIds
+ * @param {RootScope} [scope]
  */
-async function dropFromIndex(cwd, hostIds) {
+async function dropFromIndex(cwd, hostIds, scope) {
   const index = await loadIndex(cwd);
   let changed = false;
   for (const [crid, id] of Object.entries(index)) {
     if (hostIds.has(id)) { delete index[crid]; changed = true; }
   }
-  if (changed) await saveIndex(cwd, index);
+  if (changed) await saveIndex(cwd, index, scope);
 }
 
 /**
@@ -478,12 +509,13 @@ async function dropFromIndex(cwd, hostIds) {
  */
 async function remove(cwd, hostId) {
   assertHostId(hostId);
-  await registerRoot(cwd);
+  const scope = rootScope();
+  await registerRoot(cwd, scope);
   return serialize(async () => {
     let existed = true;
     try { await fsp.access(itemPath(cwd, hostId)); } catch { existed = false; }
-    await removeNow(cwd, hostId);
-    await dropFromIndex(cwd, new Set([hostId]));
+    await removeNow(cwd, hostId, scope);
+    await dropFromIndex(cwd, new Set([hostId]), scope);
     return { removed: existed };
   });
 }
@@ -499,7 +531,8 @@ async function prune(cwd, days, opts = {}) {
   if (typeof days !== 'number' || !Number.isFinite(days) || days < 0) {
     throw new Error('siteFeedbackInbox: days must be a non-negative number');
   }
-  await registerRoot(cwd);
+  const scope = rootScope();
+  await registerRoot(cwd, scope);
   const cutoff = (opts.now ?? Date.now()) - days * DAY_MS;
   return serialize(async () => {
     /** @type {string[]} */
@@ -509,10 +542,10 @@ async function prune(cwd, days, opts = {}) {
       if (!meta || !PRUNABLE.has(meta.status)) continue;
       const changed = Date.parse(meta.statusChangedAt || meta.receivedAt);
       if (!Number.isFinite(changed) || changed >= cutoff) continue;
-      await removeNow(cwd, id);
+      await removeNow(cwd, id, scope);
       pruned.push(id);
     }
-    if (pruned.length) await dropFromIndex(cwd, new Set(pruned));
+    if (pruned.length) await dropFromIndex(cwd, new Set(pruned), scope);
     return pruned;
   });
 }

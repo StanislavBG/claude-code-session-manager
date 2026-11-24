@@ -353,3 +353,54 @@ test('an ancestor of a project is never registered, even holding a feedback-inbo
   expect(spy).not.toHaveBeenCalled();
   expect(fs.readdirSync(ns(parent))).toEqual([]);
 });
+
+test('a symlinked path to a known project is accepted and registers the real root', async () => {
+  const cwd = await mkTmpCwd();
+  const linkDir = fs.realpathSync(await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-site-inbox-link-')));
+  tmpDirs.push(linkDir);
+  const link = path.join(linkDir, 'proj');
+  fs.symlinkSync(cwd, link);
+  const spy = vi.spyOn(config, 'addAllowedRoot');
+  expect(await inbox.writeItem(item(link, 'FB-SYML1', '2026-11-24T10:00:00.000Z')))
+    .toEqual({ duplicate: false, hostId: 'FB-SYML1' });
+  expect(spy).toHaveBeenCalledWith(cwd);
+  expect(fs.existsSync(path.join(ns(cwd), 'items', 'FB-SYML1', 'meta.json'))).toBe(true);
+});
+
+test('a symlink to the home directory is still refused', async () => {
+  const linkDir = fs.realpathSync(await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-site-inbox-homelink-')));
+  tmpDirs.push(linkDir);
+  const link = path.join(linkDir, 'home');
+  fs.symlinkSync(os.homedir(), link);
+  await addBoxFor(link);
+  const spy = vi.spyOn(config, 'addAllowedRoot');
+  await expectAllRefused(link);
+  await expectAllRefused(os.homedir());
+  expect(spy).not.toHaveBeenCalled();
+});
+
+test('a box whose projectCwd no longer resolves matches nothing', async () => {
+  const base = path.join(os.homedir(), '.cache');
+  fs.mkdirSync(base, { recursive: true });
+  const cwd = fs.realpathSync(await fsp.mkdtemp(path.join(base, 'sm-site-inbox-gone-')));
+  tmpDirs.push(cwd);
+  await addBoxFor(path.join(cwd, 'missing-project'));
+  const spy = vi.spyOn(config, 'addAllowedRoot');
+  await expectAllRefused(cwd);
+  expect(spy).not.toHaveBeenCalled();
+});
+
+test('writeItem and updateMeta read the keystore box list once per call, never across calls', async () => {
+  const cwd = await mkTmpCwd();
+  const spy = vi.spyOn(keystore, 'listBoxes');
+  await inbox.writeItem(item(cwd, 'FB-ONCE1', '2026-11-24T10:00:00.000Z'));
+  expect(spy).toHaveBeenCalledTimes(1);
+  await inbox.writeItem(item(cwd, 'FB-ONCE2', '2026-11-24T10:01:00.000Z'));
+  expect(spy).toHaveBeenCalledTimes(2);
+  spy.mockClear();
+  await inbox.setStatus(cwd, 'FB-ONCE1', 'resolved');
+  expect(spy).toHaveBeenCalledTimes(1);
+  spy.mockClear();
+  await inbox.remove(cwd, 'FB-ONCE2');
+  expect(spy).toHaveBeenCalledTimes(1);
+});

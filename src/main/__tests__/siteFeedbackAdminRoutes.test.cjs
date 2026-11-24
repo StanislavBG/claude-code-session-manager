@@ -7,11 +7,17 @@
  */
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, afterAll } from 'vitest';
+const fs = require('node:fs');
 const os = require('node:os');
+const path = require('node:path');
 const { registerAdminRoute } = require('../lib/feedback-remote/siteFeedbackAdminRoutes.cjs');
 
-const CWD = '/home/u/proj';
+// A real project dir: the known-project check compares fs.realpathSync paths, so CWD must exist.
+const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sm-site-admin-')));
+const CWD = path.join(TMP, 'proj');
+fs.mkdirSync(CWD);
+afterAll(() => fs.rmSync(TMP, { recursive: true, force: true }));
 const SNIP = '<script src="x" data-key="fbk1_box1.abc" async></script>';
 
 function makeFakeAdminHttp() {
@@ -371,9 +377,10 @@ test.each([
 });
 
 test.each([
-  ['an unknown cwd', '/home/u/other'],
+  ['an unknown cwd', path.join(TMP, 'other')],
   ['the home directory', os.homedir()],
-  ['an ancestor of a project', '/home/u'],
+  ['an ancestor of a project', TMP],
+  ['the filesystem root', path.parse(TMP).root],
 ])('inbox, item and status answer 404 unknown_project for %s before any inbox call', async (_n, cwd) => {
   const { adminHttp, service } = setup();
   const calls = [
@@ -401,5 +408,48 @@ test('with no boxes at all every inbox route answers 404 unknown_project', async
   const r = await adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd: CWD } });
   expect(r.status).toBe(404);
   expect(r.body.error).toBe('unknown_project');
+  expect(service.calls).toEqual([]);
+});
+
+const INBOX_CALLS = (adminHttp, cwd) => [
+  adminHttp.call('GET', '/admin/site-feedback/inbox', { query: { cwd } }),
+  adminHttp.call('GET', '/admin/site-feedback/item', { query: { cwd, id: 'FB-AB123' } }),
+  adminHttp.call('POST', '/admin/site-feedback/status', { body: { cwd, id: 'FB-AB123', status: 'open' } }),
+];
+
+test('a symlinked path to a known project is accepted on all three routes', async () => {
+  const link = path.join(TMP, 'proj-link');
+  fs.symlinkSync(CWD, link);
+  const { adminHttp, service } = setup();
+  for (const r of await Promise.all(INBOX_CALLS(adminHttp, link))) expect(r.status).toBe(200);
+  expect(service.calls.map((c) => c[0])).toEqual(['listItems', 'getItem', 'setStatus']);
+});
+
+test('a box whose projectCwd is a symlink matches the real project path', async () => {
+  const link = path.join(TMP, 'box-link');
+  fs.symlinkSync(CWD, link);
+  const { adminHttp } = setup(undefined, [{ boxId: 'box1', projectCwd: link }]);
+  for (const r of await Promise.all(INBOX_CALLS(adminHttp, CWD))) expect(r.status).toBe(200);
+});
+
+test('the home directory is refused even when a box claims it', async () => {
+  const { adminHttp, service } = setup(undefined, [{ boxId: 'box1', projectCwd: os.homedir() }]);
+  for (const r of await Promise.all(INBOX_CALLS(adminHttp, os.homedir()))) {
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe('unknown_project');
+  }
+  expect(service.calls).toEqual([]);
+});
+
+test('a cwd or box projectCwd that does not resolve is refused', async () => {
+  const missing = path.join(TMP, 'gone');
+  const { adminHttp, service } = setup(undefined, [{ boxId: 'box1', projectCwd: missing }]);
+  for (const r of await Promise.all(INBOX_CALLS(adminHttp, missing))) {
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe('unknown_project');
+  }
+  const dangling = path.join(TMP, 'dangling');
+  fs.symlinkSync(missing, dangling);
+  for (const r of await Promise.all(INBOX_CALLS(adminHttp, dangling))) expect(r.status).toBe(404);
   expect(service.calls).toEqual([]);
 });

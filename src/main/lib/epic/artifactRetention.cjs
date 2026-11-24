@@ -8,12 +8,14 @@
  *       totalBytes (store size left after the sweep), overCap,
  *       missingRows: string[] ('<owner-id>/<name>' ledger rows dropped because their file
  *       is gone), compacted: string[] (owner ids whose ledger was rewritten only to drop
- *       such rows) }. Never throws.
+ *       such rows), uncheckedRows: number (ledger rows kept because their file's state is
+ *       unknown — an lstat error other than ENOENT/ENOTDIR; logged once per sweep) }. Never throws.
  *
  * Missing-file compaction runs for EVERY owner, whatever its lifecycle: a ledger row whose
  *   stored file artifacts/<owner>/<name> no longer exists (deleted from the OS file manager)
- *   is dropped — pinned rows included, since nothing is left to keep. Only an ENOENT/ENOTDIR
- *   lstat counts as missing. The rewrite is asserted as writer 'artifacts'; dryRun reports
+ *   is dropped — pinned rows included, since nothing is left to keep. Only a definite 'gone'
+ *   (artifactStore.storedFileState: ENOENT/ENOTDIR, or not a regular file) counts as missing;
+ *   an 'unknown' state (EACCES, EIO, …) keeps the row. The rewrite is asserted as writer 'artifacts'; dryRun reports
  *   the rows without writing.
  *
  * Epic folders artifacts/<epic-id>/ are eligible when:
@@ -49,7 +51,7 @@ const nodeFs = require('node:fs');
 const path = require('node:path');
 const opsOwnership = require('../opsOwnership.cjs');
 const atomicFs = require('../util/atomicFs.cjs');
-const { storedFilePresent } = require('./artifactStore.cjs');
+const { storedFileState } = require('./artifactStore.cjs');
 
 const WRITER = 'artifacts';
 const NS = 'artifacts';
@@ -124,12 +126,17 @@ function childFiles(fsImpl, dir) {
   return entries.filter((e) => e.name !== LEDGER && !e.isSymbolicLink()).map((e) => e.name);
 }
 
-/** Ledger entries whose stored path is still a regular file (storedFilePresent); records the dropped rows on ctx.result. */
+/**
+ * Ledger entries not definitely gone (storedFileState !== 'gone'); records the dropped rows on
+ * ctx.result.missingRows and counts kept 'unknown' rows on ctx.result.uncheckedRows.
+ */
 function presentEntries(ctx, ownerId, dir, entries) {
   const live = [];
   for (const e of entries) {
-    if (!storedFilePresent(path.join(dir, e.name), ctx.fsImpl)) ctx.result.missingRows.push(`${ownerId}/${e.name}`);
-    else live.push(e);
+    const state = storedFileState(path.join(dir, e.name), ctx.fsImpl);
+    if (state === 'gone') { ctx.result.missingRows.push(`${ownerId}/${e.name}`); continue; }
+    if (state === 'unknown') ctx.result.uncheckedRows += 1;
+    live.push(e);
   }
   return live;
 }
@@ -216,7 +223,7 @@ function safeDirs(fsImpl, dir) {
 
 function pruneArtifacts(opts) {
   const result = {
-    removed: [], trimmed: [], removedFiles: 0, kept: 0, totalBytes: 0, overCap: false, missingRows: [], compacted: [],
+    removed: [], trimmed: [], removedFiles: 0, kept: 0, totalBytes: 0, overCap: false, missingRows: [], compacted: [], uncheckedRows: 0,
   };
   try {
     const o = opts || {};
@@ -260,6 +267,9 @@ function pruneArtifacts(opts) {
       const dir = opsOwnership.opsPath(o.projectRoot, NS, TASKS_DIR, t);
       const ownerId = `${TASKS_DIR}/${t}`;
       visit(ownerId, dir, () => pruneTaskOwner(ctx, ownerId, dir));
+    }
+    if (result.uncheckedRows > 0) {
+      console.warn(`[artifactRetention] kept ${result.uncheckedRows} unchecked ledger row(s): file state unknown (lstat error other than ENOENT/ENOTDIR) (${root})`);
     }
     result.totalBytes = ctx.dryRun ? Math.max(0, before - freed) : scan(fsImpl, root).bytes;
     if (result.totalBytes > cap) {

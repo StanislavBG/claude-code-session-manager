@@ -305,11 +305,11 @@ test('listArtifacts lstats each entry through fsImpl and never throws on a stat 
   let list;
   expect(() => { list = store.listArtifacts(root, { fsImpl: fake }); }).not.toThrow();
   expect(stats.map((f) => path.basename(f)).sort()).toEqual(['one.txt', 'three.txt', 'two.txt']);
-  // Any lstat error = not present.
+  // Only a confirmed regular file is listed: ENOENT is gone, an unknown error is hidden too.
   expect(list.map((e) => e.name)).toEqual(['three.txt']);
 });
 
-test('storedFilePresent: regular file true; dangling symlink, symlink to a file, folder, missing → false', () => {
+test('storedFileState: regular file → file; missing, dangling symlink, symlink, folder, ENOTDIR → gone; other errors → unknown', () => {
   const dir = path.join(ns(), 'probe');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'real.txt');
@@ -318,16 +318,21 @@ test('storedFilePresent: regular file true; dangling symlink, symlink to a file,
   fs.symlinkSync(path.join(dir, 'nowhere.txt'), dangling);
   const toFile = path.join(dir, 'tofile.txt');
   fs.symlinkSync(file, toFile);
-  expect(store.storedFilePresent(file)).toBe(true);
-  expect(store.storedFilePresent(dangling)).toBe(false);
-  expect(store.storedFilePresent(toFile)).toBe(false);
-  expect(store.storedFilePresent(dir)).toBe(false);
-  expect(store.storedFilePresent(path.join(dir, 'missing.txt'))).toBe(false);
-  expect(store.storedFilePresent(path.join(file, 'under-a-file'))).toBe(false);
-  const throwing = { lstatSync: () => { throw new Error('boom'); } };
-  expect(() => store.storedFilePresent(file, throwing)).not.toThrow();
-  expect(store.storedFilePresent(file, throwing)).toBe(false);
-  expect(store.storedFilePresent(file, { lstatSync: () => null })).toBe(false);
+  expect(store.storedFileState(file)).toBe('file');
+  expect(store.storedFileState(path.join(dir, 'missing.txt'))).toBe('gone');
+  expect(store.storedFileState(dangling)).toBe('gone');
+  expect(store.storedFileState(toFile)).toBe('gone');
+  expect(store.storedFileState(dir)).toBe('gone');
+  expect(store.storedFileState(path.join(file, 'under-a-file'))).toBe('gone');
+  const throwing = (code) => ({ lstatSync: () => { throw Object.assign(new Error('x'), { code }); } });
+  expect(() => store.storedFileState(file, throwing('EACCES'))).not.toThrow();
+  expect(store.storedFileState(file, throwing('EACCES'))).toBe('unknown');
+  expect(store.storedFileState(file, throwing('EIO'))).toBe('unknown');
+  expect(store.storedFileState(file, throwing('ENOENT'))).toBe('gone');
+  expect(store.storedFileState(file, throwing('ENOTDIR'))).toBe('gone');
+  expect(store.storedFileState(file, { lstatSync: () => { throw new Error('no code'); } })).toBe('unknown');
+  expect(store.storedFileState(file, { lstatSync: () => null })).toBe('unknown');
+  expect(store.storedFilePresent).toBeUndefined();
   expect(store.storedFileMissing).toBeUndefined();
 });
 

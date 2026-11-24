@@ -375,3 +375,44 @@ test('pruneArtifacts compacts a dangling-symlink row and keeps the regular-file 
   expect(r.missingRows).toEqual(['live-epic/dangling.png']);
   expect(r.compacted).toEqual(['live-epic']);
 });
+
+test('pruneArtifacts keeps EACCES/EIO rows (unknown state) and still compacts an ENOENT row', () => {
+  const held = owner(['live-epic'], [
+    { name: 'denied.png', createdAt: iso(1) },
+    { name: 'ioerr.png', createdAt: iso(1) },
+    { name: 'here.png', createdAt: iso(1) },
+  ]);
+  const other = ownerMissing(['new-done'], [
+    { name: 'a.png', createdAt: iso(1) },
+    { name: 'gone.png', createdAt: iso(1) },
+  ], ['gone.png']);
+  const heldLedger = fs.readFileSync(path.join(held, 'index.json'), 'utf8');
+  const fail = { 'denied.png': 'EACCES', 'ioerr.png': 'EIO' };
+  const fake = {
+    ...fs,
+    lstatSync: (p, ...rest) => {
+      const code = fail[path.basename(p)];
+      if (code) throw Object.assign(new Error('x'), { code });
+      return fs.lstatSync(p, ...rest);
+    },
+  };
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const r = pruneArtifacts({ projectRoot: root, epicStatus, now: NOW, days: 30, tasksDays: 10, fsImpl: fake });
+  expect(fs.readFileSync(path.join(held, 'index.json'), 'utf8')).toBe(heldLedger);
+  expect(fs.existsSync(path.join(held, 'denied.png'))).toBe(true);
+  expect(fs.existsSync(path.join(held, 'ioerr.png'))).toBe(true);
+  expect(ledger(other)).toEqual(['a.png']);
+  expect(r.missingRows).toEqual(['new-done/gone.png']);
+  expect(r.compacted).toEqual(['new-done']);
+  expect(r.uncheckedRows).toBe(2);
+  const unchecked = warn.mock.calls.filter((c) => String(c[0]).includes('unchecked'));
+  expect(unchecked).toHaveLength(1);
+});
+
+test('uncheckedRows is 0 and nothing is logged about it when every lstat answers', () => {
+  owner(['live-epic'], [{ name: 'a.png', createdAt: iso(1) }]);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const r = pruneArtifacts({ projectRoot: root, epicStatus, now: NOW, days: 30, tasksDays: 10 });
+  expect(r.uncheckedRows).toBe(0);
+  expect(warn.mock.calls.filter((c) => String(c[0]).includes('unchecked'))).toHaveLength(0);
+});

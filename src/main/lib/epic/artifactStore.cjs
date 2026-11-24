@@ -333,20 +333,24 @@ async function ingestDir({
 }
 
 /**
- * storedFilePresent(file, fsImpl) → true only when lstat (no symlink
- * following) says the stored path is a regular file. Publish never stores a
- * symlink, so a symlink (dangling or not), a folder, or any lstat error counts
- * as missing. The one rule shared by listArtifacts and the retention sweep
- * (artifactRetention.cjs). Never throws.
+ * storedFileState(file, fsImpl) → 'file' | 'gone' | 'unknown', from lstat (no
+ * symlink following). 'file': a regular file. 'gone': lstat succeeded on
+ * something that is not a regular file (publish never stores a symlink, so a
+ * symlink — dangling or not — or a folder counts as gone), or lstat threw
+ * ENOENT/ENOTDIR. 'unknown': any other error (EACCES, EIO, …) — the file may
+ * still exist. The one rule shared by listArtifacts (shows only 'file') and the
+ * retention sweep (artifactRetention.cjs compacts only 'gone'). Never throws.
  * @param {string} file
  * @param {{ lstatSync: (p: string) => { isFile: () => boolean } }} [fsImpl]
+ * @returns {'file' | 'gone' | 'unknown'}
  */
-function storedFilePresent(file, fsImpl = fs) {
+function storedFileState(file, fsImpl = fs) {
   try {
     const st = fsImpl.lstatSync(file);
-    return !!st && st.isFile() === true;
-  } catch {
-    return false;
+    return st.isFile() === true ? 'file' : 'gone';
+  } catch (e) {
+    const code = e && /** @type {{ code?: unknown }} */ (e).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'gone' : 'unknown';
   }
 }
 
@@ -355,7 +359,8 @@ function storedFilePresent(file, fsImpl = fs) {
  * `ownerId` (an Epic id, or `_tasks/<task-id>`). A missing or corrupt ledger
  * contributes [] for that owner. An entry whose stored file
  * (artifacts/<owner>/<name>) no longer exists — e.g. deleted from the OS file
- * manager, or replaced by a symlink — is omitted (one lstat per entry through fsImpl); the daily sweep
+ * manager, or replaced by a symlink — or whose state is unknown (an lstat error other than
+ * ENOENT/ENOTDIR) is omitted (one lstat per entry through fsImpl, storedFileState); the daily sweep
  * (artifactRetention.cjs) compacts such rows out of the ledger. Never throws.
  */
 function listArtifacts(projectRoot, { fsImpl = fs } = {}) {
@@ -381,7 +386,7 @@ function listArtifacts(projectRoot, { fsImpl = fs } = {}) {
   }
   for (const { ownerId, dir } of owners) {
     for (const e of readLedger(path.join(dir, LEDGER), fsImpl)) {
-      if (!storedFilePresent(path.join(dir, e.name), fsImpl)) continue;
+      if (storedFileState(path.join(dir, e.name), fsImpl) !== 'file') continue;
       out.push({ ...e, ownerId });
     }
   }
@@ -409,7 +414,7 @@ module.exports = {
   publishArtifact,
   ingestDir,
   listArtifacts,
-  storedFilePresent,
+  storedFileState,
   stagingDirFor,
   inferKind,
   MAX_BYTES,

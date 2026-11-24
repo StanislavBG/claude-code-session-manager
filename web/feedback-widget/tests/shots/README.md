@@ -1,9 +1,13 @@
 # Design vs. widget screenshot pairs
 
-Written by [`../design-shots.e2e.ts`](../design-shots.e2e.ts) at 1280×800, DPR 1:
+Written by [`../design-shots.e2e.ts`](../design-shots.e2e.ts) at 1280×800, DPR 1. The spec has two
+halves that run apart:
 
 ```sh
+# widget half only: offline, part of the default e2e run and the gate
 npm --prefix web/feedback-widget run e2e -- tests/design-shots.e2e.ts
+# design half only: needs network (FW_SHOTS=design)
+npm --prefix web/feedback-widget run shots:design
 ```
 
 - `design/<scene>.png`: the Claude Design prototype
@@ -13,7 +17,7 @@ npm --prefix web/feedback-widget run e2e -- tests/design-shots.e2e.ts
   committed and are byte-identical from run to run. The spec serves a temp copy of the design folder
   over http, boots the dc runtime only after every web font has loaded, and shoots after a warm-up load.
   It needs network access to Google Fonts, unpkg (React and Babel for the dc runtime) and the
-  prototype's demo-site images.
+  prototype's demo-site images, so only `shots:design` renders it; re-run it when the prototype changes.
 - `widget/<scene>.png`: the built widget (`src/index.ts`, bundled with esbuild) on a stand-in host
   page, for each scene the spec can reach on the real widget. It skips any other scene and names the
   reason in the skip annotation. Not committed (see `.gitignore`); each run writes them fresh. When a

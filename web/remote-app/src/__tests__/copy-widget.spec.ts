@@ -1,15 +1,11 @@
 // @vitest-environment node
-// This project has no @types/node, so the node built-in imports below are untyped.
+/// <reference types="node" />
+// The app tsconfig limits ambient types to vite/client; this node-env spec pulls in @types/node itself.
 import { describe, it, expect, afterEach } from 'vitest';
-// @ts-ignore no @types/node
 import { mkdtemp, mkdir, writeFile, rm, readFile, stat } from 'node:fs/promises';
-// @ts-ignore no @types/node
 import { tmpdir } from 'node:os';
-// @ts-ignore no @types/node
 import { join } from 'node:path';
-// @ts-ignore no @types/node
 import { execFileSync } from 'node:child_process';
-// @ts-ignore no @types/node
 import { fileURLToPath } from 'node:url';
 // @ts-expect-error plain .mjs script without type declarations
 import { copyWidget, buildWidget, widgetManifestEntries, WIDGET_DIR } from '../../scripts/copy-widget.mjs';

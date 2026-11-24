@@ -8,7 +8,8 @@
     "build": "vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "shots:design": "FW_SHOTS=design playwright test tests/design-shots.e2e.ts"
   },
   "dependencies": {
     "modern-screenshot": "^4.7.0",

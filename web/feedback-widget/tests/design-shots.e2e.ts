@@ -9,13 +9,17 @@
 // The design folder is copied to a temp dir and the scene wrappers are written there (never into
 // session-manager-operations/design-mocks/), then served over http: the dc runtime fetches the
 // sibling .dc.html, which file:// blocks.
+//
+// The two halves run apart. The default `e2e` run renders only the widget half, which needs no
+// network. `npm run shots:design` (FW_SHOTS=design) renders only the design half, which fetches
+// Google Fonts, unpkg and the prototype's demo-site images.
 import { expect, test, type Page } from '@playwright/test';
 import { build } from 'esbuild';
 import { createServer, type Server } from 'node:http';
 import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, extname, join, normalize } from 'node:path';
+import { dirname, extname, isAbsolute, join, normalize, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { FONT_FACES as WIDGET_FONT_FACES, FONTS_DIR } from '../src/ui/tokens';
@@ -24,6 +28,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const widgetRoot = join(here, '..');
 const designSrc = join(widgetRoot, '..', '..', 'session-manager-operations', 'design-mocks', 'feedback-widget');
 const shotsDir = join(here, 'shots');
+
+/** True when this run renders the design half (`npm run shots:design`); false for the default widget half. */
+const DESIGN_RUN = process.env.FW_SHOTS === 'design';
 
 const VIEWPORT = { width: 1280, height: 800 };
 const DEFAULTS = { launcher: 'corner', flow: 'annotate', toolbar: 'dock', success: 'receipt' } as const;
@@ -139,9 +146,33 @@ let base = '';
 
 test.beforeAll(async () => {
   tmp = await mkdtemp(join(tmpdir(), 'fw-design-shots-'));
-  await cp(designSrc, join(tmp, 'design'), { recursive: true });
-  for (const s of SCENES) await writeFile(join(tmp, 'design', `scene-${s.id}.html`), sceneWrapper(s.id));
+  if (DESIGN_RUN) {
+    await cp(designSrc, join(tmp, 'design'), { recursive: true });
+    for (const s of SCENES) await writeFile(join(tmp, 'design', `scene-${s.id}.html`), sceneWrapper(s.id));
+  } else {
+    await writeHost(tmp);
+  }
 
+  server = createServer(async (req, res) => {
+    const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
+    const file = normalize(join(tmp, path));
+    // Refuse anything outside tmp: a sibling such as `<tmp>-evil` passes a bare prefix check.
+    const rel = relative(tmp, file);
+    if (rel.startsWith('..') || isAbsolute(rel)) return void res.writeHead(403).end();
+    try {
+      const body = await readFile(file);
+      res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
+      res.end(body);
+    } catch {
+      res.writeHead(404).end('not found');
+    }
+  });
+  await new Promise<void>((ok) => server!.listen(0, '127.0.0.1', ok));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+/** The built widget, its fonts and the stand-in host page, under `<tmp>/host/`. */
+async function writeHost(tmp: string): Promise<void> {
   const bundled = await build({
     entryPoints: [join(widgetRoot, 'src', 'index.ts')],
     bundle: true,
@@ -162,22 +193,7 @@ test.beforeAll(async () => {
   }
   await writeFile(join(tmp, 'host', 'index.html'), HOST_PAGE);
   await writeFile(join(tmp, 'host', 'host.css'), HOST_CSS);
-
-  server = createServer(async (req, res) => {
-    const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
-    const file = normalize(join(tmp, path));
-    if (!file.startsWith(tmp)) return void res.writeHead(403).end();
-    try {
-      const body = await readFile(file);
-      res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
-      res.end(body);
-    } catch {
-      res.writeHead(404).end('not found');
-    }
-  });
-  await new Promise<void>((ok) => server!.listen(0, '127.0.0.1', ok));
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
+}
 
 test.afterAll(async () => {
   await new Promise<void>((ok) => (server ? server.close(() => ok()) : ok()));
@@ -214,7 +230,7 @@ async function waitForFonts(page: Page): Promise<void> {
   });
 }
 
-test.describe('design shots (prototype, default variant)', () => {
+if (DESIGN_RUN) test.describe('design shots (prototype, default variant)', () => {
   for (const scene of SCENES) {
     test(scene.id, async ({ page }) => {
       const errors: string[] = [];
@@ -419,7 +435,7 @@ const DRIVERS: Record<SceneId, (page: Page) => Promise<string | null>> = {
   },
 };
 
-test.describe('widget shots (built widget on the stand-in host)', () => {
+if (!DESIGN_RUN) test.describe('widget shots (built widget on the stand-in host)', () => {
   for (const scene of SCENES) {
     test(scene.id, async ({ page }) => {
       await page.goto(`${base}/host/index.html`, { waitUntil: 'networkidle' });

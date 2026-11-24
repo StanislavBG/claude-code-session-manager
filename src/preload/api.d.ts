@@ -2352,7 +2352,7 @@ export interface VoicesVoicePayload {
 }
 
 export type VoicesApproveResult =
-  | { ok: true; voiceId: string; scope: 'project' | 'machine'; pin: string; at: string }
+  | { ok: true; voiceId: string; scope: 'project' | 'machine'; pin: string; approvedAt: string }
   | { ok: false; error: string };
 
 export type VoicesUnapproveResult = { ok: true; voiceId: string } | { ok: false; error: string };

@@ -66,7 +66,7 @@ function writeVoice(dir, id, json) {
 const projDir = () => path.join(project, '.claude', 'voices');
 const machDir = () => path.join(home, 'library');
 function approve(scope, id, pin) {
-  const key = `${scope}|${scope === 'project' ? project : ''}|${id}`;
+  const key = vl.approvalKey(scope, project, id);
   let cur = { version: 1, approvals: {} };
   try { cur = JSON.parse(fs.readFileSync(path.join(home, 'approvals.json'), 'utf8')); } catch { /* fresh */ }
   cur.approvals[key] = { pin, approvedAt: '2026-11-23T00:00:00Z' };
@@ -206,4 +206,12 @@ test('refusal: an approved project or machine voice whose file is gone never fal
   approve('machine', 'am_adam', vl.pinOf(vl.resolveVoiceId(project, 'am_adam').entry, project));
   fs.rmSync(mfile);
   expect(vl.resolveVoiceId(project, 'am_adam')).toEqual({ ok: false, error: "approved voice 'am_adam' was removed outside the Voices screen" });
+});
+
+test('exports the one approvalKey format and the canonical JSON helper', () => {
+  expect(vl.approvalKey('project', project, 'narrator')).toBe(`project|${path.resolve(project)}|narrator`);
+  expect(vl.approvalKey('project', `${project}/./`, 'narrator')).toBe(`project|${path.resolve(project)}|narrator`);
+  expect(vl.approvalKey('machine', project, 'host')).toBe('machine||host');
+  expect(vl.canonical({ b: 1, a: [2, { d: undefined, c: 'x' }] })).toBe('{"a":[2,{"c":"x"}],"b":1}');
+  expect(vl.canonical(undefined)).toBe('null');
 });

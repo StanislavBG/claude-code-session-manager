@@ -12,14 +12,15 @@
  *                     {lane, position} | null (voiceLane.laneSnapshot).
  *   voices:preview   {cwd, voiceId, text}  -> previewVoice result, bytes as a Uint8Array.
  *   voices:approve   {cwd, voiceId}        -> writes <voicesHome>/approvals.json
- *                     with pin = voiceLibrary.pinOf; project/machine voices only.
+ *                     each approval as {pin, approvedAt (ISO)}, pin = voiceLibrary.pinOf;
+ *                     project/machine voices only.
  *   voices:unapprove {cwd, voiceId}        -> removes that approval.
  *   voices:delete    {cwd, voiceId}        -> deletes the effective project or
  *                     machine voice file; refuses an approved voice and a built-in.
  *
  * This module is the ONLY writer of approvals.json and of voice deletions
- * (voiceLibrary.cjs only reads approvals). Approval keys are
- * '<scope>|<projectRoot or empty>|<id>', exactly as voiceLibrary reads them.
+ * (voiceLibrary.cjs only reads approvals). Approval keys come from
+ * voiceLibrary.approvalKey — the reader's own function, never a copy.
  *
  * deps: { schemas, validatePath } plus optional test overrides
  *       { resolveProjectRoot, voiceLibrary, voiceLane, previewVoice, now }.
@@ -46,10 +47,8 @@ function projectRootOf(deps, cwd) {
   return path.resolve(resolve(real));
 }
 
-/** Same key voiceLibrary.readApprovals is looked up by. */
-function approvalKey(scope, projectRoot, id) {
-  return `${scope}|${scope === 'project' && projectRoot ? path.resolve(projectRoot) : ''}|${id}`;
-}
+// The one approval-key format, shared with the reader so the two can never drift.
+const { approvalKey } = require('../demo-video-kit/voiceLibrary.cjs');
 
 function approvalsPath(lib) {
   return path.join(lib.voicesHome(), 'approvals.json');
@@ -115,9 +114,9 @@ function approve(deps, root, voiceId) {
   const { approvals } = lib.readApprovals();
   const key = approvalKey(entry.scope, root, voiceId);
   const pin = lib.pinOf(entry, root);
-  const at = (deps.now ? deps.now() : new Date()).toISOString();
-  writeApprovals(lib, { ...approvals, [key]: { pin, at } });
-  return { ok: true, voiceId, scope: entry.scope, pin, at };
+  const approvedAt = (deps.now ? deps.now() : new Date()).toISOString();
+  writeApprovals(lib, { ...approvals, [key]: { pin, approvedAt } });
+  return { ok: true, voiceId, scope: entry.scope, pin, approvedAt };
 }
 
 function unapprove(deps, root, voiceId) {
@@ -181,7 +180,6 @@ function registerVoicesIpc(ipcMain, deps = {}) {
 
 module.exports = {
   registerVoicesIpc,
-  approvalKey,
   BUILTIN_ERROR,
   APPROVED_DELETE_ERROR,
   CHANNELS: Object.freeze(['voices:list', 'voices:preview', 'voices:approve', 'voices:unapprove', 'voices:delete']),

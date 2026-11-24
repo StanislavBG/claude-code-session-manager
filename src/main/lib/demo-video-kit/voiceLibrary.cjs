@@ -215,10 +215,12 @@ function readApprovals() {
   }
 }
 
+/** approvals.json key: '<scope>|<resolved projectRoot, project scope only>|<id>'. The ONE copy — voicesIpc.cjs (the writer) imports it. */
 function approvalKey(scope, projectRoot, id) {
   return `${scope}|${scope === 'project' && projectRoot ? path.resolve(projectRoot) : ''}|${id}`;
 }
 
+/** Key-sorted JSON (undefined keys dropped) — the stable bytes pinOf hashes. */
 function canonical(v) {
   if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
   if (v && typeof v === 'object') {
@@ -300,6 +302,8 @@ module.exports = {
   listVoices,
   resolveVoiceId,
   pinOf,
+  approvalKey,
+  canonical,
   readApprovals,
   validateVoiceEntry,
   KOKORO_V1_VOICES,

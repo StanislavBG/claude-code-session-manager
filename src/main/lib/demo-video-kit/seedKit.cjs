@@ -19,9 +19,9 @@ const path = require('node:path');
 const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
 const { writeTextAtomic } = require('../util/atomicFs.cjs');
 
-const KIT_VERSION = '30';
+const KIT_VERSION = '31';
 // sha256 of kitDigest(__dirname). Update together with a KIT_VERSION bump.
-const KIT_DIGEST = 'e156993d5b66629dd957c86550af7acb805b086d5d710f34f38911d1b4d865ae';
+const KIT_DIGEST = '48474f72332fd008f4ee12cd88c885e7291b39b7d7f1e95a59deb7c5bd8b6eaa';
 const KIT_FILES = Object.freeze(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md', 'kind-marketing.md', 'cast.md', 'resumableRun.cjs', 'voiceLibrary.cjs', 'voiceLane.cjs', 'kokoroSay.cjs']);
 const STAMP_FILE = 'KIT_VERSION';
 

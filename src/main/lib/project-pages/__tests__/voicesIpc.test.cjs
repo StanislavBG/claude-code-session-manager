@@ -15,7 +15,7 @@ const path = require('node:path');
 
 const { schemas } = require('../../../ipcSchemas.cjs');
 const voiceLibrary = require('../../demo-video-kit/voiceLibrary.cjs');
-const { registerVoicesIpc, approvalKey, BUILTIN_ERROR, APPROVED_DELETE_ERROR, CHANNELS } = require('../voicesIpc.cjs');
+const { registerVoicesIpc, BUILTIN_ERROR, APPROVED_DELETE_ERROR, CHANNELS } = require('../voicesIpc.cjs');
 
 let tmp;
 let home;
@@ -148,10 +148,36 @@ test('voices:approve writes approvals.json with pinOf for project and machine vo
   const host = entries.find((v) => v.id === 'host');
   expect(file.approvals[`project|${root}|narrator`].pin).toBe(voiceLibrary.pinOf(narrator, root));
   expect(file.approvals['machine||host'].pin).toBe(voiceLibrary.pinOf(host, root));
-  expect(approvalKey('project', root, 'narrator')).toBe(`project|${root}|narrator`);
+  expect(voiceLibrary.approvalKey('project', root, 'narrator')).toBe(`project|${root}|narrator`);
   expect(narrator.approved && narrator.pinOk).toBe(true);
   expect(host.approved && host.pinOk).toBe(true);
   expect(voiceLibrary.resolveVoiceId(root, 'narrator').approved).toBe(true);
+});
+
+test('writer and reader agree: voicesIpc uses voiceLibrary\'s approvalKey and writes {pin, approvedAt}', async () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'voicesIpc.cjs'), 'utf8');
+  expect(src).not.toMatch(/function\s+approvalKey\s*\(/);
+  expect(require('../voicesIpc.cjs').approvalKey).toBeUndefined();
+  expect(typeof voiceLibrary.approvalKey).toBe('function');
+  expect(typeof voiceLibrary.canonical).toBe('function');
+  writeProjectVoice('narrator');
+  writeMachineVoice('host');
+  const { call } = setup();
+  const a = await call('voices:approve', { cwd: root, voiceId: 'narrator' });
+  expect(a).toMatchObject({ ok: true, approvedAt: '2026-11-23T20:00:00.000Z' });
+  expect(a.at).toBeUndefined();
+  await call('voices:approve', { cwd: root, voiceId: 'host' });
+  const file = readApprovalsFile();
+  for (const [scope, id] of [['project', 'narrator'], ['machine', 'host']]) {
+    const rec = file.approvals[voiceLibrary.approvalKey(scope, root, id)];
+    expect(Object.keys(rec).sort()).toEqual(['approvedAt', 'pin']);
+    expect(rec.approvedAt).toBe('2026-11-23T20:00:00.000Z');
+    expect(new Date(rec.approvedAt).toISOString()).toBe(rec.approvedAt);
+    expect(voiceLibrary.resolveVoiceId(root, id)).toMatchObject({ ok: true, approved: true, scope });
+    expect(voiceLibrary.listVoices(root).voices.find((v) => v.id === id)).toMatchObject({ approved: true, pinOk: true });
+  }
+  expect((await call('voices:unapprove', { cwd: root, voiceId: 'narrator' })).ok).toBe(true);
+  expect(voiceLibrary.resolveVoiceId(root, 'narrator')).toMatchObject({ ok: true, approved: false });
 });
 
 test('voices:approve re-approves a voice changed since approval', async () => {

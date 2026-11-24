@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 30 (resumableRun.cjs stops the whole process tree, locks starts, truncates run.log)', () => {
-  expect(KIT_VERSION).toBe('30');
+test('KIT_VERSION is bumped to 31 (voiceLibrary.cjs exports approvalKey + canonical for the approvals writer)', () => {
+  expect(KIT_VERSION).toBe('31');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

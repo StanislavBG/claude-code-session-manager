@@ -777,6 +777,142 @@ With `stream: true`, every refusal before the ledger start line keeps its normal
   (your figure is kept as `cliCostUsd`). `persisted: true` needs a `sessionId`; that session is then skipped
   by History like a persisted Task.
 
+## Paired services (over the relay)
+
+A service that does not run on this machine (first one: Kiln) can still hand work to Session Manager. It
+pairs once, like the phone, and then calls six MCP tools through the bilko.run Web Remote relay. Every
+message is end-to-end encrypted; the relay sees only boxes. The desktop answers each call by running the
+same loopback admin route the tool mirrors, so the answers have the shapes in sections 2-4.
+
+### Pairing (the owner does this once)
+
+1. In Session Manager open **App Settings → Web remote → Pair a service…**. Name the service, pick its
+   home project and tick the tools it may call.
+2. The dialog shows a one-time code and a **copy command** button. The command is the `service pair` line
+   below with the code filled in.
+3. Run that command where the service lives. It redeems the code, connects, and prints a 6-digit SAS.
+4. Check that the SAS matches the one the desktop shows, and press **Confirm**. The desktop pins the
+   service's public key. Until then the service can call nothing.
+
+A pending pairing lives 10 minutes on the desktop; the relay code itself lasts 5. Pairings are stored in
+`~/.claude/session-manager/remote-services.json` ([`servicePairings.cjs`](../../src/main/lib/feedback-remote/servicePairings.cjs)) —
+that file is not part of the contract.
+
+### Scope and its limits
+
+Enforced on the desktop by [`serviceMcpSession.cjs`](../../src/main/lib/feedback-remote/serviceMcpSession.cjs), on every call:
+
+| Rule | What it means |
+| --- | --- |
+| Tool allowlist | `tools/list` shows only the tools the owner ticked. Calling any other tool is refused (JSON-RPC error `-32001`) and the route is never run. |
+| `homeCwd` binds `fromCwd` | `feedback_open_session` fills a missing `fromCwd` with the service's home project. A different `fromCwd` is refused with 403. |
+| Own Epics only | Each Epic the service opens (`feedback_open_session`, `macro_run`) goes into its ledger. `epic_get` answers the route's own 404 for any other Epic, and `events_read` drops rows of other Epics. |
+| `replyMode` default `event` | A service has no chat to wake, so a missing `replyMode` becomes `event`. Replies arrive as `epic_cross_project_reply` rows through `events_read`. |
+| `cmd:mcp` only | A service may send only boxed `cmd:mcp` envelopes. Anything else is refused with an opaque `rejected` and written to the audit log. |
+| No env identity | `originClaudeSessionId` / `originProjectRoot` sent by a service are dropped; only a local process may vouch for a session. |
+
+### The six tools
+
+Defined once in [`serviceMcpTools.cjs`](../../src/main/lib/feedback-remote/serviceMcpTools.cjs). The first four share their
+`inputSchema` objects with the local stdio MCP server, so a service and a local agent see the same schemas.
+`macro_run` and `events_read` are served only to a paired service.
+
+| Tool | Arguments (required in **bold**) | Route it mirrors |
+| --- | --- | --- |
+| `feedback_list_projects` | none | `GET /admin/feedback/targets` |
+| `feedback_open_session` | **`toCwd`**, **`title`**, **`motivation`**, **`acceptanceCriteria`**, **`body`**, `fromCwd`, `plan`, `outOfScope`, `series`, `tag`, `fromEpicId`, `agentType`, `referencePaths`, `autoStart`, `humanRequestQuote`, `externalRef`, `replyMode` | `POST /admin/feedback/open-session` (§2 A) |
+| `macro_list` | `cwd` | `GET /admin/macros` |
+| `macro_run` | **`cwd`**, **`id`**, `inputs` (string map), `effort`, `externalRef` | `POST /admin/macros/run` (§2 B) |
+| `epic_get` | **`cwd`**, exactly one of `id` / `externalRef`, `receipt` | `GET /admin/epic` (§3) |
+| `events_read` | `after`, `kinds` (`epic_state_changed`, `epic_cross_project_reply`), `limit` (1-500) | `GET /admin/events` (§4) |
+
+The schema says `fromCwd` is required for `feedback_open_session`, but a service may leave it out (see the
+scope table). A tool result is MCP `content: [{ type: 'text', text: <route JSON> }]`, with `isError: true`
+when the route answered outside 2xx.
+
+### The Node bridge: `service pair` and `service mcp`
+
+[`serviceStdioBridge.cjs`](../../src/main/lib/feedback-remote/serviceStdioBridge.cjs), routed from `bin/cli.cjs` before any
+Electron code loads:
+
+```sh
+npx claude-code-session-manager service pair --code <code> --name <name> --state-dir <dir> [--device <prefix>] [--timeout <seconds>]
+npx claude-code-session-manager service mcp --state-dir <dir>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--code` | The one-time code from the pairing dialog. |
+| `--name` | The name the desktop shows for this service. |
+| `--state-dir` | Where the service keeps `service-client.json` (its token, identity key and desktop id, mode 0600). Use the same dir for `pair` and `mcp`. |
+| `--device` | A 6+ character prefix of the desktop's device id. Needed only when the account has several desktops; with one desktop it is picked for you. |
+| `--timeout` | Seconds `pair` waits for the owner to confirm the SAS (default 300). |
+
+- `pair` prints `SAS: <digits>` and where to confirm it, then exits 0 once the desktop confirms. A bad or
+  expired code, an ambiguous `--device`, revocation or timeout exit 1. Bad flags exit 2.
+- `mcp` is a stdio MCP server: newline-delimited JSON-RPC 2.0 on stdin/stdout. Stdout carries protocol
+  messages only; logs go to stderr. It reconnects by itself (1-60 s jittered backoff). Closing stdin exits 0.
+
+Driving it from Python:
+
+```python
+import json, subprocess
+
+p = subprocess.Popen(
+    ["npx", "claude-code-session-manager", "service", "mcp", "--state-dir", "/var/lib/kiln/sm"],
+    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+)
+
+def call(id, method, params=None):
+    p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": id, "method": method, "params": params or {}}) + "\n")
+    p.stdin.flush()
+    reply = json.loads(p.stdout.readline())
+    if "error" in reply:
+        raise RuntimeError(reply["error"]["message"])  # "revoked: pair again" -> process exits 3
+    return reply["result"]
+
+call(1, "initialize", {"protocolVersion": "2025-06-18"})
+print(call(2, "tools/list"))
+print(call(3, "tools/call", {"name": "epic_get", "arguments": {"cwd": "/home/me/proj", "externalRef": "kiln:42"}}))
+p.stdin.close(); p.wait()
+```
+
+A service that would rather speak the protocol itself can follow the reference client
+[`reference/sm_service_client.py`](reference/sm_service_client.py) (standard library + `cryptography`; no reconnect).
+The Node client it mirrors is [`serviceClient.cjs`](../../src/main/lib/feedback-remote/serviceClient.cjs).
+
+### Revoke and the kill switch
+
+- **Revoke** (App Settings → Web remote → Services) deletes the service's pin and its relay client. The
+  relay closes its socket with code `4001`; the next call is refused even if the socket is still open. A
+  revoked client stops reconnecting: `service mcp` prints `revoked: pair again` and **exits 3**. A 401 from
+  `client-ticket` or `client/devices` means the same. Pair again for a new token.
+- **Kill switch** (turning Web remote off, or revoke-all) refuses every service call with an opaque
+  `rejected` within one second; revoke-all also drops every connection.
+
+### Relay routes
+
+Base `https://bilko.run/api/sm-relay`; socket `wss://bilko.run/projects/session-manager/relay`.
+
+| Route | Who calls it | Auth | Limit |
+| --- | --- | --- | --- |
+| `POST client-otp` | the desktop, to mint a pairing code | desktop device token or Clerk session | code is 8 chars, single-use, lives 5 minutes; 10 codes an hour per account, shared with device codes |
+| `POST client-pair` `{ code, clientName }` → `{ clientToken, clientId }` | the service, once | the code | 10 an hour per IP |
+| `POST client-ticket` → `{ ticket }` | the service, before each connect (ticket is one-time, 30 s) | client token | 10 a minute per token |
+| `GET client/devices` | the service, at pairing | client token | 10 a minute per token |
+| `GET clients` / `DELETE clients/<clientId>` | the desktop, to list and revoke services | desktop device token or Clerk session | — |
+
+A service connection counts toward the 5 browser connections an account may hold at once. A `DELETE`
+closes that client's socket with `4001`.
+
+### What does not change
+
+- `relay_unsupported` appears only when the relay is a build without these routes. Update the relay; there
+  is nothing to fix in the app.
+- Any account the relay allows can pair services. There is no owner-only check.
+- The loopback admin API in sections 1-8 is unchanged. Paired services are an extra way in, not a new
+  version of it.
+
 ## 8. Not part of the contract
 
 Do not build on these. They change without a version bump.

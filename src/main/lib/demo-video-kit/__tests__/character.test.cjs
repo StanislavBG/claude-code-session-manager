@@ -521,19 +521,55 @@ test('batchTimeoutMs: scales per line, caps at the ceiling and the job deadline,
   expect(batchTimeoutMs(40, { now: 0, env: {} })).toEqual({ ok: true, ms: BATCH_TIMEOUT_CEILING_MS });
   expect(batchTimeoutMs(40, { now: 0, env: { SM_SCHEDULER_JOB_DEADLINE_MS: 'soon' } })).toEqual({ ok: true, ms: BATCH_TIMEOUT_CEILING_MS });
   const now = 1_000_000;
-  const deadline = String(now + SPEAK_DEADLINE_MARGIN_MS + 20 * 60000);
-  expect(batchTimeoutMs(40, { now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: deadline } })).toEqual({ ok: true, ms: 20 * 60000 });
-  const tight = String(now + SPEAK_DEADLINE_MARGIN_MS + 30000);
-  const r = batchTimeoutMs(5, { now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: tight } });
+  const at = (leftMs, lines = 40) => batchTimeoutMs(lines, { now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: String(now + leftMs) } });
+  // 65 min left: the reserve is a quarter (16.25 min), so 48.75 min to speak.
+  expect(at(65 * 60000)).toEqual({ ok: true, ms: 65 * 60000 - 16.25 * 60000 });
+  const r = at(50000, 5);
   expect(r.ok).toBe(false);
-  expect(r.error).toMatch(/30s/);
+  expect(r.error).toMatch(/37s/);
   expect(r.error).toMatch(/5 lines/);
+});
+
+test('speakReserveMs: a quarter of the time left, at most 45 min', () => {
+  const { speakReserveMs, SPEAK_DEADLINE_MARGIN_MS } = charMod;
+  expect(speakReserveMs(43 * 60000)).toBe(Math.floor(43 * 60000 / 4));
+  expect(speakReserveMs(180 * 60000)).toBe(SPEAK_DEADLINE_MARGIN_MS);
+  expect(speakReserveMs(10 * 60 * 60000)).toBe(SPEAK_DEADLINE_MARGIN_MS);
+  expect(speakReserveMs(2 * 60000)).toBe(30000);
+  expect(speakReserveMs(50000)).toBe(12500);
+});
+
+test('speak deadline reserve scales: 43 min, 180 min, 2 min, 50 s left and no deadline', () => {
+  const { batchTimeoutMs, laneWaitMs, BATCH_TIMEOUT_CEILING_MS } = charMod;
+  const now = 5_000_000;
+  const env = (leftMs) => ({ SM_SCHEDULER_JOB_DEADLINE_MS: String(now + leftMs) });
+  // 43 min left (a 45-minute-budget job a little in): ~32 min to wait and speak, not an instant failure.
+  const m43 = 43 * 60000 - Math.floor(43 * 60000 / 4);
+  expect(m43 / 60000).toBeCloseTo(32.25, 5);
+  expect(laneWaitMs({ now, env: env(43 * 60000) })).toBe(m43);
+  expect(batchTimeoutMs(40, { now, env: env(43 * 60000) })).toEqual({ ok: true, ms: m43 });
+  // 180 min left: the full 45 min reserve, 135 min to speak.
+  expect(laneWaitMs({ now, env: env(180 * 60000) })).toBe(135 * 60000);
+  expect(batchTimeoutMs(40, { now, env: env(180 * 60000) })).toEqual({ ok: true, ms: 135 * 60000 });
+  // 2 min left: 30 s reserve, 90 s to speak (above the 60 s floor).
+  expect(laneWaitMs({ now, env: env(2 * 60000) })).toBe(90000);
+  expect(batchTimeoutMs(40, { now, env: env(2 * 60000) })).toEqual({ ok: true, ms: 90000 });
+  // 50 s left: 12.5 s reserve, 37.5 s to speak -> refused, naming the time left and the reserve.
+  expect(laneWaitMs({ now, env: env(50000) })).toBe(37500);
+  const r = batchTimeoutMs(3, { now, env: env(50000) });
+  expect(r.ok).toBe(false);
+  expect(r.error).toBe('only 37s left to speak for 3 lines (0.8 min left before the job deadline, 0.2 min kept in reserve); need at least 60s');
+  expect(r.error).not.toMatch(/margin/);
+  // No deadline: unchanged limits.
+  expect(laneWaitMs({ now, env: {} })).toBe(6 * 60 * 60 * 1000);
+  expect(batchTimeoutMs(40, { now, env: {} })).toEqual({ ok: true, ms: BATCH_TIMEOUT_CEILING_MS });
+  expect(batchTimeoutMs(2, { now, env: {} })).toEqual({ ok: true, ms: 2 * charMod.COMMAND_TIMEOUT_MS });
 });
 
 test.skipIf(process.platform === 'win32')('speakLines: too little time before the job deadline runs no batch call', () => {
   const root = batchProject('host');
   const prev = process.env.SM_SCHEDULER_JOB_DEADLINE_MS;
-  process.env.SM_SCHEDULER_JOB_DEADLINE_MS = String(Date.now() + charMod.SPEAK_DEADLINE_MARGIN_MS + 1000);
+  process.env.SM_SCHEDULER_JOB_DEADLINE_MS = String(Date.now() + 50000);
   try {
     const r = charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }]);
     expect(r).toMatchObject({ ok: false, line: 0, lines: [0], speaker: 'Bit' });
@@ -883,10 +919,10 @@ test('wavSeconds reads byteRate and data size; 0 when unparseable', () => {
   expect(charMod.wavSeconds(path.join(d, 'missing.wav'))).toBe(0);
 });
 
-test('laneWaitMs: job deadline minus 45 min when set, else 6 h', () => {
+test('laneWaitMs: time left minus the speak reserve when a deadline is set, else 6 h', () => {
   const now = 1_000_000_000;
   expect(charMod.laneWaitMs({ now, env: {} })).toBe(6 * 60 * 60 * 1000);
-  expect(charMod.laneWaitMs({ now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: String(now + 60 * 60 * 1000) } })).toBe(15 * 60 * 1000);
+  expect(charMod.laneWaitMs({ now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: String(now + 60 * 60 * 1000) } })).toBe(45 * 60 * 1000);
   expect(charMod.laneWaitMs({ now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: '' } })).toBe(6 * 60 * 60 * 1000);
 });
 
@@ -907,7 +943,7 @@ test.skipIf(process.platform === 'win32')('voice lane: a wait past the job deadl
   const { root } = heavyProject(log, 'lateproj');
   const holder = lane.enterLane({ lane: 'heavy', voiceId: 'other', label: 'video other', projectRoot: '/x', kind: 'video' });
   const prev = process.env.SM_SCHEDULER_JOB_DEADLINE_MS;
-  process.env.SM_SCHEDULER_JOB_DEADLINE_MS = String(Date.now() + 10 * 60 * 1000);
+  process.env.SM_SCHEDULER_JOB_DEADLINE_MS = String(Date.now() - 1000);
   try {
     const r = charMod.speakLines(root, [{ text: 'hi', out: 'a.wav' }]);
     expect(r.ok).toBe(false);

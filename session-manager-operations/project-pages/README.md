@@ -267,7 +267,9 @@ A command voice uses either `{text}` + `{out}` (run once per line) or `{lines}` 
 manifest `[{text, out}]` of all its lines (absolute outs, each ending in `.wav`). Its outs are
 cleared first, and it succeeds only when every out is a RIFF WAV. Its time limit
 (`batchTimeoutMs`) is 15 minutes per line, at most 180 minutes, and never past the job deadline
-(`SM_SCHEDULER_JOB_DEADLINE_MS`) minus 45 minutes; under 1 minute left fails the run.
+(`SM_SCHEDULER_JOB_DEADLINE_MS`) minus a reserve for mixing and saving (`speakReserveMs`): a
+quarter of the time left, at most 45 minutes. Under 1 minute left to speak fails the run, naming
+the minutes left before the job deadline and the reserve kept.
 `node character.cjs speak spec.json [--wait seconds]` (spec `{projectRoot, lines}`) runs
 `speakLines` in a detached runner (`resumableRun.cjs`) with its state in `<spec>.run/`. Each call
 waits one slice: it exits 0 or 1 with the result, or exits 75 with a pending line while the voice
@@ -428,7 +430,9 @@ Every synthesis — video runs and previews alike — waits in the one machine-w
 `<voices home>/lane/<heavy|light>/` (or `SM_VOICE_LANE_DIR`). Two lanes, `heavy` and `light`,
 each run **one synthesis at a time**. `heavy` in the voice file wins; otherwise a Kokoro voice is
 light and every other engine heavy. Dead-pid or 6 h old tickets are swept; a waiting call prints
-its position; each finished call appends a line to `<voices home>/usage.jsonl`. A lane wait that
+its position; each finished call appends a line to `<voices home>/usage.jsonl`. A lane wait is
+bounded by the time left before the job deadline minus the same reserve (a quarter of the time
+left, at most 45 minutes), or 6 h with no job deadline. A lane wait that
 times out fails the run with its position (`timed out after <ms> ms at position N of M`), and its
 ticket leaves the lane with no usage line: nothing was synthesized.
 

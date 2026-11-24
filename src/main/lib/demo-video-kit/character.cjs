@@ -326,14 +326,34 @@ function wavSeconds(file) {
 }
 
 /**
+ * Time kept back from speaking for mixing and saving the video, given `leftMs` before the
+ * job deadline: a quarter of it, at most SPEAK_DEADLINE_MARGIN_MS (45 min). Short jobs still
+ * get three quarters of their time to speak; long jobs keep the full 45 minutes.
+ */
+function speakReserveMs(leftMs) {
+  return Math.min(SPEAK_DEADLINE_MARGIN_MS, Math.floor(leftMs / 4));
+}
+
+/** env.SM_SCHEDULER_JOB_DEADLINE_MS as a finite number, else null. */
+function jobDeadline(env) {
+  const raw = env && env.SM_SCHEDULER_JOB_DEADLINE_MS;
+  const deadline = Number(raw);
+  return raw !== undefined && raw !== null && raw !== '' && Number.isFinite(deadline) ? deadline : null;
+}
+
+/** Minutes with one decimal, for error messages. */
+function fmtMin(ms) {
+  return Math.round(Math.max(0, ms) / 6000) / 10;
+}
+
+/**
  * How long one synthesis call may wait for its voice lane: the time left before
- * env.SM_SCHEDULER_JOB_DEADLINE_MS minus SPEAK_DEADLINE_MARGIN_MS when that is set
+ * env.SM_SCHEDULER_JOB_DEADLINE_MS minus speakReserveMs(time left) when that is set
  * (may be <= 0: no time left), else LANE_WAIT_DEFAULT_MS (6 h).
  */
 function laneWaitMs({ now = Date.now(), env = process.env } = {}) {
-  const raw = env && env.SM_SCHEDULER_JOB_DEADLINE_MS;
-  const deadline = Number(raw);
-  if (raw !== undefined && raw !== null && raw !== '' && Number.isFinite(deadline)) return deadline - now - SPEAK_DEADLINE_MARGIN_MS;
+  const deadline = jobDeadline(env);
+  if (deadline !== null) return deadline - now - speakReserveMs(deadline - now);
   return LANE_WAIT_DEFAULT_MS;
 }
 
@@ -365,7 +385,7 @@ function inLane(ctx, rv, outs, fn) {
       },
     });
     if (!w.ok) {
-      const why = left <= 0 ? ` (no time left before the job deadline minus a ${SPEAK_DEADLINE_MARGIN_MS / 60000} min margin)` : '';
+      const why = left <= 0 ? ' (no time left before the job deadline)' : '';
       return { ok: false, error: `${w.error}${why}` };
     }
     granted = true;
@@ -420,21 +440,20 @@ function speakWithCommand(voice, text, out, { cwd } = {}) {
 /**
  * Time limit for one batch voice call over `lineCount` lines -> {ok: true, ms} | {ok: false, error}.
  * ms = min(lineCount * COMMAND_TIMEOUT_MS, BATCH_TIMEOUT_CEILING_MS), capped at the scheduler's
- * job deadline (env.SM_SCHEDULER_JOB_DEADLINE_MS) minus SPEAK_DEADLINE_MARGIN_MS when that is a
+ * job deadline (env.SM_SCHEDULER_JOB_DEADLINE_MS) minus speakReserveMs(time left) when that is a
  * finite number: the voice runs first, so the whole video is still to be built after it.
  */
 function batchTimeoutMs(lineCount, { now = Date.now(), env = process.env } = {}) {
   let ms = Math.min(lineCount * COMMAND_TIMEOUT_MS, BATCH_TIMEOUT_CEILING_MS);
-  const deadline = Number(env && env.SM_SCHEDULER_JOB_DEADLINE_MS);
-  const raw = env && env.SM_SCHEDULER_JOB_DEADLINE_MS;
-  if (raw !== undefined && raw !== null && raw !== '' && Number.isFinite(deadline)) {
-    ms = Math.min(ms, deadline - now - SPEAK_DEADLINE_MARGIN_MS);
-  }
+  const deadline = jobDeadline(env);
+  const leftMs = deadline === null ? null : deadline - now;
+  if (leftMs !== null) ms = Math.min(ms, leftMs - speakReserveMs(leftMs));
   if (ms < MIN_BATCH_TIMEOUT_MS) {
     const left = Math.max(0, Math.floor(ms / 1000));
+    const ctx = leftMs === null ? '' : ` (${fmtMin(leftMs)} min left before the job deadline, ${fmtMin(speakReserveMs(leftMs))} min kept in reserve)`;
     return {
       ok: false,
-      error: `only ${left}s left before the job deadline (minus a ${SPEAK_DEADLINE_MARGIN_MS / 60000} min margin) for ${lineCount} lines; need at least ${MIN_BATCH_TIMEOUT_MS / 1000}s`,
+      error: `only ${left}s left to speak for ${lineCount} lines${ctx}; need at least ${MIN_BATCH_TIMEOUT_MS / 1000}s`,
     };
   }
   return { ok: true, ms };
@@ -661,6 +680,7 @@ module.exports = {
   isBatchVoice,
   wavSeconds,
   laneWaitMs,
+  speakReserveMs,
   lanePositionLine,
   LANE_WAIT_DEFAULT_MS,
   validateCharacterJson,

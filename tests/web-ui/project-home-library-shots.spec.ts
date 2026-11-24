@@ -11,11 +11,12 @@ const __filename = fileURLToPath(import.meta.url)
 
 // Real Chromium (never Electron). Renders the real Project Home document (the
 // ProjectHomeKeyButtons + ProjectPagesSection shell, whose Pages tab is PagesPane and Videos tab is VideosPane) with CSS from the built web renderer (dist-web/app.css) and a stub
-// window.api holding 2 knowledge pages + 2 videos; writes 4 PNGs for the validation record.
+// window.api holding 2 knowledge pages + 2 videos; writes 4 PNGs to test-results/project-home-library/
+// (gitignored) — never a tracked path.
 // The app ships a single light palette, so "dark" = Chromium dark colour-scheme emulation
 // plus an inverted render of the same page.
 const root = path.resolve(__dirname, '../..')
-const OUT = path.join(root, 'session-manager-operations/reviews/validation/project-home-as-a-player-knowledge-pages-video-p-4afa65b6/screens')
+const OUT = path.join(root, 'test-results/project-home-library')
 const { PLAYER_BRIDGE_SCRIPT } = createRequire(__filename)(path.join(root, 'src/main/lib/project-pages/playerBridge.cjs')) as { PLAYER_BRIDGE_SCRIPT: string }
 
 const videoHtml = (title: string) => `<!doctype html><html><body style="margin:0;background:#1d2733;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><h1 style="font-size:48px">${title}</h1><script>

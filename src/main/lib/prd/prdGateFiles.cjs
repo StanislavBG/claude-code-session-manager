@@ -286,7 +286,9 @@ function pathLikePrefix(s) {
 }
 
 /**
- * One `# Files` bullet's text -> the paths it names ([] when none). Walks
+ * One `# Files` bullet's text -> the paths it names ([] when none). An
+ * entry with no ", " that is itself a path (valid, ending in a file
+ * extension or "/") is kept whole first. Otherwise walks
  * every separator occurrence (" (", " - ", " — ", ": ", ", ") left to right
  * and splits at the first whose prefix is a path (valid entry ending in a
  * file extension or "/"): after ", " the rest is parsed again as more
@@ -303,6 +305,13 @@ function pathLikePrefix(s) {
 function parseFilesEntry(raw) {
   const text = unwrapTicks(String(raw).trim());
   if (!text) return [];
+  // A whole entry that is itself a path wins over any note split, so
+  // "docs/v1.2 - notes.md" is not cut to "docs/v1.2". A ", " list still
+  // splits: "src/a.cjs, src/b.cjs" is two paths, not one spaced name.
+  if (!text.includes(', ')) {
+    const whole = pathLikePrefix(text);
+    if (whole) return [whole];
+  }
   /** @type {{at:number, sep:string}[]} */
   const hits = [];
   for (const sep of FILES_NOTE_SEPARATORS) {

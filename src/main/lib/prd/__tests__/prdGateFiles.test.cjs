@@ -212,3 +212,8 @@ test('parseFilesSection splits a ", " list into separately checked paths', () =>
   );
   assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs, the helper'])), ['src/a.cjs']);
 });
+
+test('parseFilesSection keeps a whole spaced path whose earlier segment has a dot (4198)', () => {
+  assert.deepEqual(parseFilesSection(filesBody(['- docs/v1.2 - notes.md'])), ['docs/v1.2 - notes.md']);
+  assert.deepEqual(parseFilesSection(filesBody(['- docs/a.md - b.md'])), ['docs/a.md - b.md']);
+});

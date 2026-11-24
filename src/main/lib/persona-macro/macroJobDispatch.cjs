@@ -11,9 +11,10 @@
  * when job.repoPaths is set, with an optional review stage when job.review is set.
  * A built-in whose job.reviewable is true (Demo Video) runs that same review
  * stage when the press passes reviewStage: true or a review decision.
- * A project Video tool's job env gets SM_VOICE_ID = the press's voiceId, else the
- * tool's default voiceId, else nothing; handed to createPrd as `env` and named
- * in the job's implementation notes.
+ * A project Video tool's job gets voiceId = the press's voiceId, else the tool's
+ * default voiceId, else nothing; handed to createPrd as `voiceId` (PRD
+ * frontmatter, which the scheduler exports as SM_VOICE_ID) and named in the
+ * job's implementation notes as a 'Voice: <id>' line.
  *
  * Plain Node, no Electron imports; all I/O is injected.
  */
@@ -230,8 +231,8 @@ async function dispatchMacroJob(
     ? (voiceId || (typeof tool.voiceId === 'string' && VOICE_ID_RE.test(tool.voiceId) ? tool.voiceId : null))
     : null;
   if (jobVoiceId) {
-    input.env = { SM_VOICE_ID: jobVoiceId };
-    input.implementationNotes += ` SM_VOICE_ID=${jobVoiceId}: speak every narration line with this library voice.`;
+    input.voiceId = jobVoiceId;
+    input.implementationNotes += ` Voice: ${jobVoiceId} (also in SM_VOICE_ID): speak every narration line with this library voice.`;
   }
 
   let res;

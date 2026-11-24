@@ -481,33 +481,99 @@ test('the persona carries the outcome stop rule and the outcome tool', () => {
   expect(persona).toContain('save no video\n   or review material, and end PASS');
 });
 
-test('project tool voice: SM_VOICE_ID = press voiceId, else the tool default, else unset', async () => {
+test('project tool voice: voiceId = press voiceId, else the tool default, else unset; never env', async () => {
   const press = await runTool(tool({}, { voiceId: 'tool-voice' }), { voiceId: 'press-voice' });
   expect(press.r.ok).toBe(true);
-  expect(press.i.env).toEqual({ SM_VOICE_ID: 'press-voice' });
-  expect(press.i.implementationNotes).toContain('SM_VOICE_ID=press-voice');
+  expect(press.i.voiceId).toBe('press-voice');
+  expect(press.i.env).toBeUndefined();
+  expect(press.i.implementationNotes).toContain(' Voice: press-voice (also in SM_VOICE_ID): speak every narration line with this library voice.');
 
   const fallback = await runTool(tool({}, { voiceId: 'tool-voice' }));
-  expect(fallback.i.env).toEqual({ SM_VOICE_ID: 'tool-voice' });
+  expect(fallback.i.voiceId).toBe('tool-voice');
+  expect(fallback.i.env).toBeUndefined();
 
   const pressOnly = await runTool(tool(), { voiceId: 'press-voice' });
-  expect(pressOnly.i.env).toEqual({ SM_VOICE_ID: 'press-voice' });
+  expect(pressOnly.i.voiceId).toBe('press-voice');
 
   const none = await runTool(tool());
+  expect(none.i.voiceId).toBeUndefined();
   expect(none.i.env).toBeUndefined();
+  expect(none.i.implementationNotes).not.toContain('Voice:');
   expect(none.i.implementationNotes).not.toContain('SM_VOICE_ID');
 
+  const badDefault = await runTool(tool({}, { voiceId: 'Bad Default' }));
+  expect(badDefault.i.voiceId).toBeUndefined();
+
   const committing = await runTool(tool({ repoPaths: ['videos'] }, { voiceId: 'tool-voice' }));
-  expect(committing.i.env).toEqual({ SM_VOICE_ID: 'tool-voice' });
+  expect(committing.i.voiceId).toBe('tool-voice');
+  expect(committing.i.implementationNotes).toContain(' Voice: tool-voice (also in SM_VOICE_ID)');
 
   const bad = await runTool(tool(), { voiceId: 'Bad Voice' });
   expect(bad.r).toMatchObject({ ok: false, error: expect.stringContaining('voiceId') });
   expect(bad.d.createPrd).not.toHaveBeenCalled();
 });
 
-test('built-in press: a voiceId never becomes job env', async () => {
+test('built-in press: a voiceId never reaches the job', async () => {
   const d = mk();
   const r = await dispatchMacroJob({ ...base, voiceId: 'press-voice' }, d);
   expect(r.ok).toBe(true);
+  expect(d.createPrd.mock.calls[0][0].voiceId).toBeUndefined();
   expect(d.createPrd.mock.calls[0][0].env).toBeUndefined();
+});
+
+// --- end to end: the real createPrd writes the PRD, its frontmatter carries the voice ---
+
+test('dispatch through the real createPrd writes voiceId into the PRD frontmatter', async () => {
+  const config = require('../../../config.cjs');
+  const { createPrd } = require('../../prd/prdCreate.cjs');
+  const { parsePrdFile } = require('../../prd/prdFrontmatter.cjs');
+  const home = fsx.mkdtempSync(path.join(osx.tmpdir(), 'mjd-sched-home-'));
+  const root = fsx.mkdtempSync(path.join(osx.tmpdir(), 'mjd-e2e-proj-'));
+  const prevHome = process.env.SM_SCHEDULER_HOME;
+  process.env.SM_SCHEDULER_HOME = home;
+  config.addAllowedRoot(root);
+  // The tool's persona must resolve, as createPrd checks agentType.
+  fsx.mkdirSync(path.join(root, '.claude', 'agents'), { recursive: true });
+  fsx.writeFileSync(path.join(root, '.claude', 'agents', 'video-maker.md'), '---\nname: video-maker\ndescription: test persona\n---\nMake videos.\n');
+  let nn = 500;
+  const written = [];
+  const remote = {
+    async allocateParallelGroup() { return nn++; },
+    async readPrd() { return { ok: false }; },
+    async writePrd(slug, body) {
+      const p = path.join(home, `${slug}.md`);
+      fsx.writeFileSync(p, body);
+      written.push(p);
+      return { ok: true, path: p };
+    },
+    async listPrds() { return { prds: [], total: 0, limit: 0, offset: 0, hasMore: false }; },
+  };
+  const realDispatch = async (t, params) => {
+    const before = written.length;
+    const r = await dispatchMacroJob(
+      { ...tbase, cwd: root, ...params },
+      { createPrd: (input) => createPrd(input, remote), listRows: async () => [], macros: [t] },
+    );
+    expect(r.error).toBeUndefined();
+    expect(r).toMatchObject({ ok: true });
+    expect(written.length).toBe(before + 1);
+    return parsePrdFile(fsx.readFileSync(written[written.length - 1], 'utf8'));
+  };
+  try {
+    const press = await realDispatch(tool({}, { projects: [root], voiceId: 'tool-voice' }), { voiceId: 'press-voice' });
+    expect(press.frontmatter.voiceId).toBe('press-voice');
+    expect(press.body).toContain(' Voice: press-voice (also in SM_VOICE_ID): speak every narration line with this library voice.');
+
+    const fallback = await realDispatch(tool({}, { projects: [root], voiceId: 'tool-voice' }), {});
+    expect(fallback.frontmatter.voiceId).toBe('tool-voice');
+    expect(fallback.body).toContain(' Voice: tool-voice (also in SM_VOICE_ID)');
+
+    const none = await realDispatch(tool({}, { projects: [root] }), {});
+    expect(none.frontmatter.voiceId).toBeUndefined();
+    expect(none.body).not.toContain('Voice:');
+  } finally {
+    if (prevHome === undefined) delete process.env.SM_SCHEDULER_HOME; else process.env.SM_SCHEDULER_HOME = prevHome;
+    fsx.rmSync(home, { recursive: true, force: true });
+    fsx.rmSync(root, { recursive: true, force: true });
+  }
 });

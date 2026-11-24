@@ -79,7 +79,7 @@ export default function Cockpit({ socket, deviceId, onRefreshDevices }: Props) {
   if (route.view === 'projects') {
     body = awaitingDesktopConfirm ? (
       <div className="flex-1 flex items-center justify-center text-ink-mute text-sm px-6 text-center font-serif italic">
-        Waiting for you to confirm the 6-digit code on your computer (Settings → Phone remote)…
+        Waiting for you to confirm the 6-digit code on your computer (Settings → Web remote)…
       </div>
     ) : (
       <ProjectsScreen socket={socket} deviceId={deviceId} refreshKey={refreshKey} ready={ready} onOpen={openProject} />

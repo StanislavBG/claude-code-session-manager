@@ -21,7 +21,7 @@ export default function DevicePicker({ onClose, onRefreshDevices }: Props) {
 
   const remove = async (id: string, label: string, online: boolean, current: boolean) => {
     const msg = online
-      ? `Remove ${label}? It disconnects now and must be paired again from its Settings → Phone remote.`
+      ? `Remove ${label}? It disconnects now and must be paired again from its Settings → Web remote.`
       : `Remove ${label}? It can be paired again later.`;
     if (!window.confirm(msg)) return;
     setRemovingId(id); setErr(null);

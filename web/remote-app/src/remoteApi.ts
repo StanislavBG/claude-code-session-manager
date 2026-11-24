@@ -11,7 +11,7 @@ import type {
 type CommandSocket = Pick<RelaySocket, 'sendCommand'>;
 
 export const REFUSED_MESSAGE =
-  'Your computer refused this request. Confirm the 6-digit code in Session Manager (Settings → Phone remote), enable remote control for sending, or update Session Manager to the latest version.';
+  'Your computer refused this request. Confirm the 6-digit code in Session Manager (Settings → Web remote), enable remote control for sending, or update Session Manager to the latest version.';
 
 export class RemoteError extends Error {
   constructor(message: string) {

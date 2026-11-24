@@ -10,7 +10,7 @@ const IcoBolt = () => (
 );
 /**
  * Shown when signed in but no paired device is online. Generates a pairing code
- * to enter in the desktop Session Manager's Settings → Phone remote.
+ * to enter in the desktop Session Manager's Settings → Web remote.
  */
 export default function ConnectScreen({
   socket: _socket, onRefresh,
@@ -73,7 +73,7 @@ export default function ConnectScreen({
             ? `${deviceLabel(activeDevice.deviceId, deviceMeta[activeDevice.deviceId])} is offline`
             : 'Your desktop is offline'}</h1>
           <p className="text-center text-[14.5px] text-ink-soft leading-relaxed mb-7">
-            Open <strong className="text-ink font-semibold">Session Manager</strong> on it with Phone remote
+            Open <strong className="text-ink font-semibold">Session Manager</strong> on it with Web remote
             enabled and this phone will reconnect on its own. There's no need to pair again.
           </p>
         </>
@@ -81,7 +81,7 @@ export default function ConnectScreen({
         <>
           <h1 className="font-serif text-[34px] font-semibold tracking-tight text-center mt-5 mb-2">Pair this phone</h1>
           <p className="text-center text-[14.5px] text-ink-soft leading-relaxed mb-7">
-            On your desktop open <strong className="text-ink font-semibold">Settings → Phone remote</strong>, turn on
+            On your desktop open <strong className="text-ink font-semibold">Settings → Web remote</strong>, turn on
             remote control, then click Pair Device… and enter the code below.
           </p>
         </>

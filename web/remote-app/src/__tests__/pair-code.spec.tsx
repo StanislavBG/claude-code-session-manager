@@ -19,7 +19,7 @@ describe('PairCode', () => {
     for (const ch of 'ABCD1234') expect(container.textContent).toContain(ch);
     expect(container.querySelectorAll('span.select-all').length).toBe(8);
     expect(container.querySelectorAll('ol li').length).toBe(3);
-    expect(container.textContent).toContain('Settings → Phone remote');
+    expect(container.textContent).toContain('Settings → Web remote');
   });
 
   it('shows the error text when requestOtp rejects', async () => {

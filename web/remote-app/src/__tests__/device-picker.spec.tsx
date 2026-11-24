@@ -100,7 +100,7 @@ describe('DevicePicker', () => {
       expect(revokeDevice).toHaveBeenCalledWith('cccccc333');
       expect(vi.mocked(revokeDevice).mock.invocationCallOrder[0]).toBeLessThan(refresh.mock.invocationCallOrder[0]);
       fireEvent.click(screen.getByTestId('device-remove-bbbbbb222'));
-      expect(c.mock.calls[1][0]).toMatch(/Settings → Phone remote/);
+      expect(c.mock.calls[1][0]).toMatch(/Settings → Web remote/);
     });
 
     it('shows an alert when revoke rejects and keeps the sheet open', async () => {

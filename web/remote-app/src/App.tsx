@@ -263,13 +263,13 @@ function AppInner() {
           <div className="max-w-sm mx-auto text-center">
             <p className="font-serif text-xl font-semibold text-ink mb-1">Verify E2E session</p>
             <p className="text-ink-mute mb-3 text-xs">
-              Confirm the desktop (Settings → Phone remote) shows the same 6-digit code:
+              Confirm the desktop (Settings → Web remote) shows the same 6-digit code:
             </p>
             <div className="text-3xl font-mono tracking-[0.3em] text-accent mb-4 select-all">
               {pendingSas.sas}
             </div>
             <p className="text-ink-mute mb-3 text-xs">
-              Now click “Codes match — confirm” on your computer (Settings → Phone remote). Your sessions appear once you do.
+              Now click “Codes match — confirm” on your computer (Settings → Web remote). Your sessions appear once you do.
             </p>
             <button
               onClick={clearPendingSas}

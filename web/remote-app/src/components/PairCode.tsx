@@ -8,7 +8,7 @@ export const IcoLink = ({ size = 42 }: { size?: number }) => (
 
 /**
  * Generates a pairing code (OTP) to enter in the desktop Session Manager's
- * Settings → Phone remote, and shows the code cells, steps and expiry.
+ * Settings → Web remote, and shows the code cells, steps and expiry.
  */
 export default function PairCode() {
   const [code, setCode] = useState<string | null>(null);
@@ -45,7 +45,7 @@ export default function PairCode() {
       {code ? (
         <ol className="text-sm text-ink-soft list-decimal list-inside space-y-1 mb-2 max-w-xs mx-auto">
           <li>Open Session Manager on your computer.</li>
-          <li>Go to <span className="text-ink font-semibold">Settings → Phone remote</span> and turn on 'Allow remote control from the web'.</li>
+          <li>Go to <span className="text-ink font-semibold">Settings → Web remote</span> and turn on 'Allow remote control from the web'.</li>
           <li>Click 'Pair Device…' and enter this code.</li>
         </ol>
       ) : (

@@ -1132,6 +1132,13 @@
  },
  {
   "ns": "siteFeedback",
+  "method": "inboxRemove",
+  "channel": "siteFeedback:inbox-remove",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "siteFeedback",
   "method": "drainNow",
   "channel": "siteFeedback:drain-now",
   "kind": "invoke",

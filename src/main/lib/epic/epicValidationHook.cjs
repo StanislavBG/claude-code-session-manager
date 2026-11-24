@@ -68,7 +68,65 @@ function recordFolderLines(cwd, epicId) {
  * (plan-records/<epicId>/, never committed), so the digest names that
  * absolute folder plus the legacy reviews/validation/<epicId>/ one.
  */
-function buildSettledDigest(settle, { epicId, notValidatedReason, cwd } = {}) {
+const SEVERITY_ORDER = ['Critical', 'Important', 'Minor'];
+const MAX_FINDING_LINES = 50;
+
+function severityRank(sev) {
+  const i = SEVERITY_ORDER.indexOf(String(sev || ''));
+  return i === -1 ? SEVERITY_ORDER.length : i;
+}
+
+/**
+ * Findings section lines: every finding gets an outcome in the same turn —
+ * Minor ones are the ones that get dropped when only verdict slugs are listed.
+ * Critical first, then Important, then Minor (stable within a severity).
+ */
+function findingLines(findings) {
+  const list = (Array.isArray(findings) ? findings : []).filter((f) => f && typeof f === 'object');
+  if (!list.length) return [];
+  const sorted = list
+    .map((f, i) => ({ f, i }))
+    .sort((a, b) => (severityRank(a.f.severity) - severityRank(b.f.severity)) || (a.i - b.i))
+    .map((x) => x.f);
+  const shown = sorted.slice(0, MAX_FINDING_LINES);
+  const out = [
+    '', `Findings (${list.length}) — give each one an outcome in this turn: a fix PRD or a one-line close reason:`,
+    ...shown.map((f) => `- [${f.severity}] ${f.prd}: ${f.text}${f.file ? ` (${f.file})` : ''}`),
+  ];
+  if (sorted.length > shown.length) out.push(`- …and ${sorted.length - shown.length} more in the records`);
+  return out;
+}
+
+/**
+ * Flatten verdict records ({ prd, at, findings[] }) to digest findings, keeping
+ * only verdicts saved after `sinceMs` (null = keep all). A verdict with no
+ * parseable `at` is kept only when there is no previous digest.
+ */
+function collectFindings(verdicts, sinceMs) {
+  const out = [];
+  for (const v of Array.isArray(verdicts) ? verdicts : []) {
+    if (!v || !Array.isArray(v.findings) || !v.findings.length) continue;
+    if (sinceMs != null) {
+      const t = typeof v.at === 'string' ? Date.parse(v.at) : NaN;
+      if (!Number.isFinite(t) || t <= sinceMs) continue;
+    }
+    for (const f of v.findings) {
+      if (!f || typeof f !== 'object') continue;
+      out.push({ prd: v.prd, severity: f.severity, text: f.text, file: f.file });
+    }
+  }
+  return out;
+}
+
+function defaultReadVerdictFiles(cwd, epicId) {
+  try {
+    return require('./epicOutsideRead.cjs').readVerdictFiles(cwd, epicId);
+  } catch {
+    return [];
+  }
+}
+
+function buildSettledDigest(settle, { epicId, notValidatedReason, cwd, findings } = {}) {
   const s = settle || {};
   const verified = s.verified || [];
   const refuted = s.refuted || [];
@@ -99,6 +157,7 @@ function buildSettledDigest(settle, { epicId, notValidatedReason, cwd } = {}) {
       ...cancelled.map((c) => `- ${c}`),
     );
   }
+  lines.push(...findingLines(findings));
   if (notValidated.length) {
     lines.push(
       '', `Not validated (${notValidated.length}) — ${notValidatedReason || 'no validator checked them'}:`,
@@ -134,6 +193,7 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
     jobBudget,
     sendPrompt,
     appendResponseEvent,
+    readVerdictFiles = defaultReadVerdictFiles,
     now = Date.now,
     log = console,
   } = deps;
@@ -220,7 +280,17 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
       }
     }
 
-    const prompt = buildSettledDigest(digestSettle, { epicId, notValidatedReason, cwd });
+    let findings = [];
+    try {
+      const sinceMs = newestDigest ? Date.parse(newestDigest.at) : null;
+      findings = collectFindings(
+        (await readVerdictFiles(cwd, epicId)) || [],
+        sinceMs != null && Number.isFinite(sinceMs) ? sinceMs : null,
+      );
+    } catch (e) {
+      try { (log || console).error('[epicValidationHook] readVerdictFiles failed', epicId, e); } catch { /* noop */ }
+    }
+    const prompt = buildSettledDigest(digestSettle, { epicId, notValidatedReason, cwd, findings });
     sendPrompt(epicId, prompt, { origin: 'scheduler' });
     await appendResponseEvent(
       cwd, epicId,

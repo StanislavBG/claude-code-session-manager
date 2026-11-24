@@ -2963,7 +2963,12 @@ function attachWindow(w) { mainWindow = w; }
 function buildScheduleStatePayload(state) {
   const payload = {
     config: state.config,
-    jobs: state.jobs,
+    // Cancelled rows ship as shallow copies marked `cancelled: true` (the one
+    // rule in lib/scheduler/cancelledRow.cjs) so the renderer never re-derives
+    // it. Copies only — the live rows (and so queue.json) never carry the key.
+    jobs: Array.isArray(state.jobs)
+      ? state.jobs.map((j) => (isCancelledRow(j) ? { ...j, cancelled: true } : j))
+      : state.jobs,
     lastRunAt: state.lastRunAt,
     // Distinct from lastRunAt (only stamped when a batch actually launches):
     // stamped every time tickQueue reaches the picker at all. See

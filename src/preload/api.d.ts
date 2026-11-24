@@ -895,6 +895,12 @@ export interface ScheduleJobRuntime {
 }
 
 export interface ScheduleJob {
+  /**
+   * True when a human cancelled this row. Set only by main in the schedule:state
+   * payload, from lib/scheduler/cancelledRow.cjs isCancelledRow — the renderer
+   * must read this and never re-derive the rule. Never stored in queue.json.
+   */
+  cancelled?: boolean;
   macroId?: string | null;
   /** Content id of the AgentSnapshot the first dispatch pinned; a resume re-runs it, never the live persona. */
   agentSnapshotId?: string;

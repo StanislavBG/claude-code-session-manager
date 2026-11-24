@@ -304,6 +304,43 @@ describe('backfillFromRunLogs', () => {
     assert.ok(lines.some((l) => l.unit === 'sm-job-live' && l.peakMb === 777), JSON.stringify(lines));
   });
 
+  it('a live peak already on disk after the async write is kept exactly once, whatever its key order', async () => {
+    seedRuns(2);
+    let s;
+    s = createJobMemoryStats({
+      storePath: path.join(tmp, STORE_FILE),
+      now: () => clock,
+      writeTextAtomic: async (f, text) => {
+        s.recordPeak({ agentType: 'validator', peakMb: 777, at: 9, runId: 'live-run', unit: 'sm-job-live' });
+        await new Promise((r) => setImmediate(r));
+        // The live peak lands after our rename, written with its keys in a different order.
+        fs.writeFileSync(f, text + JSON.stringify({ unit: 'sm-job-live', at: 9, runId: 'live-run', peakMb: 777, agentType: 'validator' }) + '\n');
+      },
+    });
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 2);
+    const lines = storeLines();
+    assert.equal(lines.length, 3, JSON.stringify(lines));
+    assert.equal(lines.filter((l) => l.runId === 'live-run' && l.unit === 'sm-job-live' && l.at === 9).length, 1);
+  });
+
+  it('a live peak replaced by the async write is re-appended exactly once', async () => {
+    seedRuns(2);
+    let s;
+    s = createJobMemoryStats({
+      storePath: path.join(tmp, STORE_FILE),
+      now: () => clock,
+      writeTextAtomic: async (f, text) => {
+        s.recordPeak({ at: 9, unit: 'sm-job-live', peakMb: 777, runId: 'live-run', agentType: 'validator' });
+        await new Promise((r) => setImmediate(r));
+        fs.writeFileSync(f, text);
+      },
+    });
+    assert.equal(await s.backfillFromRunLogs(RUNS()), 2);
+    const live = storeLines().filter((l) => l.runId === 'live-run' && l.unit === 'sm-job-live' && l.at === 9);
+    assert.equal(live.length, 1);
+    assert.equal(live[0].peakMb, 777);
+  });
+
   it('a store holding 30 samples is left alone', async () => {
     seedRuns(5);
     writeStore(seq(30, (i) => ({ agentType: 'dev-lead', peakMb: 500, at: i })));

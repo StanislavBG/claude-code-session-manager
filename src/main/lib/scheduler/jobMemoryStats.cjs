@@ -269,8 +269,10 @@ function createJobMemoryStats(deps = {}) {
         liveDuringWrite = null;
         if (landed.length && samples && samples.length) {
           const stored = readSamplesUncached(file);
-          const have = new Set(stored.map((x) => JSON.stringify(x)));
-          const missing = landed.filter((x) => !have.has(JSON.stringify(x)));
+          // Identity = (runId, unit, at), never JSON.stringify of the whole sample (key-order dependent).
+          const sampleKey = (x) => `${x.runId || ''}\0${x.unit || ''}\0${x.at}`;
+          const have = new Set(stored.map(sampleKey));
+          const missing = landed.filter((x) => !have.has(sampleKey(x)));
           if (missing.length) writeSamples(file, [...stored, ...missing]);
         }
       }

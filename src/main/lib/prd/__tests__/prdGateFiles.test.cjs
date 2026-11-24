@@ -189,3 +189,26 @@ test('parseFilesSection round-trips renderFilesSection output', () => {
   const files = ['src/a.cjs', 'src/main/', 'docs/My Notes/readme.md'];
   assert.deepEqual(parseFilesSection(renderFilesSection(files).join('\n')), files);
 });
+
+test('parseFilesSection keeps a valid spaced path whole when its prefix before a separator is not a path', () => {
+  assert.deepEqual(
+    parseFilesSection(filesBody(['- docs/A - B.md', '- docs/My (copy).md', '- `docs/A - B.md (note)`'])),
+    ['docs/A - B.md', 'docs/My (copy).md'],
+  );
+});
+
+test('parseFilesSection strips a note after " (", " — " and ": " when the prefix is a path', () => {
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs (note)'])), ['src/a.cjs']);
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs — note'])), ['src/a.cjs']);
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs: the helper'])), ['src/a.cjs']);
+  assert.deepEqual(parseFilesSection(filesBody(['- src/main/: the folder'])), ['src/main/']);
+});
+
+test('parseFilesSection splits a ", " list into separately checked paths', () => {
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs, src/b.cjs'])), ['src/a.cjs', 'src/b.cjs']);
+  assert.deepEqual(
+    parseFilesSection(filesBody(['- `src/a.cjs`, `src/b.cjs` (tests), /abs/c.cjs'])),
+    ['src/a.cjs', 'src/b.cjs'],
+  );
+  assert.deepEqual(parseFilesSection(filesBody(['- src/a.cjs, the helper'])), ['src/a.cjs']);
+});

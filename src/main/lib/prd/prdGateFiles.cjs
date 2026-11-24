@@ -242,9 +242,10 @@ function renderFilesSection(files) {
 /**
  * Inverse of renderFilesSection: read the bullet entries under the `# Files`
  * heading (up to the next top-level heading) back out of a PRD body. Returns
- * [] when there is no such section; never throws. Each bullet keeps only a
- * path that passes isValidFilesEntry (see parseFilesEntry) — a trailing note
- * is cut off, prose and invalid bullets are dropped, duplicates removed.
+ * [] when there is no such section; never throws. Each bullet keeps only the
+ * paths that pass isValidFilesEntry (see parseFilesEntry) — a trailing note
+ * is cut off, a ", " list is split, prose and invalid bullets are dropped,
+ * duplicates removed.
  *
  * @param {string} body
  * @returns {string[]}
@@ -262,40 +263,62 @@ function parseFilesSection(body) {
     if (!inFence && /^#\s/.test(line)) break;
     const m = line.match(/^[-*]\s+(.+?)\s*$/);
     if (!m) continue;
-    const entry = parseFilesEntry(m[1]);
-    if (entry && !out.includes(entry)) out.push(entry);
+    for (const entry of parseFilesEntry(m[1])) {
+      if (!out.includes(entry)) out.push(entry);
+    }
   }
   return out;
 }
 
 const unwrapTicks = (s) => { const t = s.match(/^`([^`]+)`$/); return (t ? t[1] : s).trim(); };
 
+// Separators a `# Files` bullet uses between a path and a note (or, for
+// ", ", between two paths). Matched only when what comes before is a path.
+const FILES_NOTE_SEPARATORS = [' (', ' - ', ' — ', ': ', ', '];
+
+/** The validated path when `s` is a valid entry ending in a file extension or "/", else null. */
+function pathLikePrefix(s) {
+  const lead = unwrapTicks(s);
+  if (!lead) return null;
+  const checked = isValidFilesEntry(lead);
+  if (!checked.ok) return null;
+  return /\.[A-Za-z0-9]+$/.test(checked.path) || checked.path.endsWith('/') ? checked.path : null;
+}
+
 /**
- * One `# Files` bullet's text -> its path, or null when it names no valid
- * path. Order: a leading path followed by a note — "path (note)",
- * "path - note", "path — note" (path optionally backticked) — keeps just the
- * path; otherwise the whole (unwrapped) entry, when it passes
- * isValidFilesEntry. A whole entry with a space must still look like a path
- * (contain "/", not end in sentence punctuation) — the API allows spaced
- * paths, but a spaced entry with neither is prose.
+ * One `# Files` bullet's text -> the paths it names ([] when none). Walks
+ * every separator occurrence (" (", " - ", " — ", ": ", ", ") left to right
+ * and splits at the first whose prefix is a path (valid entry ending in a
+ * file extension or "/"): after ", " the rest is parsed again as more
+ * entries; after any other separator the rest is a note and dropped. With no
+ * such split, the whole (unwrapped) entry is kept when it passes
+ * isValidFilesEntry — so a spaced path like "docs/A - B.md" round-trips. A
+ * whole entry with a space must still look like a path (contain "/", not end
+ * in sentence punctuation) — the API allows spaced paths, but a spaced entry
+ * with neither is prose.
  *
  * @param {string} raw
- * @returns {string|null}
+ * @returns {string[]}
  */
 function parseFilesEntry(raw) {
   const text = unwrapTicks(String(raw).trim());
-  const noted = text.match(/^(.+?)\s+(?:\(|[-—](?:\s|$))/);
-  if (noted) {
-    const lead = unwrapTicks(noted[1]);
-    const checked = lead ? isValidFilesEntry(lead) : null;
-    if (checked && checked.ok) return checked.path;
+  if (!text) return [];
+  /** @type {{at:number, sep:string}[]} */
+  const hits = [];
+  for (const sep of FILES_NOTE_SEPARATORS) {
+    for (let at = text.indexOf(sep); at > 0; at = text.indexOf(sep, at + 1)) hits.push({ at, sep });
   }
-  const whole = text;
-  if (!whole) return null;
-  const checked = isValidFilesEntry(whole);
-  if (!checked.ok) return null;
-  if (/\s/.test(checked.path) && (!checked.path.includes('/') || /[.,:;!?)]$/.test(checked.path))) return null;
-  return checked.path;
+  hits.sort((a, b) => a.at - b.at);
+  for (const { at, sep } of hits) {
+    const lead = pathLikePrefix(text.slice(0, at));
+    if (!lead) continue;
+    if (sep !== ', ') return [lead];
+    return [lead, ...parseFilesEntry(text.slice(at + sep.length))];
+  }
+  const checked = isValidFilesEntry(text);
+  if (!checked.ok) return [];
+  if (/\s/.test(checked.path) && (!checked.path.includes('/') || /[.,:;!?)]$/.test(checked.path))) return [];
+  return [checked.path];
 }
 
 /**

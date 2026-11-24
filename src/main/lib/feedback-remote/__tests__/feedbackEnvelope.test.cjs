@@ -145,48 +145,80 @@ test('dimensions within +-1 of report.screenshot are accepted', async () => {
 
 test('too_large: size check runs before decryption', async () => {
   // Garbage that would be bad_envelope if decrypted first.
-  expectCleanFailure(await openReportEnvelope(Buffer.alloc(100, 1), { ...opts(), maxBytes: 50 }), 'too_large');
+  const r1 = await openReportEnvelope(Buffer.alloc(100, 1), { ...opts(), maxBytes: 50 });
+  expect(r1.ok).toBe(false);
+  expectCleanFailure(r1, 'too_large');
   const env = await sealed();
-  expectCleanFailure(await openReportEnvelope(env, { ...opts(), maxBytes: env.length - 1 }), 'too_large');
+  const r2 = await openReportEnvelope(env, { ...opts(), maxBytes: env.length - 1 });
+  expect(r2.ok).toBe(false);
+  expectCleanFailure(r2, 'too_large');
 });
 
 test('bad_envelope: not an SMF1 envelope', async () => {
-  expectCleanFailure(await openReportEnvelope(Buffer.from('not an envelope at all'), opts()), 'bad_envelope');
+  const r3 = await openReportEnvelope(Buffer.from('not an envelope at all'), opts());
+  expect(r3.ok).toBe(false);
+  expectCleanFailure(r3, 'bad_envelope');
 });
 
 test('decrypt_failed: wrong box key, or wrong box id', async () => {
   const env = await sealed();
   const other = generateBoxKeypair();
-  expectCleanFailure(await openReportEnvelope(env, { privateKeyJwk: other.privateKeyJwk, boxId: BOX_ID }), 'decrypt_failed');
-  expectCleanFailure(await openReportEnvelope(env, { ...opts(), boxId: 'box_other' }), 'decrypt_failed');
+  const r4 = await openReportEnvelope(env, { privateKeyJwk: other.privateKeyJwk, boxId: BOX_ID });
+  expect(r4.ok).toBe(false);
+  expectCleanFailure(r4, 'decrypt_failed');
+  const r5 = await openReportEnvelope(env, { ...opts(), boxId: 'box_other' });
+  expect(r5.ok).toBe(false);
+  expectCleanFailure(r5, 'decrypt_failed');
 });
 
 test('bad_multipart: wrong content type, extra field, missing field, garbage body', async () => {
   const json = sealEnvelope(Buffer.from(JSON.stringify(validReport())), 'application/json', box.publicKey, BOX_ID);
-  expectCleanFailure(await openReportEnvelope(json, opts()), 'bad_multipart');
+  const r6 = await openReportEnvelope(json, opts());
+  expect(r6.ok).toBe(false);
+  expectCleanFailure(r6, 'bad_multipart');
   const noBoundary = sealEnvelope(Buffer.from('x'), 'multipart/form-data', box.publicKey, BOX_ID);
-  expectCleanFailure(await openReportEnvelope(noBoundary, opts()), 'bad_multipart');
-  expectCleanFailure(await openReportEnvelope(await sealed({ extra: true }), opts()), 'bad_multipart');
-  expectCleanFailure(await openReportEnvelope(await sealed({ omit: 'annotated' }), opts()), 'bad_multipart');
+  const r7 = await openReportEnvelope(noBoundary, opts());
+  expect(r7.ok).toBe(false);
+  expectCleanFailure(r7, 'bad_multipart');
+  const r8 = await openReportEnvelope(await sealed({ extra: true }), opts());
+  expect(r8.ok).toBe(false);
+  expectCleanFailure(r8, 'bad_multipart');
+  const r9 = await openReportEnvelope(await sealed({ omit: 'annotated' }), opts());
+  expect(r9.ok).toBe(false);
+  expectCleanFailure(r9, 'bad_multipart');
   const garbage = sealEnvelope(Buffer.from(`${SECRET_TITLE} no parts here`), 'multipart/form-data; boundary=zzz', box.publicKey, BOX_ID);
-  expectCleanFailure(await openReportEnvelope(garbage, opts()), 'bad_multipart');
+  const r10 = await openReportEnvelope(garbage, opts());
+  expect(r10.ok).toBe(false);
+  expectCleanFailure(r10, 'bad_multipart');
 });
 
 test('bad_report: invalid JSON, or JSON failing the Report v1 schema', async () => {
-  expectCleanFailure(await openReportEnvelope(await sealed({ reportRaw: `{${SECRET_TITLE}` }), opts()), 'bad_report');
+  const r11 = await openReportEnvelope(await sealed({ reportRaw: `{${SECRET_TITLE}` }), opts());
+  expect(r11.ok).toBe(false);
+  expectCleanFailure(r11, 'bad_report');
   const bad = { ...validReport(), type: 'nope' };
-  expectCleanFailure(await openReportEnvelope(await sealed({ report: bad }), opts()), 'bad_report');
+  const r12 = await openReportEnvelope(await sealed({ report: bad }), opts());
+  expect(r12.ok).toBe(false);
+  expectCleanFailure(r12, 'bad_report');
 });
 
 test('bad_image: not a PNG, size mismatch, edge over 8192, over 8 MiB', async () => {
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
-  expectCleanFailure(await openReportEnvelope(await sealed({ screenshot: jpeg }), opts()), 'bad_image');
-  expectCleanFailure(await openReportEnvelope(await sealed({ annotated: makePng(W + 2, H) }), opts()), 'bad_image');
+  const r13 = await openReportEnvelope(await sealed({ screenshot: jpeg }), opts());
+  expect(r13.ok).toBe(false);
+  expectCleanFailure(r13, 'bad_image');
+  const r14 = await openReportEnvelope(await sealed({ annotated: makePng(W + 2, H) }), opts());
+  expect(r14.ok).toBe(false);
+  expectCleanFailure(r14, 'bad_image');
   const huge = makePng(8193, 1);
   const hugeReport = validReport();
   hugeReport.screenshot.width = 8193;
   hugeReport.screenshot.height = 1;
-  expectCleanFailure(await openReportEnvelope(await sealed({ report: hugeReport, screenshot: huge, annotated: huge }), opts()), 'bad_image');
+  const r15 = await openReportEnvelope(await sealed({ report: hugeReport, screenshot: huge, annotated: huge }), opts());
+  expect(r15.ok).toBe(false);
+  expectCleanFailure(r15, 'bad_image');
   const big = Buffer.concat([makePng(W, H), Buffer.alloc(8 * 1024 * 1024)]);
-  expectCleanFailure(await openReportEnvelope(await sealed({ screenshot: big }), { ...opts(), maxBytes: 20 * 1024 * 1024 }), 'bad_image');
+  const r16 = await openReportEnvelope(await sealed({ screenshot: big }), { ...opts(), maxBytes: 20 * 1024 * 1024 });
+  expect(r16.ok).toBe(false);
+  expectCleanFailure(r16, 'bad_image');
 });

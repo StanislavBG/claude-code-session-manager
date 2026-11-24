@@ -314,6 +314,10 @@ test('POST envelope: header/body validation, 201 id, idempotent report id, 413, 
   expect(s).toMatchObject({ status: 400, body: { error: 'bad_envelope' } });
   s = await submit(m, id, { reportId: 'not-a-uuid', ip: 'b' });
   expect(s).toMatchObject({ status: 400, body: { error: 'invalid_report_id' } });
+  s = await submit(m, id, { reportId: '00000000-0000-0000-0000-000000000000', ip: 'b2' });
+  expect(s.status).toBe(201);
+  s = await submit(m, id, { headers: { 'Content-Type': 'text/plain' }, ip: 'b3' });
+  expect(s).toMatchObject({ status: 400, body: { error: 'bad_envelope' } });
   s = await submit(m, id, { body: Buffer.from('XXXXhello'), ip: 'c' });
   expect(s).toMatchObject({ status: 400, body: { error: 'bad_envelope' } });
   s = await submit(m, id, { body: Buffer.alloc(12 * 1024 * 1024 + 1, 'S'), ip: 'd' });

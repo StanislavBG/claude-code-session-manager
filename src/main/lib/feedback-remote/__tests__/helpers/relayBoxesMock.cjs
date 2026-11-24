@@ -29,7 +29,7 @@ const IP_WINDOW_MS = 60 * 1000;
 const BOX_LIMIT = 60;
 const BOX_WINDOW_MS = 60 * 60 * 1000;
 const ALLOW_HEADERS = 'Content-Type, X-Sm-Envelope, X-Sm-Report-Id';
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACCOUNT_ID = 'acct-test';
 
 /** @param {number} n */
@@ -386,6 +386,8 @@ async function startRelayBoxesMock(opts) {
     const reportId = req.headers['x-sm-report-id'];
     if (typeof reportId !== 'string' || !UUID_RE.test(reportId))
       return send(res, 400, { error: 'invalid_report_id' }, cors);
+    if (String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/octet-stream')
+      return send(res, 400, { error: 'bad_envelope' }, cors);
     if (tooLarge) return send(res, 413, { error: 'payload_too_large' }, cors);
     if (buf.length < 4 || buf.subarray(0, 4).toString('latin1') !== 'SMF1')
       return send(res, 400, { error: 'bad_envelope' }, cors);

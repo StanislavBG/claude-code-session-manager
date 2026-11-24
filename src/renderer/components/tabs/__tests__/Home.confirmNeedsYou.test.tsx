@@ -6,6 +6,13 @@ import { act } from 'react-dom/test-utils'
 import { NeedsYouSection } from '../Home'
 import { buildNeedsYouRows, parseToolConfirmation, type OutsideItemLite } from '../../../lib/homeNeedsYou'
 import { toast } from '../../../state/toast'
+import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
+
+// Spy (call-through) on the setter openChat uses to select the row's Epic.
+vi.mock('../../../lib/promptSessionDeepLink', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../lib/promptSessionDeepLink')>()
+  return { ...actual, setPendingPromptSessionId: vi.fn(actual.setPendingPromptSessionId) }
+})
 
 const DIGEST = 'ab'.repeat(32)
 
@@ -148,6 +155,7 @@ describe('NeedsYouSection row kinds — answers and links only', () => {
     const open = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Open session')
     expect(open).toBeTruthy()
     await click(open!)
+    expect(setPendingPromptSessionId).toHaveBeenCalledWith('e1')
     expect(onNavigate).toHaveBeenCalledWith('terminal')
   })
 

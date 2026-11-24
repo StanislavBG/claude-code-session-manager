@@ -270,6 +270,9 @@ test('the admin route table has no voices write route', () => {
   expect(keys.length).toBeGreaterThan(5);
   expect(keys.filter((k) => /voice/i.test(k) && (/^(POST|PUT|PATCH|DELETE) /.test(k) && !/\/(preview|list|read)$/.test(k) || WRITE_WORD.test(k.split(' ')[1])))).toEqual([]);
 
+  // Repo-wide structural guard, which is why it reads source text: the invariant is about
+  // every file, not one module's behavior. Only voicesIpc.cjs writes approvals.json, and no
+  // admin route (or MCP server route) writes a voice — a new writer anywhere must fail here.
   // Every admin route URL literal anywhere in src/main and the MCP server: none writes a voice.
   const srcMain = path.resolve(__dirname, '..', '..', '..');
   const files = [path.resolve(srcMain, '..', '..', 'scripts', 'scheduler-mcp-server.cjs')];

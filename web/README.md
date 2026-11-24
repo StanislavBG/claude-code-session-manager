@@ -15,6 +15,8 @@ repo. This directory only holds the tooling that *produces* what Bilko serves:
 - `remote-app/` — the phone-remote PWA, the live source of the bundle published at
   `bilko.run/projects/session-manager/`. A **separate npm project** with its own install/test/build
   that root test runners ignore; see [`remote-app/AGENTS.md`](remote-app/AGENTS.md).
+- `feedback-widget/` — the embeddable site Feedback widget, a separate npm project; its
+  design-vs-widget screenshot pairs: [`feedback-widget/tests/shots/README.md`](feedback-widget/tests/shots/README.md).
 
 `web/manual/build.mjs` and `web/manual/capture-figures.mjs` are the only manual builders.
 

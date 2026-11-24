@@ -2843,6 +2843,12 @@ export interface ChatExternalNewSessionResult {
   /** The minted Epic's id when `ok`. */
   epicId?: string;
   error?: string;
+  /** Project Home entry id of the background build queued for a scripted job press (Demo Video). */
+  entryId?: string;
+  /** That build's slug. */
+  slug?: string;
+  /** That build's stage; null when it has none. */
+  stage?: 'review' | 'final' | null;
 }
 
 export type CreateProjectFolderResult =
@@ -3715,6 +3721,8 @@ export interface SessionManagerAPI {
         requestId?: string;
         via?: 'script';
         effort?: string;
+        /** Scripted job press: build a review cut first. */
+        reviewStage?: boolean;
       }) => void,
     ) => () => void;
     /** Classify a queued PromptTicket's text as 'inline' (run through

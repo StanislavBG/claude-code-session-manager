@@ -1449,6 +1449,11 @@ const chatExternalNewSessionResult = z.object({
   ok: z.boolean(),
   epicId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).optional(),
   error: z.string().max(500).optional(),
+  // The background build the renderer queued for a scripted job press
+  // (Demo Video): its Project Home entry id, slug and stage.
+  entryId: entryId.optional(),
+  slug: z.string().min(1).max(200).optional(),
+  stage: z.enum(['review', 'final']).nullable().optional(),
 }).strict();
 
 // Phone drill-down reads. cwd is re-checked against the open tabs in

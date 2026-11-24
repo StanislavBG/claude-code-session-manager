@@ -1453,7 +1453,8 @@ const EXTERNAL_NEW_SESSION_TIMEOUT_MS = 30000;
 const pendingExternalNewSessions = new Map(); // requestId -> { resolve, timer }
 
 /**
- * @returns {Promise<{ ok: true, epicId: string } | { ok: false, reason: 'no-window'|'timeout'|'launch-failed', error: string }>}
+ * Every payload key (incl. a boolean `reviewStage`) is broadcast unchanged.
+ * @returns {Promise<{ ok: true, epicId: string, entryId?: string, slug?: string, stage?: 'review'|'final'|null } | { ok: false, reason: 'no-window'|'timeout'|'launch-failed', error: string }>}
  */
 function startExternalNewSession(payload) {
   if (!hasLiveWindow()) {
@@ -1471,13 +1472,20 @@ function startExternalNewSession(payload) {
   });
 }
 
-function settleExternalNewSession({ requestId, ok, epicId, error }) {
+function settleExternalNewSession({ requestId, ok, epicId, error, entryId, slug, stage }) {
   const entry = pendingExternalNewSessions.get(requestId);
   if (!entry) return;
   clearTimeout(entry.timer);
   pendingExternalNewSessions.delete(requestId);
-  if (ok && epicId) entry.resolve({ ok: true, epicId });
-  else entry.resolve({ ok: false, reason: 'launch-failed', error: error || 'renderer could not start the session' });
+  if (ok && epicId) {
+    entry.resolve({
+      ok: true,
+      epicId,
+      ...(entryId !== undefined ? { entryId } : {}),
+      ...(slug !== undefined ? { slug } : {}),
+      ...(stage !== undefined ? { stage } : {}),
+    });
+  } else entry.resolve({ ok: false, reason: 'launch-failed', error: error || 'renderer could not start the session' });
 }
 
 // Read-only: is a chat turn for this tab running, being dispatched, parked

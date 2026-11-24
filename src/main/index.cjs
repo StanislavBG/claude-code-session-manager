@@ -1794,7 +1794,8 @@ app.whenReady().then(async () => {
     Promise.resolve()
       .then(() => require('./lib/feedback-remote/crossProjectReply.cjs').deliverDueReplies({ appVersion }))
       .then((r) => {
-        logs.writeLine({ scope: 'feedback-reply', level: r.failed || r.error ? 'warn' : 'info', message: 'scheduled replies pass', meta: { appVersion, due: r.due, delivered: r.delivered, failed: r.failed, ...(r.error ? { error: r.error } : {}) } });
+        const { replyPassLogMeta } = require('./lib/feedback-remote/crossProjectReply.cjs');
+        logs.writeLine({ scope: 'feedback-reply', level: r.failed || r.error ? 'warn' : 'info', message: 'scheduled replies pass', meta: replyPassLogMeta(r, appVersion) });
       })
       .catch((e) => {
         logs.writeLine({ scope: 'feedback-reply', level: 'error', message: 'scheduled replies pass failed', meta: { error: e?.message } });

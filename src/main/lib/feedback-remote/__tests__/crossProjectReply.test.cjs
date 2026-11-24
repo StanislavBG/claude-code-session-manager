@@ -1037,3 +1037,24 @@ test('deliverDueReplies: a pass started while one is running is skipped and deli
     expect(readLedger(home)[0].deliveredAt).toEqual(expect.any(String));
   });
 });
+
+test('replyPassLogMeta: a skipped pass is marked skipped: true; a run pass skipped: false', async () => {
+  const { replyPassLogMeta } = require('../crossProjectReply.cjs');
+  await withSchedulerHome(async () => {
+    const { b } = await setup();
+    const d = deps('sent');
+    await sendFeedbackReply(input(b, { message: 'Live in v{version}.', deliverWhen: { appVersionAbove: '0.141.0' } }), d);
+    let release;
+    const gate = new Promise((res) => { release = res; });
+    const realSend = d.sendPrompt;
+    d.sendPrompt = async (...args) => { await gate; return realSend(...args); };
+    const p1 = deliverDueReplies({ appVersion: '0.142.0' }, d);
+    await new Promise((res) => setImmediate(res));
+    const second = await deliverDueReplies({ appVersion: '0.142.0' }, d);
+    expect(replyPassLogMeta(second, '0.142.0')).toEqual({ appVersion: '0.142.0', due: 0, delivered: 0, failed: 0, skipped: true });
+    release();
+    const first = await p1;
+    expect(replyPassLogMeta(first, '0.142.0')).toEqual({ appVersion: '0.142.0', due: 1, delivered: 1, failed: 0, skipped: false });
+  });
+  expect(replyPassLogMeta({ due: 0, delivered: 0, failed: 0, error: 'boom' }, '1.0.0')).toEqual({ appVersion: '1.0.0', due: 0, delivered: 0, failed: 0, skipped: false, error: 'boom' });
+});

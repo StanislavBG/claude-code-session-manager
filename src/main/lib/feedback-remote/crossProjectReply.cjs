@@ -717,6 +717,22 @@ async function deliverDueReplies(opts = {}, deps = {}) {
   }
 }
 
+/**
+ * Log meta for one 'scheduled replies pass' line. `skipped` tells a pass that
+ * deliverDueReplies skipped (a previous pass still running) apart from a pass
+ * that ran and found nothing due — both report due 0.
+ */
+function replyPassLogMeta(r, appVersion) {
+  return {
+    appVersion,
+    due: r.due,
+    delivered: r.delivered,
+    failed: r.failed,
+    skipped: r.skipped === true,
+    ...(r.error ? { error: r.error } : {}),
+  };
+}
+
 async function runDueRepliesPass({ appVersion } = {}, deps = {}) {
   const summary = { due: 0, delivered: 0, failed: 0, results: [] };
   const listDue = deps.listDueReplies || pendingReplies.listDueReplies;
@@ -861,5 +877,6 @@ module.exports = {
   sendFeedbackReply,
   deliverAuthorizedReply,
   deliverDueReplies,
+  replyPassLogMeta,
   registerAdminRoute,
 };

@@ -190,6 +190,21 @@ test('listeners get one shared deep-frozen copy; a mutating listener is logged a
   expect(errSpy).toHaveBeenCalledWith('[epicEventLog] listener failed', expect.stringMatching(/read only|read-only|kind/));
 });
 
+test('a function-valued field is dropped on disk and in the listener copy; the append still resolves', async () => {
+  const views = [];
+  log.onEpicEventAppended((_c, rec) => { views.push(rec); });
+  const rec = await log.appendEpicEvent(cwd, EPIC, { kind: 'job.queued', callback: () => 1, note: 'kept' });
+  const rows = fs.readFileSync(file(), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  expect(rows).toHaveLength(1);
+  expect('callback' in rows[0]).toBe(false);
+  expect(rows[0].note).toBe('kept');
+  expect(views).toHaveLength(1);
+  expect(Object.isFrozen(views[0])).toBe(true);
+  expect('callback' in views[0]).toBe(false);
+  expect(views[0]).toEqual(rows[0]);
+  expect(Object.isFrozen(rec)).toBe(false);
+});
+
 test('_resetForTests clears listeners', async () => {
   const fn = vi.fn();
   log.onEpicEventAppended(fn);

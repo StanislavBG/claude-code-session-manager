@@ -15,6 +15,7 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { FeedbackUser } from '../host';
 import type { ReportType } from '../report';
 import { panelVisible, type Event, type State } from './machine';
+import { Receipt, receiptCss } from './Receipt';
 import { colors, fonts, motion } from './tokens';
 
 // ── Copy & rules (§5.6) ───────────────────────────────────────────────────────
@@ -27,6 +28,15 @@ export const TITLE_MIN = 3;
 export const TITLE_MAX = 120;
 export const DETAILS_MAX = 5000;
 export const DETAILS_ROWS = 4;
+/** §5.6 Error banner (mode `error`); a 4xx (`rejected`) result swaps the body copy (§1 Submission). */
+export const ERROR_TITLE = "Couldn't reach the feedback server";
+export const ERROR_BODY_RETRY = 'Nothing is lost — this report is saved in your browser and will retry on its own.';
+export const ERROR_BODY_REJECTED = "The feedback server didn't accept this report.";
+
+export function errorBody(kind: State['errorKind']): string {
+  return kind === 'rejected' ? ERROR_BODY_REJECTED : ERROR_BODY_RETRY;
+}
+
 /** Describe → Title focus delay (§2). */
 export const FOCUS_TITLE_DELAY_MS = 420;
 
@@ -140,6 +150,14 @@ export function panelCss(): string {
     `.fw-pn-input::placeholder,.fw-pn-textarea::placeholder{color:${c['ink-4']}}`,
     `.fw-pn-input:focus,.fw-pn-textarea:focus{border-color:${c.ink};box-shadow:0 0 0 3px rgba(244,185,66,.45)}`,
     `.fw-pn-error{font-weight:500;font-size:12.5px;color:${c.accent}}`,
+    // Error banner (§5.6)
+    `.fw-pn-banner{display:flex;align-items:flex-start;gap:12px;padding:12px;border-radius:9px;` +
+      `background:rgba(168,56,24,.08);border:1px solid rgba(168,56,24,.35)}`,
+    `.fw-pn-bang{flex:none;width:22px;height:22px;border-radius:999px;background:${c.accent};color:${c['on-accent']};` +
+      `font-weight:700;font-size:13px;line-height:22px;text-align:center}`,
+    `.fw-pn-bantext{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}`,
+    `.fw-pn-bantitle{font-weight:600;font-size:14px;line-height:1.35;color:${c.ink}}`,
+    `.fw-pn-banbody{font-weight:400;font-size:13px;line-height:1.45;color:${c['ink-2']}}`,
     // Footer
     `.fw-pn-foot{flex:none;display:flex;align-items:center;gap:12px;padding:12px 14px 12px 20px;border-top:1px solid ${c.rule};background:${c['paper-2']}}`,
     `.fw-pn-avatar{flex:none;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;` +
@@ -154,6 +172,8 @@ export function panelCss(): string {
     `.fw-pn-key{font-family:${fonts.mono};font-weight:500;font-size:11px;padding:2px 6px;border-radius:5px;background:rgba(255,248,239,.16)}`,
     `.fw-panel button:focus-visible{outline:2px solid ${c.amber};outline-offset:2px}`,
     `.fw-panel :disabled{cursor:default}`,
+    // Receipt (§5.7) — same sheet, so the strict-CSP one-sheet rule holds.
+    receiptCss(),
     // §4 reduced motion: no translate/scale, fades capped at 150 ms.
     `@media (prefers-reduced-motion:reduce){` +
       `.fw-panel{transition:opacity 150ms, visibility 150ms}` +
@@ -205,8 +225,23 @@ export interface PanelProps {
   mini?: boolean;
   /** Override for the shortcut chip platform test (defaults to navigator.platform). */
   platform?: string;
+  /** Receipt "Screenshot" / "Console" / "Network" rows (§5.7); defaults: viewport size, nothing captured. */
+  attached?: PanelAttached;
   /** Marks / Attached sections (rendered below Details). */
   children?: ComponentChildren;
+}
+
+export interface PanelAttached {
+  width: number;
+  height: number;
+  console: { count: number; on: boolean };
+  network: { count: number; on: boolean };
+}
+
+function defaultAttached(): PanelAttached {
+  const w = typeof window === 'undefined' ? 0 : window.innerWidth;
+  const h = typeof window === 'undefined' ? 0 : window.innerHeight;
+  return { width: w, height: h, console: { count: 0, on: true }, network: { count: 0, on: true } };
 }
 
 export function Panel(props: PanelProps) {
@@ -223,6 +258,8 @@ export function Panel(props: PanelProps) {
   const showBack = state.mode === 'review' || state.mode === 'error';
   const invalid = !titleValid(state.draft.title);
   const reporter = reporterView(user);
+  const showReceipt = state.mode === 'sent' && state.config.success === 'receipt';
+  const attached = props.attached ?? defaultAttached();
 
   useLayoutEffect(() => {
     if (ref.current) adoptInto(ref.current);
@@ -257,12 +294,26 @@ export function Panel(props: PanelProps) {
       ref={ref}
       class={`fw-panel${mini ? ' fw-panel--mini' : ''}${visible ? '' : ' fw-panel--hidden'}`}
       role="region"
-      aria-label="Describe your feedback"
+      aria-label={showReceipt ? 'Feedback received' : 'Describe your feedback'}
       aria-hidden={visible ? undefined : 'true'}
       aria-busy={sending ? 'true' : undefined}
     >
       {sending && <div ref={barRef} class="fw-pn-progress" data-part="progress" />}
 
+      {showReceipt ? (
+        <Receipt
+          id={state.reportId}
+          user={user}
+          typeLabel={spec.label}
+          title={state.draft.title}
+          screenshot={{ width: attached.width, height: attached.height, marks: state.marks.length }}
+          console={attached.console}
+          network={attached.network}
+          onSendAnother={() => dispatch({ type: 'sendAnother' })}
+          onDone={() => dispatch({ type: 'done' })}
+        />
+      ) : (
+      <>
       <div class="fw-pn-head">
         <div class="fw-pn-headrow">
           <div class="fw-pn-eyebrow">{EYEBROW}</div>
@@ -288,6 +339,22 @@ export function Panel(props: PanelProps) {
       </div>
 
       <div class="fw-pn-body">
+        {state.mode === 'error' && (
+          <div class="fw-pn-banner" data-part="error-banner" role="alert">
+            <span class="fw-pn-bang" aria-hidden="true">
+              !
+            </span>
+            <div class="fw-pn-bantext">
+              <div class="fw-pn-bantitle" data-part="error-title">
+                {ERROR_TITLE}
+              </div>
+              <div class="fw-pn-banbody" data-part="error-body">
+                {errorBody(state.errorKind)}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div class="fw-pn-field">
           <div class="fw-pn-label" id="fw-pn-type-label">Type</div>
           <div class="fw-pn-seg" role="radiogroup" aria-labelledby="fw-pn-type-label">
@@ -382,6 +449,8 @@ export function Panel(props: PanelProps) {
           </span>
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }

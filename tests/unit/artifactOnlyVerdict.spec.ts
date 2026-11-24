@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { verifyRun, artifactsVerifiedOnDisk } = require('../../src/main/runVerify.cjs');
+const { verifyRun, artifactsVerifiedOnDisk, captureArtifactEvidence } = require('../../src/main/runVerify.cjs');
 const { commitGuardVerdict } = require('../../src/main/scheduler.cjs');
 
 const SLUG = '816-artifact-prd';
@@ -26,7 +26,12 @@ function writeArt(rel: string, content: string, mtime?: Date) {
   fs.writeFileSync(abs, content);
   if (mtime) fs.utimesSync(abs, mtime, mtime);
 }
-function run(prdPath: string, startedAt: string, finishedAt: string) {
+function writeIn(root: string, rel: string, content: string) {
+  const abs = path.join(root, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, content);
+}
+function run(prdPath: string, startedAt: string, finishedAt: string, artifactEvidence: unknown = undefined) {
   fs.writeFileSync(
     path.join(runDir, `${SLUG}.log`),
     JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done\nSCHEDULER_VERDICT: PASS' }) + '\n',
@@ -34,6 +39,7 @@ function run(prdPath: string, startedAt: string, finishedAt: string) {
   return verifyRun({
     runDir, prdPath, exitCode: 0, committedDuringRun: false,
     queueEntry: { slug: SLUG, cwd, startedAt, finishedAt },
+    ...(artifactEvidence === undefined ? {} : { artifactEvidence }),
   });
 }
 
@@ -103,6 +109,43 @@ describe('artifact-only verdict', () => {
     expect(artifactsVerifiedOnDisk({ ...base, paths: [ART], fsImpl: { statSync() { throw new Error('boom'); } } })).toBe(false);
     expect(artifactsVerifiedOnDisk({ ...base, paths: ['review-records'], fsImpl: { statSync: fs.statSync, readdirSync() { throw new Error('boom'); } } })).toBe(false);
     expect(artifactsVerifiedOnDisk({ ...base, paths: [ART] })).toBe(true);
+  });
+  it('(g) artifact only in a worktree, captured before teardown → artifact_verified (pre-teardown)', async () => {
+    const wt = path.join(tmp, 'wt');
+    writeIn(wt, ART, 'x'); writeIn(wt, 'review-records/b.md', 'y');
+    const prd = writePrd(DECL);
+    const ev = captureArtifactEvidence({ prdPath: prd, roots: [cwd, wt], startedAt: started });
+    expect(ev?.ok).toBe(true);
+    expect(ev?.paths).toEqual([ART, 'review-records/b.md']);
+    expect(typeof ev?.capturedAt).toBe('string');
+    fs.rmSync(wt, { recursive: true, force: true });
+    const v = await run(prd, started, finished, ev);
+    expect(v.verdict).toBe('pass_no_commit_artifact_verified');
+    expect(v.artifactEvidenceSource).toBe('pre-teardown');
+    expect(v.verifiedArtifacts).toEqual(ev.verified);
+    expect(v.reason).toMatch(/before teardown/);
+  });
+  it('(h) worktree deleted, no evidence → pass_no_commit', async () => {
+    const wt = path.join(tmp, 'wt');
+    writeIn(wt, ART, 'x'); writeIn(wt, 'review-records/b.md', 'y');
+    fs.rmSync(wt, { recursive: true, force: true });
+    expect((await run(writePrd(DECL), started, finished)).verdict).toBe('pass_no_commit');
+  });
+  it('(i) ok evidence whose paths differ from the frontmatter → pass_no_commit', async () => {
+    const ev = { ok: true, verified: [{ path: ART, size: 1, mtime: finished }], paths: [ART], capturedAt: finished };
+    expect((await run(writePrd(DECL), started, finished, ev)).verdict).toBe('pass_no_commit');
+    const reordered = { ...ev, paths: ['review-records/b.md', ART] };
+    expect((await run(writePrd(DECL), started, finished, reordered)).verdict).toBe('pass_no_commit');
+  });
+  it('(j) no declaration + ok evidence → pass_no_commit', async () => {
+    const ev = { ok: true, verified: [], paths: [ART, 'review-records/b.md'], capturedAt: finished };
+    expect((await run(writePrd(''), started, finished, ev)).verdict).toBe('pass_no_commit');
+  });
+  it('(k) captureArtifactEvidence → null for an undeclared PRD and a missing prdPath', () => {
+    writeArt(ART, 'x');
+    expect(captureArtifactEvidence({ prdPath: writePrd(''), roots: [cwd], startedAt: started })).toBeNull();
+    expect(captureArtifactEvidence({ prdPath: path.join(tmp, 'nope.md'), roots: [cwd], startedAt: started })).toBeNull();
+    expect(captureArtifactEvidence({ prdPath: undefined, roots: [cwd], startedAt: started })).toBeNull();
   });
   it('(f) commit guard stands down only on a clean tree', () => {
     const base = { siblingRunning: false, ranInWorktree: true, jobSelfCommitted: false, legitimateNoOp: false, isFixPlanJob: false, artifactVerified: true, verifyResult: { verdict: 'pass_no_commit_artifact_verified' } };

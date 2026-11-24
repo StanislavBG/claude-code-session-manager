@@ -641,6 +641,28 @@ function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
   }
 }
 
+/**
+ * Capture artifact evidence for a DECLARED artifact-only PRD while the job
+ * worktree still exists (spawnJob tears it down before verifyRun runs). Runs
+ * the same artifactsCheck verifyRun would, against `roots` (main checkout
+ * first, then the worktree), with an open-ended window (finishedAt: null =
+ * now). Returns null when the PRD is not an artifact-only declaration or on any
+ * read/parse error — never throws. Otherwise { ok, verified, paths, capturedAt }
+ * where `paths` is a copy of the frontmatter artifactPaths, so verifyRun can
+ * refuse evidence captured for a different declaration.
+ */
+function captureArtifactEvidence({ prdPath, roots, startedAt, fsImpl = fs } = {}) {
+  try {
+    const text = fs.readFileSync(prdPath, 'utf8');
+    const fm = parsePrdFile(text).frontmatter;
+    if (!isArtifactOnlyDeclaration(fm)) return null;
+    const check = artifactsCheck({ cwd: roots, paths: fm.artifactPaths, startedAt, finishedAt: null, fsImpl });
+    return { ok: check.ok, verified: check.verified, paths: [...fm.artifactPaths], capturedAt: new Date().toISOString() };
+  } catch {
+    return null;
+  }
+}
+
 // ─── main verifier ────────────────────────────────────────────────────────────
 
 /**
@@ -684,11 +706,18 @@ function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
  *                                            ever applies when this is exactly 0 — default
  *                                            null so callers that don't pass it keep
  *                                            today's behavior byte-for-byte.
+ * @param {object|null} [params.artifactEvidence] Result of captureArtifactEvidence,
+ *                                            taken by the caller while the job worktree
+ *                                            still existed (before teardown). The artifact
+ *                                            exemption checks queueEntry.cwd live; only when
+ *                                            that fails does it accept this evidence, and
+ *                                            only if ok === true and its paths equal the
+ *                                            frontmatter artifactPaths. Default null.
  * @returns {Promise<{verdict:string, reason:string, downgradeTo:string|null}>}
  */
 async function verifyRun({
   runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false,
-  ghExecImpl, priorLandedCommit = null, jobLandedCommitThisRun = null, exitCode = null, worktreeDir = null,
+  ghExecImpl, priorLandedCommit = null, jobLandedCommitThisRun = null, exitCode = null, artifactEvidence = null,
 }) {
   const { slug } = queueEntry;
   const logPath = path.join(runDir, `${slug}.log`);
@@ -953,9 +982,10 @@ async function verifyRun({
       // (all deliverables live in a git-excluded dir, so "no commit" is
       // correct). Reads the declared list from frontmatter — never scrapes
       // prose — and stat-checks each file on disk (non-empty, in the run
-      // window). Paths resolve against queueEntry.cwd, then retry against the
-      // run's worktree dir when the caller supplies one. Any doubt falls
-      // through to pass_no_commit below. The commit guard separately requires
+      // window). Paths resolve against queueEntry.cwd live; when that fails,
+      // the caller's artifactEvidence (captureArtifactEvidence, run in the job
+      // worktree before teardown) counts only if ok and its paths equal the
+      // frontmatter artifactPaths. Any doubt falls through to pass_no_commit. The commit guard separately requires
       // a clean tree for this verdict (scheduler.cjs commitGuardVerdict).
       let artifactVerified = false;
       if (!mergeMainVerified && !priorRunVerified) {
@@ -963,22 +993,30 @@ async function verifyRun({
         try { fm = parsePrdFile(prdFullText).frontmatter; } catch { fm = null; }
         if (isArtifactOnlyDeclaration(fm)) {
           const check = artifactsCheck({
-            cwd: [queueEntry?.cwd, worktreeDir],
+            cwd: [queueEntry?.cwd],
             paths: fm.artifactPaths,
             startedAt: queueEntry?.startedAt,
             finishedAt: queueEntry?.finishedAt,
           });
-          if (check.ok) {
+          const evidenceOk = !check.ok
+            && artifactEvidence && artifactEvidence.ok === true
+            && Array.isArray(artifactEvidence.paths) && Array.isArray(artifactEvidence.verified)
+            && artifactEvidence.paths.length === fm.artifactPaths.length
+            && artifactEvidence.paths.every((p, i) => p === fm.artifactPaths[i]);
+          if (check.ok || evidenceOk) {
             artifactVerified = true;
+            const verified = check.ok ? check.verified : artifactEvidence.verified;
             return conclude(
               'pass_no_commit_artifact_verified',
               'SCHEDULER_VERDICT: PASS with no commit, but every declared artifact exists, is non-empty, and was '
-                + `written inside the run window (${check.verified.map((v) => v.path).join(', ')})`,
+                + `written inside the run window (${verified.map((v) => v.path).join(', ')})`
+                + (check.ok ? '' : ' (checked in the job worktree before teardown)'),
               null,
               {
                 ...(annotations.length ? { annotations } : {}),
                 sentinel,
-                verifiedArtifacts: check.verified,
+                verifiedArtifacts: verified,
+                ...(check.ok ? {} : { artifactEvidenceSource: 'pre-teardown' }),
               },
             );
           }
@@ -1029,6 +1067,7 @@ module.exports = {
   extractMergeMainPrNumber,
   checkMergeablePr,
   artifactsVerifiedOnDisk,
+  captureArtifactEvidence,
   isAncestorCommit,
   commitExistsInRepo,
   commitOnAnyRef,

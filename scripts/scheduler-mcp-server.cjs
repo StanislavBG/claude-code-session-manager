@@ -1535,6 +1535,26 @@ async function preflightAppRefusal(expected) {
     + "Restart Session Manager into a newer build (Command Palette: 'Reboot app (drain first)') and call again.";
 }
 
+// First app release whose POST /admin/feedback/reply knows deliverWhen (held
+// replies, 58b70bc2). An older app ignores the key and delivers at once with
+// {version} unfilled, spending a reply slot (seen live 2026-11-24 on 0.141.0).
+const HELD_REPLY_MIN_APP_VERSION = '0.142.0';
+
+// Refuses (returns an error line) when a feedback_reply carries deliverWhen but
+// the running app is older than HELD_REPLY_MIN_APP_VERSION or reports no
+// version. A missing admin-api.json returns null so adminRequest reports "not running".
+async function heldReplyAppRefusal(deliverWhen) {
+  if (deliverWhen === undefined || deliverWhen === null) return null;
+  let cfg;
+  try { cfg = await readAdminConfig(); } catch { return null; }
+  const appVersion = typeof cfg.appVersion === 'string' && cfg.appVersion ? cfg.appVersion : null;
+  const cmp = appVersion ? compareVersions(appVersion, HELD_REPLY_MIN_APP_VERSION) : NaN;
+  if (cmp >= 0) return null;
+  return `refused: the running Session Manager app (${appVersion ? `v${appVersion}` : 'version not reported'}) predates held replies `
+    + `and would ignore deliverWhen: it would deliver the reply at once with {version} unfilled and spend one of the thread's replies. `
+    + `Send it after the app runs v${HELD_REPLY_MIN_APP_VERSION} or later, or send it now without deliverWhen with the version written by hand.`;
+}
+
 // Adds originClaudeSessionId (SM_CHAT_SESSION_ID fallback when sourcePromptId
 // is absent) and originProjectRoot (SM_PROJECT_ROOT hint) to a create payload.
 function withCreateOrigin(payload) {
@@ -1910,6 +1930,9 @@ async function handleCallTool(request) {
       if (typeof args.outcome !== 'string' || !args.outcome) {
         return errorResult('missing required argument: outcome');
       }
+      const held = args.deliverWhen !== undefined && args.deliverWhen !== null;
+      const heldRefusal = held ? await heldReplyAppRefusal(args.deliverWhen) : null;
+      if (heldRefusal) return errorResult(heldRefusal);
       const payload = { ...args };
       // Identity comes only from this process's env — never from the caller.
       delete payload.originClaudeSessionId;
@@ -1945,6 +1968,10 @@ async function handleCallTool(request) {
         } else if (result?.delivery === 'fallback') {
           note = ' — the asking Epic could not take it, so the reply fell back to a new proposed session in that project'
             + `${result.fallbackEpicId ? ` (${result.fallbackEpicId})` : ''}; a human there must approve it.`;
+        }
+        if (held && result?.delivery !== 'scheduled') {
+          note += ` WARNING: deliverWhen was sent, but the app delivered the reply immediately instead of holding it `
+            + `(delivery '${result?.delivery ?? 'none'}'); any {version} in the message went out unfilled.`;
         }
       }
       return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };

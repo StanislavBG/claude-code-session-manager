@@ -51,14 +51,14 @@ function startFakeAdminServer(body) {
   });
 }
 
-async function setup(body, env) {
+async function setup(body, env, { appVersion } = {}) {
   const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-mcp-reply-'));
   tmpDirs.push(homeDir);
   const { server, requests } = await startFakeAdminServer(body);
   servers.push(server);
   const tokenPath = path.join(homeDir, '.claude', 'session-manager', 'admin-api.json');
   await fsp.mkdir(path.dirname(tokenPath), { recursive: true });
-  await fsp.writeFile(tokenPath, JSON.stringify({ port: server.address().port, token: 't' }), 'utf8');
+  await fsp.writeFile(tokenPath, JSON.stringify({ port: server.address().port, token: 't', ...(appVersion ? { appVersion } : {}) }), 'utf8');
   savedEnv = {};
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
   for (const k of ENV_KEYS) delete process.env[k];
@@ -193,4 +193,59 @@ test('feedback_open_session catalog limits the feedback_reply promise to an iden
   const { MCP_TOOL_CATALOG, composeDescription } = require('../lib/mcpToolCatalog.cjs');
   const open = composeDescription(MCP_TOOL_CATALOG.find((e) => e.name === 'feedback_open_session'));
   expect(open).toMatch(/only when the call comes from a Session Manager Epic chat session that Session Manager can identify/);
+});
+
+// deliverWhen (held replies) arrived in v0.142.0; an older app ignores it and
+// delivers at once with {version} unfilled, spending a reply slot.
+const HELD = { ...BASE, deliverWhen: { appVersionAbove: '0.141.0' } };
+
+test.each([
+  ['0.141.0', 'v0.141.0'],
+  [undefined, 'version not reported'],
+])('deliverWhen on app %s is refused before any request', async (appVersion, named) => {
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'scheduled' }, { SM_CHAT_SESSION_ID: 's' }, { appVersion });
+  const r = await call(handleCallTool, HELD);
+  expect(r.isError).toBe(true);
+  const text = r.content[0].text;
+  expect(text).toContain(named);
+  expect(text).toMatch(/at once/);
+  expect(text).toContain('{version}');
+  expect(text).toMatch(/spend/);
+  expect(text).toContain('v0.142.0 or later');
+  expect(text).toMatch(/without deliverWhen/);
+  expect(requests).toHaveLength(0);
+});
+
+test('deliverWhen on app 0.142.0 is sent with deliverWhen', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'scheduled' }, { SM_CHAT_SESSION_ID: 's' }, { appVersion: '0.142.0' });
+  const r = await call(handleCallTool, HELD);
+  expect(r.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body.deliverWhen).toEqual({ appVersionAbove: '0.141.0' });
+  expect(r.content[0].text).not.toMatch(/instead of holding/);
+});
+
+test('no deliverWhen on app 0.141.0 is sent as before', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'delivered' }, { SM_CHAT_SESSION_ID: 's' }, { appVersion: '0.141.0' });
+  const r = await call(handleCallTool, BASE);
+  expect(r.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body).not.toHaveProperty('deliverWhen');
+  expect(r.content[0].text).not.toMatch(/instead of holding/);
+});
+
+test('a held request the app delivered at once is flagged', async () => {
+  const { handleCallTool, requests } = await setup({ ok: true, delivery: 'delivered' }, { SM_CHAT_SESSION_ID: 's' }, { appVersion: '0.142.0' });
+  const r = await call(handleCallTool, HELD);
+  expect(requests).toHaveLength(1);
+  const text = r.content[0].text;
+  expect(text).toMatch(/delivered the reply immediately instead of holding it/);
+  expect(text).toContain("'delivered'");
+});
+
+test('catalog says deliverWhen needs v0.142.0 or later; summary unchanged', () => {
+  const { MCP_TOOL_CATALOG, composeDescription } = require('../lib/mcpToolCatalog.cjs');
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'feedback_reply');
+  expect(composeDescription(entry)).toMatch(/deliverWhen needs Session Manager v0\.142\.0 or later running/);
+  expect(entry.summary).toBe('Answer the project that sent this session its feedback.');
 });

@@ -371,7 +371,8 @@ const MCP_TOOL_CATALOG = [
       + 'deliverWhen { appVersionAbove }: hold this reply until Session Manager runs a version above '
       + 'appVersionAbove (give the version running now); it then sends itself, even after this Epic closes; '
       + '`{version}` in the message becomes that version. A held reply returns delivery "scheduled" and '
-      + 'counts toward the 3-reply cap at once.',
+      + 'counts toward the 3-reply cap at once. deliverWhen needs Session Manager v0.142.0 or later running; '
+      + 'an older app is refused before the call.',
   },
   {
     name: 'project_home_write',

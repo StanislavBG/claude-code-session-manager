@@ -26,7 +26,7 @@ const { makeDepResolver } = require('./lib/prd/depSlugResolve.cjs');
 const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/scheduler/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/telemetry/auditLog.cjs');
 const { checkMainDependencyHealth } = require('./lib/git/depHealth.cjs');
-const { findTrackedRuntimeState } = require('./lib/git/runtimeStateUntrack.cjs');
+const { findTrackedRuntimeState, findVisibleRuntimeState } = require('./lib/git/runtimeStateUntrack.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
 const { computeReport, isRetentionEnabled, liveKeysFromJobs, resolveRetentionConfig } = require('./lib/scheduler/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
@@ -817,6 +817,25 @@ function evaluateMainDepLinks(results = []) {
 }
 
 /**
+ * evaluateVisibleRuntimeState(results) → { component, issues }
+ *
+ * Pure over `Array<{ cwd, count }>` (count = findVisibleRuntimeState(cwd).length).
+ * One warn issue per project whose runtime files git can see — a namespace
+ * missing its self-ignore. Non-critical: component.ok is always true.
+ */
+function evaluateVisibleRuntimeState(results = []) {
+  const list = Array.isArray(results) ? results : [];
+  const projects = list
+    .filter((r) => r && Number.isFinite(r.count) && r.count > 0)
+    .map(({ cwd, count }) => ({ cwd, count }));
+  if (projects.length === 0) return { component: { ok: true }, issues: [] };
+  return {
+    component: { ok: true, warn: true, projects },
+    issues: projects.map((p) => `warn: ${p.cwd} has ${p.count} Session Manager runtime file(s) git can see (missing self-ignore)`),
+  };
+}
+
+/**
  * evaluateCredentialHealth({ credState, now }) → { component, issues }
  *
  * Pure over its inputs — `credState` is the shape lib/credentials.cjs's
@@ -1489,10 +1508,15 @@ async function check(opts = {}) {
   try {
     const roots = [...new Set(allProjectCwds())].slice(0, 100).filter((cwd) => fs.existsSync(cwd));
     const hits = [];
+    const visible = [];
     for (const cwd of roots) {
       const n = (await findTrackedRuntimeState(cwd)).length;
       if (n > 0) hits.push({ cwd, count: n });
+      visible.push({ cwd, count: (await findVisibleRuntimeState(cwd)).length });
     }
+    const visibleEval = evaluateVisibleRuntimeState(visible);
+    status.components.visible_runtime_state = visibleEval.component;
+    status.issues.push(...visibleEval.issues);
     status.components.tracked_runtime_state = hits.length === 0
       ? { ok: true }
       : { ok: true, warn: true, projects: hits };
@@ -1501,6 +1525,7 @@ async function check(opts = {}) {
     }
   } catch (e) {
     status.components.tracked_runtime_state = { ok: true, error: e.message };
+    status.components.visible_runtime_state = { ok: true, error: e.message };
   }
 
   // 6.8. Credential health (informational-but-loud): is the Claude OAuth token
@@ -1595,6 +1620,7 @@ module.exports = {
   evaluateStarveEscalationHealth,
   evaluateBuildFreshness,
   evaluateMainDepLinks,
+  evaluateVisibleRuntimeState,
   WORKTREE_SAFETY_PATHS,
   latestStarveEscalationReasons,
   DISPATCH_STALL_THRESHOLD_MS,

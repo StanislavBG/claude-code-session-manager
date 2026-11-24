@@ -173,6 +173,7 @@
   "remoteClientSessions": "feedback-remote",
   "remoteE2eCrypto": "feedback-remote",
   "remoteFrameAssembler": "feedback-remote",
+  "servicePairings": "feedback-remote",
   "reservationExpiry": "scheduler",
   "reviewNotice": "scheduler",
   "runClaudeP": "claude",

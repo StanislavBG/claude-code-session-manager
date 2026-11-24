@@ -8,6 +8,8 @@ Part of the **AGENT LAYER** partition — see
 `session-manager-dev/skills/` — 4 skills (`builder`, `develop`, `maintaining-md-network`, `send-feedback`); keep in sync with `project-partition.md` and
 `seedDevPlugin.cjs`'s header count.
 
+`session-manager-dev/hooks/` — the residue Stop hook (develop rule 6).
+
 `packs/<id>/` — context packs (plugin + `sm-pack.json` + optional `laws.md`), loaded per session by `--plugin-dir`, not the marketplace; read by `src/main/lib/packs/packCatalog.cjs`.
 
 Two manifests: root [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json)
@@ -35,8 +37,7 @@ purpose and runs only when `session-manager-operations/manual/manual.json` exist
 ## Who consumes this
 
 **Other repos**, not (only) this one. A project installs `claude-code-session-manager` from npm,
-or references its skills/hooks directly.
-Editing a skill here changes every consuming repo. See
+or references its skills/hooks directly. See
 [`../session-manager-operations/reviews/2026-09-12-agent-layer-consumers.md`](../session-manager-operations/reviews/2026-09-12-agent-layer-consumers.md)
 for live consumers.
 
@@ -48,7 +49,7 @@ for live consumers.
   never this repo's own absolute path or a copy.
 - Do not confuse this with `.claude/` at the repo root — this repo's own unshipped local dev
   config. `.claude/agents/*.md` are per-project OVERLAYS that win over
-  `~/.claude/agents/*.md` (Claude Code's own precedence, per `src/main/agentLibrary.cjs`);
+  `~/.claude/agents/*.md` (per `src/main/agentLibrary.cjs`);
   `src/seed/agents/` is the shipped source for the personas
   `src/main/seedAgentPersonas.cjs` copies into `~/.claude/agents/` (its `PERSONAS` list);
   `builder` has no seed source — the generic `~/.claude/agents/builder.md` is machine-local

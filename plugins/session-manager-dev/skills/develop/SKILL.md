@@ -50,7 +50,9 @@ new work. **report** = your final message to the human.
    the project laws reserve for a human, or a PRD refuted twice on the same criterion (one
    decision: re-plan it or drop that criterion). Never write "deferred", "follow-up for later", "needs
    a new Epic from you" or "say the word". Why: a list nobody owns becomes debt the human has
-   to chase.
+   to chase. Enforced by the plugin's Stop hook (`hooks/residue-check.cjs`): it checks each
+   Epic chat turn once and asks for an outcome for any line that hands work back;
+   `SM_RESIDUE_CHECK=0` turns it off.
 
 ## Phase 1 — plan and queue
 

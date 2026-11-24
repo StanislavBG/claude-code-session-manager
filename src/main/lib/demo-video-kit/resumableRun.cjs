@@ -23,20 +23,31 @@
 // "not written yet".
 //
 // Files in stateDir: state.json { key, pid, startedAt }, lease (mtime only),
-// result.json { key, result }, run.log (supervisor + step stdout/stderr).
+// result.json { key, result }, run.log (supervisor + step stdout/stderr of the
+// latest fresh run; truncated on each fresh start), start.lock (held only while
+// startOrAttach starts a run, so two concurrent starts spawn one supervisor).
+//
+// Process tree: on POSIX the supervisor leads its own process group and stops
+// the whole group (SIGTERM) on lease expiry and after its step exits, so a
+// voice wrapper's grandchildren never outlive the run. On win32 the same
+// points run `taskkill /PID <pid> /T /F` (winTreeKillArgv).
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const DEFAULT_LEASE_MS = 20 * 60 * 1000;
 const LEASE_CHECK_MAX_MS = 15 * 1000;
 const DEFAULT_POLL_MS = 1000;
 const LOG_TAIL_BYTES = 500;
+const START_LOCK_STALE_MS = 30 * 1000;
+const START_LOCK_WAIT_MS = 50;
+const START_LOCK_MAX_WAITS = 40;
 
 const statePath = (d) => path.join(d, 'state.json');
 const leasePath = (d) => path.join(d, 'lease');
 const resultPath = (d) => path.join(d, 'result.json');
 const logPath = (d) => path.join(d, 'run.log');
+const lockPath = (d) => path.join(d, 'start.lock');
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
@@ -98,17 +109,31 @@ function killQuiet(pid, sig) {
   try { process.kill(pid, sig); } catch { /* ESRCH: already gone */ }
 }
 
-/** Stop the recorded run (its whole process group on POSIX) and clear its files. */
+/** win32 argv that ends pid and every descendant. */
+function winTreeKillArgv(pid) {
+  return ['taskkill', '/PID', String(pid), '/T', '/F'];
+}
+
+/** End pid's whole tree: taskkill /T on win32, SIGTERM to its process group on POSIX. */
+function killTree(pid) {
+  if (process.platform === 'win32') {
+    const argv = winTreeKillArgv(pid);
+    try { spawnSync(argv[0], argv.slice(1), { shell: false, windowsHide: true, stdio: 'ignore' }); } catch { /* ignore */ }
+    return;
+  }
+  killQuiet(-pid, 'SIGTERM');
+  killQuiet(pid, 'SIGTERM');
+}
+
+/** Synchronous pause without a busy loop. */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Stop the recorded run (its whole process tree) and clear its files. */
 function stopRun(stateDir) {
   const s = readState(stateDir);
-  if (s) {
-    if (process.platform === 'win32') {
-      killQuiet(s.pid);
-    } else {
-      killQuiet(-s.pid, 'SIGTERM');
-      killQuiet(s.pid, 'SIGTERM');
-    }
-  }
+  if (s) killTree(s.pid);
   rmQuiet(statePath(stateDir));
   rmQuiet(resultPath(stateDir));
   rmQuiet(leasePath(stateDir));
@@ -123,6 +148,53 @@ function startOrAttach({ stateDir, key, argv, cwd, leaseMs = DEFAULT_LEASE_MS })
   if (!stateDir || typeof key !== 'string' || !key) throw new Error('resumableRun: stateDir and key are required');
   if (!Array.isArray(argv) || argv.length === 0) throw new Error('resumableRun: argv must be a non-empty array');
   fs.mkdirSync(stateDir, { recursive: true });
+  const attached = attachLive(stateDir, key);
+  if (attached) return attached;
+  const lock = lockPath(stateDir);
+  let waits = 0;
+  let staleRemoved = false;
+  for (;;) {
+    try {
+      fs.closeSync(fs.openSync(lock, 'wx'));
+      break;
+    } catch (err) {
+      if (!err || err.code !== 'EEXIST') throw err;
+    }
+    // Another caller is starting a run: attach to it once it is recorded.
+    const other = attachLive(stateDir, key);
+    if (other) return other;
+    let age = 0;
+    try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { /* released meanwhile: retry */ }
+    if (age > START_LOCK_STALE_MS && !staleRemoved) {
+      staleRemoved = true;
+      rmQuiet(lock);
+      continue;
+    }
+    if (waits >= START_LOCK_MAX_WAITS) {
+      throw new Error(`resumableRun: start lock ${lock} is still held after ${START_LOCK_MAX_WAITS * START_LOCK_WAIT_MS} ms`);
+    }
+    waits++;
+    sleepSync(START_LOCK_WAIT_MS);
+  }
+  try {
+    return startLocked({ stateDir, key, argv, cwd, leaseMs });
+  } finally {
+    rmQuiet(lock);
+  }
+}
+
+/** Same key with a live supervisor -> attach result; otherwise null. */
+function attachLive(stateDir, key) {
+  const s = readState(stateDir);
+  if (s && s.key === key && pidAlive(s.pid)) {
+    refreshLease(stateDir);
+    return { pid: s.pid, started: false };
+  }
+  return null;
+}
+
+/** Called with start.lock held: re-check, then start a fresh run. */
+function startLocked({ stateDir, key, argv, cwd, leaseMs }) {
   const s = readState(stateDir);
   if (s && pidAlive(s.pid)) {
     if (s.key === key) {
@@ -131,10 +203,10 @@ function startOrAttach({ stateDir, key, argv, cwd, leaseMs = DEFAULT_LEASE_MS })
     }
     stopRun(stateDir);
   }
-  // A fresh run: its waiter must see only its own result.
+  // A fresh run: its waiter must see only its own result and its own log.
   rmQuiet(resultPath(stateDir));
   refreshLease(stateDir);
-  const logFd = fs.openSync(logPath(stateDir), 'a');
+  const logFd = fs.openSync(logPath(stateDir), 'w');
   let child;
   try {
     child = spawn(process.execPath, [__filename, '__supervise', stateDir, key, String(leaseMs), '--', ...argv], {
@@ -200,11 +272,8 @@ function supervise(args) {
       writeResult(stateDir, key, { ok: false, error: `abandoned: no caller for ${Math.round(leaseMs / 60000)} min` });
     } catch { /* stateDir gone */ }
     process.stderr.write(`resumableRun supervisor: lease expired, stopping group ${process.pid}\n`);
-    if (process.platform === 'win32') {
-      killQuiet(step.pid);
-      process.exit(1);
-    }
-    killQuiet(-process.pid, 'SIGTERM');
+    killTree(process.pid);
+    process.exit(1);
   }, every);
   step.on('error', (err) => {
     process.stderr.write(`resumableRun supervisor: step failed to start: ${err.message}\n`);
@@ -213,7 +282,12 @@ function supervise(args) {
   });
   step.on('exit', (code, signal) => {
     clearInterval(timer);
-    process.exit(code ?? (signal ? 1 : 0));
+    // The step wrote its result before exiting; stop whatever it left in this
+    // group (e.g. a voice wrapper's grandchildren). The waiter is not in it.
+    const exitCode = code ?? (signal ? 1 : 0);
+    process.on('SIGTERM', () => process.exit(exitCode));
+    killTree(process.pid);
+    process.exit(exitCode);
   });
 }
 
@@ -221,4 +295,4 @@ if (require.main === module && process.argv[2] === '__supervise') {
   supervise(process.argv.slice(3));
 }
 
-module.exports = { startOrAttach, waitForResult, writeResult, stopRun, readLogTail, DEFAULT_LEASE_MS };
+module.exports = { startOrAttach, waitForResult, writeResult, stopRun, readLogTail, winTreeKillArgv, DEFAULT_LEASE_MS };

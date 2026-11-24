@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 29 (capture.cjs measures from the page video origin and drops short clips)', () => {
-  expect(KIT_VERSION).toBe('29');
+test('KIT_VERSION is bumped to 30 (resumableRun.cjs stops the whole process tree, locks starts, truncates run.log)', () => {
+  expect(KIT_VERSION).toBe('30');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

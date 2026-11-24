@@ -251,3 +251,32 @@ test('model mitigations: a registry with no rows fails', () => {
   expect(r.status).toBe(1);
   expect(r.stderr).toContain(`${MM}: no mitigation rows found`);
 });
+
+test('a gitignored ops namespace with no tracked file is excluded with a note', () => {
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  write('.gitignore', `${OPS}/events/\n`);
+  write(`${OPS}/events/epic-1.jsonl`, '{}\n');
+  const r = run();
+  expect(r.status, r.stderr).toBe(0);
+  expect(r.stdout).toContain(`doc-hierarchy: note: ${OPS}/events/: runtime namespace is gitignored with no tracked files (excluded)`);
+  expect(r.stderr).not.toContain(`${OPS}/events/README.md`);
+});
+
+test('a self-ignored ops namespace (ns/* pattern) with no tracked file is excluded with a note', () => {
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  write('.gitignore', `${OPS}/agents/*\n`);
+  write(`${OPS}/agents/snapshots/a.json`, '{}\n');
+  const r = run();
+  expect(r.status, r.stderr).toBe(0);
+  expect(r.stdout).toContain(`doc-hierarchy: note: ${OPS}/agents/: runtime namespace is gitignored with no tracked files (excluded)`);
+});
+
+test('a tracked ops namespace without README.md still fails with missing junction', () => {
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  write(`${OPS}/widgets/data.json`, '{}\n');
+  spawnSync('git', ['add', '--', `${OPS}/widgets/data.json`], { cwd: root });
+  const r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain(`missing junction: ${OPS}/widgets/README.md`);
+  expect(r.stdout).not.toContain(`${OPS}/widgets/: runtime namespace`);
+});

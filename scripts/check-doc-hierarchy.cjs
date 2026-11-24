@@ -128,8 +128,32 @@ function pairSibling(f) {
 }
 
 // (1) manifest
+// A runtime namespace (agents/, events/) is gitignored, holds no tracked file and
+// exists only in the main checkout; by design it has no README, so it is a note.
+// "Gitignored" covers both `ns/` (the folder) and `ns/*` (self-ignored contents:
+// something on disk is ignored and nothing is untracked-but-unignored).
+const gitLines = (args) => {
+  const r = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' })
+  return r.status === 0 ? (r.stdout || '').split('\n').filter(Boolean) : null
+}
+function hasTrackedFiles(relDir) {
+  const out = gitLines(['ls-files', '--', relDir])
+  return out === null || out.length > 0
+}
+function isIgnoredNamespace(relDir) {
+  if (isGitIgnored(path.join(ROOT, relDir))) return true
+  const ignored = gitLines(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '--', relDir])
+  const untracked = gitLines(['ls-files', '--others', '--exclude-standard', '--', relDir])
+  return !!ignored && ignored.length > 0 && !!untracked && untracked.length === 0
+}
 const manifest = [...JUNCTIONS]
-for (const ns of listDirs(path.join(ROOT, OPS)).sort()) manifest.push(`${OPS}/${ns}/README.md`)
+for (const ns of listDirs(path.join(ROOT, OPS)).sort()) {
+  if (isIgnoredNamespace(`${OPS}/${ns}`) && !hasTrackedFiles(`${OPS}/${ns}`)) {
+    console.log(`doc-hierarchy: note: ${OPS}/${ns}/: runtime namespace is gitignored with no tracked files (excluded)`)
+    continue
+  }
+  manifest.push(`${OPS}/${ns}/README.md`)
+}
 for (const f of manifest) {
   if (exists(f)) continue
   const sib = pairSibling(f)

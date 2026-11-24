@@ -3,12 +3,13 @@
  * Run: timeout 120 npx vitest run src/main/lib/demo-video-kit/__tests__/export.test.cjs
  */
 'use strict';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { exportVideo, sizeForHtml, verifyProbe } = require('../export.cjs');
+const { EventEmitter } = require('events');
+const { exportVideo, sizeForHtml, verifyProbe, runFfmpegDefault } = require('../export.cjs');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'export-'));
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
@@ -177,6 +178,43 @@ describe('exportVideo (injected fakes)', () => {
     const r = await exportVideo({ ...f, audioPath: path.join(f.dir, 'nope.wav'), lengthS: 1, loadPlaywright: () => fakePlaywright().pw });
     expect(r.ok).toBe(false);
     expect(r.error).toContain('audioPath');
+  });
+});
+
+describe('runFfmpegDefault backpressure', () => {
+  it('200 backpressured writes leave at most 2 close listeners and emit no MaxListenersExceededWarning', async () => {
+    const child = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    const stdin = new EventEmitter();
+    let writes = 0;
+    let maxClose = 0;
+    stdin.write = () => {
+      writes++;
+      // backpressure on every write; drain fires on the next tick
+      setImmediate(() => { maxClose = Math.max(maxClose, child.listenerCount('close')); stdin.emit('drain'); });
+      return false;
+    };
+    stdin.end = () => setImmediate(() => child.emit('close', 0));
+    child.stdin = stdin;
+    async function* input() { for (let i = 0; i < 200; i++) yield PNG; }
+    const warnings = [];
+    const onWarning = (w) => warnings.push(w);
+    process.on('warning', onWarning);
+    const spawnFn = vi.fn(() => child);
+    try {
+      await runFfmpegDefault(['-y', 'out.mp4'], { input: input(), spawnFn });
+      await new Promise((r) => setImmediate(r));
+    } finally {
+      process.off('warning', onWarning);
+    }
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    expect(writes).toBe(200);
+    expect(maxClose).toBeGreaterThan(0);
+    expect(maxClose).toBeLessThanOrEqual(2);
+    expect(child.listenerCount('close')).toBeLessThanOrEqual(2);
+    expect(stdin.listenerCount('drain')).toBe(0);
+    expect(warnings.filter((w) => w && w.name === 'MaxListenersExceededWarning')).toEqual([]);
   });
 });
 

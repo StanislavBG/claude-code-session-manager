@@ -50,11 +50,11 @@ function ffprobeArgs(file) {
  * `input` into stdin (respecting backpressure), resolve with stderr on exit 0. Rejects when
  * ffmpeg cannot start, exits non-zero, exceeds the timeout, or `input` throws.
  */
-function runFfmpegDefault(args, { input } = {}) {
+function runFfmpegDefault(args, { input, spawnFn = spawn } = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderr = '';
-    const child = spawn(FFMPEG, args, { stdio: ['pipe', 'ignore', 'pipe'], shell: false });
+    const child = spawnFn(FFMPEG, args, { stdio: ['pipe', 'ignore', 'pipe'], shell: false });
     const finish = (err, val) => {
       if (settled) return;
       settled = true;
@@ -73,7 +73,14 @@ function runFfmpegDefault(args, { input } = {}) {
       if (input) {
         for await (const buf of input) {
           if (settled) return;
-          if (!child.stdin.write(buf)) await new Promise((r) => { child.stdin.once('drain', r); child.once('close', r); });
+          if (!child.stdin.write(buf)) {
+            // Wait for drain or close, then drop BOTH listeners so none accumulate per frame.
+            await new Promise((r) => {
+              const done = () => { child.stdin.off('drain', done); child.off('close', done); r(); };
+              child.stdin.once('drain', done);
+              child.once('close', done);
+            });
+          }
         }
       }
       child.stdin.end();
@@ -189,7 +196,7 @@ async function exportVideo({ htmlPath, lengthS, audioPath, outDir, fps = 30, pos
   return { ok: true, mp4Path, posterPath, width, height, durationS: v.durationS, check: { id: 'export', ok: true, detail: v.detail } };
 }
 
-module.exports = { exportVideo, sizeForHtml, ffmpegArgs, ffprobeArgs, verifyProbe, DURATION_TOLERANCE_S, TIMEOUT_MS };
+module.exports = { exportVideo, runFfmpegDefault, sizeForHtml, ffmpegArgs, ffprobeArgs, verifyProbe, DURATION_TOLERANCE_S, TIMEOUT_MS };
 
 if (require.main === module) {
   let spec;

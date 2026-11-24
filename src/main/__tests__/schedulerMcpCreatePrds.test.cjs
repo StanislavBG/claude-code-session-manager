@@ -124,4 +124,57 @@ describe('scheduler_create_prds', () => {
     expect(t).toContain('[0] a: bad gate');
     expect(t).toContain('[2] c: dependsOn cycle');
   });
+
+  it('renders zod details: entry index, slug and field path for an over-long fixes reason', async () => {
+    reply = { ok: false, applied: false, error: 'invalid PRD batch payload', details: [
+      { code: 'too_big', maximum: 200, path: ['prds', 2, 'fixes', 0, 'reason'], message: 'String must contain at most 200 character(s)' },
+    ] };
+    const r = await call({ prds: [prd('a'), prd('b'), prd('c')] });
+    const t = textOf(r);
+    expect(r.isError).toBe(true);
+    expect(t).toContain('nothing was written');
+    expect(t).toContain('- [2] c: fixes[0].reason: String must contain at most 200 character(s)');
+    expect(t).not.toContain('[-1] (no slug): invalid PRD batch payload');
+  });
+
+  it('prints a non-prds issue path under [-1] with its full path', async () => {
+    reply = { ok: false, applied: false, error: 'invalid PRD batch payload', details: [
+      { path: ['cwd'], message: 'Expected string, received number' },
+      { path: ['prds', 0], message: 'Required' },
+    ] };
+    const t = textOf(await call({ prds: [prd('a')] }));
+    expect(t).toContain('- [-1] (no slug): cwd: Expected string, received number');
+    expect(t).toContain('- [0] a: (root): Required');
+  });
+
+  it('caps the issue lines at 20 plus a "+N more" line', async () => {
+    const details = Array.from({ length: 25 }, (_, i) => ({ path: ['prds', 0, 'acceptanceCriteria', i], message: `bad ${i}` }));
+    reply = { ok: false, applied: false, error: 'invalid PRD batch payload', details };
+    const t = textOf(await call({ prds: [prd('a')] }));
+    const lines = t.split('\n').filter((l) => l.startsWith('- [0] a: acceptanceCriteria['));
+    expect(lines).toHaveLength(20);
+    expect(t).toContain('- [0] a: acceptanceCriteria[19]: bad 19');
+    expect(t).not.toContain('bad 20');
+    expect(t).toContain('+5 more');
+  });
+
+  it('prints a refusal with no details exactly as before', async () => {
+    reply = { ok: false, applied: false, error: 'invalid PRD batch payload' };
+    const t = textOf(await call({ prds: [prd('a')] }));
+    expect(t).toContain('Fix every entry below and call again:\n- [-1] (no slug): invalid PRD batch payload — call session_manager_help');
+    reply = { ok: false, applied: false, error: 'invalid PRD batch payload', details: 'not an array' };
+    expect(textOf(await call({ prds: [prd('a')] }))).toContain('- [-1] (no slug): invalid PRD batch payload');
+  });
+});
+
+describe('scheduler_create_prd zod details', () => {
+  it('shows the field path and message when the admin route returns zod details', async () => {
+    reply = { ok: false, error: 'invalid PRD payload', details: [
+      { path: ['fixes', 0, 'reason'], message: 'String must contain at most 200 character(s)' },
+    ] };
+    const r = await handleCallTool({ params: { name: 'scheduler_create_prd', arguments: prd('solo') } });
+    const t = textOf(r);
+    expect(calls[0].url).toBe('http://127.0.0.1:4321/admin/scheduler/create-prd');
+    expect(t).toContain('- fixes[0].reason: String must contain at most 200 character(s)');
+  });
 });

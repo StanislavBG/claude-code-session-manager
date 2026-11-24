@@ -317,6 +317,40 @@ function errorResult(text) {
   return { content: [{ type: 'text', text: withPointer(text) }], isError: true };
 }
 
+const ZOD_ISSUE_LINE_MAX = 20;
+
+// Renders a zod issue path as a field path: ['fixes', 0, 'reason'] -> 'fixes[0].reason'.
+function zodFieldPath(segs) {
+  let out = '';
+  for (const seg of segs) {
+    if (typeof seg === 'number') out += `[${seg}]`;
+    else out += (out ? '.' : '') + String(seg);
+  }
+  return out || '(root)';
+}
+
+// One line per zod issue from an admin route's `details` (capped, '+N more').
+// Batch mode (prds = the caller's entries): a path ['prds', i, ...rest] names
+// entry i and its slug; any other path prints under [-1] with its full path.
+// Single mode (prds = null): '- <field path>: <message>'. Returns null when
+// details is not an array of issues with a path, so callers keep today's text.
+function formatZodIssueLines(details, prds) {
+  if (!Array.isArray(details)) return null;
+  const issues = details.filter((d) => d && typeof d === 'object' && Array.isArray(d.path));
+  if (issues.length === 0) return null;
+  const lines = issues.slice(0, ZOD_ISSUE_LINE_MAX).map((issue) => {
+    const msg = issue.message ?? 'invalid';
+    if (!prds) return `- ${zodFieldPath(issue.path)}: ${msg}`;
+    const [head, idx, ...rest] = issue.path;
+    if (head === 'prds' && Number.isInteger(idx)) {
+      return `- [${idx}] ${prds[idx]?.slug ?? '(no slug)'}: ${zodFieldPath(rest)}: ${msg}`;
+    }
+    return `- [-1] (no slug): ${zodFieldPath(issue.path)}: ${msg}`;
+  });
+  if (issues.length > ZOD_ISSUE_LINE_MAX) lines.push(`+${issues.length - ZOD_ISSUE_LINE_MAX} more`);
+  return lines;
+}
+
 const NOT_RUNNING_ERROR =
   `session-manager app is not running (admin API unreachable) — start it first${HELP_POINTER}`;
 
@@ -1899,6 +1933,10 @@ async function handleCallTool(request) {
       if (Array.isArray(result?.files)) {
         text += `\nFiles: ${result.files.join(', ')}`;
       }
+      const issueLines = result?.ok === false ? formatZodIssueLines(result.details, null) : null;
+      if (issueLines) {
+        text += `\nFix these fields and call again:\n${issueLines.join('\n')}`;
+      }
       return { content: [{ type: 'text', text }] };
     }
     if (name === 'scheduler_create_prds') {
@@ -1923,7 +1961,8 @@ async function handleCallTool(request) {
       const result = await adminRequest('POST', '/admin/scheduler/create-prds', payload);
       if (result?.ok === false) {
         const errs = Array.isArray(result.errors) ? result.errors : [{ index: -1, slug: null, error: result.error ?? 'batch refused' }];
-        const lines = errs.map((e) => `- [${e.index}] ${e.slug ?? '(no slug)'}: ${e.error}`);
+        const lines = (!Array.isArray(result.errors) && formatZodIssueLines(result.details, prds))
+          || errs.map((e) => `- [${e.index}] ${e.slug ?? '(no slug)'}: ${e.error}`);
         return errorResult(`scheduler_create_prds refused the batch — nothing was written (all-or-nothing). Fix every entry below and call again:\n${lines.join('\n')}`);
       }
       const written = Array.isArray(result?.prds) ? result.prds : [];

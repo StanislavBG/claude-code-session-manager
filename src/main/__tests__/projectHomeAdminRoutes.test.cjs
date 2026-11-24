@@ -724,6 +724,29 @@ test('character/write: rejects network js, oversized js and bad json', async () 
   expect(bad.status).toBe(400);
 });
 
+test('character/write: saves a batch {lines} command voice', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const dir = path.join(pagesRoot(cwd), 'videos', '_character');
+  const voice = { engine: 'command', command: ['bin/tts', '--lines', '{lines}'] };
+  const r = await adminHttp.call('POST', '/admin/project-home/character/write', { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, voice } } });
+  expect(r.status).toBe(200);
+  expect(JSON.parse(fs.readFileSync(path.join(dir, 'character.json'), 'utf8')).voice).toEqual(voice);
+});
+
+test('character/write: refuses a command mixing {lines} with {text}/{out}', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const dir = path.join(pagesRoot(cwd), 'videos', '_character');
+  const voice = { engine: 'command', command: ['bin/tts', '{lines}', '--out', '{out}'] };
+  const r = await adminHttp.call('POST', '/admin/project-home/character/write', { body: { cwd, ...GOOD_CHARACTER, json: { ...GOOD_CHARACTER.json, voice } } });
+  expect(r.status).toBe(400);
+  expect(r.body.error).toContain('mixes {lines}');
+  expect(fs.existsSync(path.join(dir, 'character.json'))).toBe(false);
+});
+
 const { MAX_JSON_BYTES: MAX_CHARACTER_JSON_BYTES } = require('../lib/demo-video-kit/character.cjs');
 const CHARACTER_URL = '/admin/project-home/character/write';
 const CAST_COMMAND = ['speak-tool', '--text', '{text}', '--out', '{out}'];

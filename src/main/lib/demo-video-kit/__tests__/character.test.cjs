@@ -363,3 +363,60 @@ test('speakLines: a missing character names inspectCharacter\'s reason', () => {
   const r = speakLines(project(undefined), [{ text: 'x', out: '/tmp/x.wav' }]);
   expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/no valid saved character in .*: no character saved in/) });
 });
+
+// Batch voices: a {lines} command speaks a whole manifest in one call (spoken by speakLines, not per line).
+const charMod = require('../character.cjs');
+const batchVoice = { engine: 'command', command: ['bin/tts', '--lines', '{lines}'] };
+const MIXES = 'command mixes {lines} with {text}/{out}; use {lines} alone or {text} with {out}';
+
+test('validateVoice: a {lines} command without {text}/{out} is accepted for host and cast', () => {
+  expect(validateVoice(batchVoice, 'voice')).toBeNull();
+  expect(validateVoice({ engine: 'command', command: ['bin/tts', '--lines={lines}'] }, 'cast[0].voice')).toBeNull();
+  expect(validateCharacterJson({ ...kokoro, voice: batchVoice })).toBeNull();
+  expect(validateCharacterJson({ ...kokoro, cast: [{ name: 'Pip', voice: batchVoice }] })).toBeNull();
+});
+
+test('validateVoice: a {lines} command mixed with {text} or {out} is refused with a named reason', () => {
+  const withText = { engine: 'command', command: ['bin/tts', '{lines}', '{text}'] };
+  const withOut = { engine: 'command', command: ['bin/tts', '{lines}', '--out={out}'] };
+  const withBoth = { engine: 'command', command: ['bin/tts', '{lines}', '{text}', '{out}'] };
+  expect(validateCharacterJson({ ...kokoro, voice: withText })).toBe(`voice.${MIXES}`);
+  expect(validateCharacterJson({ ...kokoro, voice: withOut })).toBe(`voice.${MIXES}`);
+  expect(validateCharacterJson({ ...kokoro, voice: withBoth })).toBe(`voice.${MIXES}`);
+  expect(validateCharacterJson({ ...kokoro, cast: [{ name: 'Pip', voice: withBoth }] })).toBe(`cast[0].voice.${MIXES}`);
+  expect(validateVoice(withText, 'cast[0].voice')).toBe(`cast[0].voice.${MIXES}`);
+});
+
+test('validateVoice: {lines} does not bypass the string[] and program-name checks', () => {
+  expect(validateVoice({ engine: 'command', command: ['', '{lines}'] }, 'voice')).toBe('voice.command[0] must be a program name');
+  expect(validateVoice({ engine: 'command', command: [] }, 'voice')).toBe('voice.command must be a non-empty string[]');
+});
+
+test('isBatchVoice is true only for a valid {lines} command voice', () => {
+  expect(charMod.isBatchVoice(batchVoice)).toBe(true);
+  expect(charMod.isBatchVoice(castCmdVoice)).toBe(false);
+  expect(charMod.isBatchVoice(kokoro.voice)).toBe(false);
+  expect(charMod.isBatchVoice({ engine: 'command', command: ['bin/tts', '{lines}', '{out}'] })).toBe(false);
+  expect(charMod.isBatchVoice({ engine: 'command', command: ['', '{lines}'] })).toBe(false);
+  expect(charMod.isBatchVoice(null)).toBe(false);
+  expect(charMod.isBatchVoice(undefined)).toBe(false);
+});
+
+test('buildBatchArgv substitutes every {lines} per element and never joins argv', () => {
+  const manifest = '/tmp/a b; rm -rf / $(id) `x` "q".json';
+  const v = { engine: 'command', command: ['bin/tts', '--lines', '{lines}', '--also={lines}'] };
+  const argv = charMod.buildBatchArgv(v, manifest);
+  expect(argv).toEqual(['bin/tts', '--lines', manifest, `--also=${manifest}`]);
+  expect(argv).toHaveLength(4);
+  expect(v.command).toEqual(['bin/tts', '--lines', '{lines}', '--also={lines}']);
+});
+
+test('speakWithCommand refuses a batch voice and spawns nothing', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-char-batch-'));
+  tmp.push(root);
+  const marker = path.join(root, 'ran');
+  const v = { engine: 'command', command: [process.execPath, '-e', 'require("fs").writeFileSync(process.argv[1], "x")', marker, '{lines}'] };
+  const r = speakWithCommand(v, 'hello', path.join(root, 'o.wav'));
+  expect(r).toEqual({ ok: false, status: null, error: 'a {lines} voice is spoken by speakLines in one call per speaker, not per line' });
+  expect(fs.existsSync(marker)).toBe(false);
+});

@@ -81,6 +81,13 @@ function validateVoice(v, label) {
       return `${label}.command must be a non-empty string[]`;
     }
     if (!cmd[0]) return `${label}.command[0] must be a program name`;
+    const batch = cmd.some((a) => a.includes('{lines}'));
+    if (batch) {
+      if (cmd.some((a) => a.includes('{text}') || a.includes('{out}'))) {
+        return `${label}.command mixes {lines} with {text}/{out}; use {lines} alone or {text} with {out}`;
+      }
+      return null;
+    }
     if (!cmd.some((a) => a.includes('{text}'))) return `${label}.command must contain a {text} placeholder`;
     if (!cmd.some((a) => a.includes('{out}'))) return `${label}.command must contain an {out} placeholder`;
     return null;
@@ -210,6 +217,17 @@ function buildCommandArgv(voice, text, out) {
   return voice.command.map((a) => a.split('{text}').join(text).split('{out}').join(out));
 }
 
+/** True only for a valid engine 'command' voice whose command holds '{lines}' (one call per speaker). */
+function isBatchVoice(voice) {
+  return !!voice && voice.engine === 'command' && validateVoice(voice, 'voice') === null
+    && voice.command.some((a) => a.includes('{lines}'));
+}
+
+/** Substitute {lines} (the manifest path) into each argv element; the argv is never joined. */
+function buildBatchArgv(voice, manifestPath) {
+  return voice.command.map((a) => a.split('{lines}').join(manifestPath));
+}
+
 /** True when `file` exists, is larger than a bare WAV header and starts with 'RIFF'. */
 function isWav(file) {
   let fd;
@@ -234,6 +252,9 @@ function isWav(file) {
 function speakWithCommand(voice, text, out, { cwd } = {}) {
   if (!voice || voice.engine !== 'command' || validateVoice(voice, 'voice')) {
     return { ok: false, status: null, error: 'not a valid command voice' };
+  }
+  if (isBatchVoice(voice)) {
+    return { ok: false, status: null, error: 'a {lines} voice is spoken by speakLines in one call per speaker, not per line' };
   }
   const outStr = String(out);
   const [bin, ...args] = buildCommandArgv(voice, String(text), outStr);
@@ -314,6 +335,8 @@ module.exports = {
   speakWithCommand,
   speakLines,
   buildCommandArgv,
+  buildBatchArgv,
+  isBatchVoice,
   validateCharacterJson,
   validateCharacterJs,
   validatePersonality,

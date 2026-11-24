@@ -32,6 +32,9 @@ an unknown declared capability parks the job (`capability_unknown`) instead of s
   scheduler's dispatch check, `src/main/lib/tasks/` Task spawn.
 - Why: inherited user-scope MCP servers made every job's tool surface (and memory cost) depend on the
   machine, not on the persona. Declared = reviewable; undeclared = absent.
+- Scope (decided 2026-11-23): Epic chat turns are out of scope and keep the user's own MCP config. A human
+  supervises every chat turn, and a persona-declared set would strip the ad-hoc servers the user relies on
+  for interactive work; strict loading guards only the unattended runs (scheduler jobs and Tasks).
 
 ## Environments
 

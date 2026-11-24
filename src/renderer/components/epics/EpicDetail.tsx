@@ -21,8 +21,7 @@ import { BackgroundBuildStatus } from './BackgroundBuildStatus'
 import { BuildResultCard } from './BuildResultCard'
 import { CrossProjectReplyCard, CrossProjectReplyReceipt } from './CrossProjectReplyCard'
 import { useMacros } from '../../lib/useMacros'
-import { openPrdSlug, openAgentLibrary, openPromptSession } from '../../lib/epicNav'
-import { continueEpicFresh } from '../../lib/continueEpicFresh'
+import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
 import { formatEffectiveRuntimeLine, formatCompactRuntime } from './EffectiveRuntimeLine'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
@@ -696,7 +695,6 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const markCompleted = usePromptSessions((s) => s.markCompleted)
   const reopenEpic = usePromptSessions((s) => s.reopenEpic)
   const [resuming, setResuming] = useState(false)
-  const [continuingFresh, setContinuingFresh] = useState(false)
   const appendPromptSessionEvent = usePromptSessions((s) => s.appendPromptSessionEvent)
   const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
 
@@ -1028,7 +1026,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                     className={stats.contextLarge ? AMBER_TEXT : undefined}
                     title={
                       stats.contextLarge
-                        ? `Context ${stats.context} tokens — every turn re-reads this much; new work is cheaper in a fresh session`
+                        ? `Context ${stats.context} tokens — every turn re-reads this much; start new work as a New Session`
                         : `Context ${stats.context} tokens — re-read by every turn`
                     }
                   >
@@ -1097,32 +1095,6 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                   Terminal
                 </button>
               </div>
-            )}
-            {(promptSession.status === 'active' || isCompleted) && (
-              <button
-                type="button"
-                onClick={async () => {
-                  setContinuingFresh(true)
-                  try {
-                    const newId = await continueEpicFresh(epicId, 'Epic header')
-                    openPromptSession(newId)
-                  } catch (err: unknown) {
-                    toast.error(err instanceof Error ? err.message : String(err))
-                  } finally {
-                    setContinuingFresh(false)
-                  }
-                }}
-                disabled={continuingFresh}
-                title="Start a new session with the same agent and goal, opened with a short handoff instead of this whole history"
-                data-testid="epic-continue-fresh"
-                className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
-                  stats?.contextLarge
-                    ? `${AMBER_TINT} ${AMBER_TEXT} hover:brightness-95`
-                    : 'border-line bg-bg-hi text-fg-dim hover:bg-hi'
-                }`}
-              >
-                Continue in a fresh session
-              </button>
             )}
             {isCompleted ? (
               <button

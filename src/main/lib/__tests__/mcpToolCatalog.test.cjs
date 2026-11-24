@@ -335,8 +335,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 38 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(38);
+test('catalog has 40 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(40);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });
@@ -566,4 +566,21 @@ test('video kinds, exports and persona: project_video_write, project_character_w
   const help = textOf('session_manager_help');
   for (const s of ['Project demo', 'Blog post', 'Feature', 'TikTok', 'Marketing', 'Review first', 'default on for TikTok',
     'series brief', 'cast']) expect(help).toContain(s);
+});
+
+test('scheduler_slots_get / scheduler_slots_set sit in the scheduler group; set needs the human\'s verbatim words', () => {
+  const get = MCP_TOOL_CATALOG.find((e) => e.name === 'scheduler_slots_get');
+  const set = MCP_TOOL_CATALOG.find((e) => e.name === 'scheduler_slots_set');
+  expect(get.group).toBe('scheduler');
+  expect(set.group).toBe('scheduler');
+  expect(composeDescription(get)).toContain('GET /admin/scheduler/slots');
+  const text = composeDescription(set);
+  expect(text).toContain('POST /admin/scheduler/slots');
+  expect(text).toMatch(/human's own words/);
+  expect(text).toMatch(/verbatim/);
+  expect(text).toMatch(/this session/);
+  expect(text).toMatch(/limit/);
+  expect(text).toMatch(/number/);
+  const tool = TOOLS.find((t) => t.name === 'scheduler_slots_set');
+  expect(tool.inputSchema.required).toEqual(['cap', 'quote']);
 });

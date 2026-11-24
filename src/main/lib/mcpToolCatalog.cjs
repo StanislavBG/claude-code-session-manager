@@ -815,6 +815,38 @@ const MCP_TOOL_CATALOG = [
       + 'request_older_than_switch) carries error and reason; show the reason to the human.',
   },
   {
+    name: 'scheduler_slots_get',
+    group: 'scheduler',
+    purpose: "Read the scheduler's machine-wide limit on parallel claude sessions via the session-manager app's "
+      + 'admin API (GET /admin/scheduler/slots): the current cap, the allowed min and max, and how many slots are '
+      + 'in use and free right now.',
+    summary: 'See how many sessions may run at once and how many are busy.',
+    whenToUse: 'Use when the human asks what the session limit is, before scheduler_slots_set to learn the allowed '
+      + 'range, or to explain why queued jobs are waiting for a free slot.',
+    whenNotToUse: 'Do not use it to change the limit — that is scheduler_slots_set, and only on the human\'s words.',
+    exampleArgs: {},
+    notes: 'Read-only. Returns { ok: true, cap, min, max, inUse, available }.',
+  },
+  {
+    name: 'scheduler_slots_set',
+    group: 'scheduler',
+    purpose: "Raise or lower the scheduler's machine-wide limit on parallel claude sessions via the session-manager "
+      + "app's admin API (POST /admin/scheduler/slots), on behalf of the human in this chat. The new limit is "
+      + 'saved and wakes waiting jobs. Runs only in a Session Manager chat or terminal session; the caller identity '
+      + 'is taken from this session, never from arguments, and a scheduled job is refused.',
+    summary: 'Raise or lower the session limit when the human asks.',
+    whenToUse: "Use only when the human asked in this session for a new limit. It needs the human's own words "
+      + 'naming the limit and the number, quoted verbatim from this session, as `quote` — e.g. "raise the limit to '
+      + '14 parallel sessions" — and `cap` set to that number. The route checks the quote against what the human '
+      + 'typed in this session.',
+    whenNotToUse: 'Never on your own initiative, never from a job or script, and never with words you wrote or '
+      + 'paraphrased. Do not use it just to read the limit — use scheduler_slots_get.',
+    exampleArgs: { cap: 14, quote: 'raise the limit to 14 parallel sessions' },
+    notes: 'One instruction allows one change. Returns { ok: true, from, to }. A refusal (400 invalid_request — '
+      + 'cap outside [min, max]; 403 called_from_headless_job / human_request_unverified / '
+      + 'quote_does_not_name_slots) carries error and reason; show the reason to the human.',
+  },
+  {
     name: 'session_manager_help',
     group: 'help',
     purpose: 'THE ENTRY POINT — call this tool FIRST whenever you are unsure which session-manager-scheduler '

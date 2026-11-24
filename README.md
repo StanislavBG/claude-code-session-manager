@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->38<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, its own mission and its own copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->40<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -130,14 +130,14 @@ The app adds it at user scope in `~/.claude.json` on first launch. To add it by 
 claude mcp add session-manager-scheduler --scope user -- node <app>/scripts/scheduler-mcp-server.cjs
 ```
 
-In an installed build, the command is the app's own binary, with `-e ELECTRON_RUN_AS_NODE=1`.
+An installed build uses the app's own binary, with `-e ELECTRON_RUN_AS_NODE=1`.
 
-The server needs the app to be running. Each call goes to the app's local HTTP API. The token for it is in `~/.claude/session-manager/admin-api.json`.
+Each call goes to the running app's local HTTP API. Its token is in `~/.claude/session-manager/admin-api.json`.
 
 Two ways it can fail:
 
-- A tool returns an error that says the app is not running. Start the app, then try again.
-- The tools are not in your tool list. The server is not added. Delete `~/.claude/session-manager/.scheduler-mcp-seeded` and restart the app.
+- A tool says the app is not running. Start the app and try again.
+- The tools are missing: the server is not added. Delete `~/.claude/session-manager/.scheduler-mcp-seeded` and restart the app.
 
 Start with `session_manager_help`. No args lists every tool. `tool` explains one tool. `topic` shows one recipe.
 
@@ -193,6 +193,8 @@ Tools:
 | `task_list` | tasks | `cwd` | List a project's Tasks with their status, model and cost. |
 | `task_get` | tasks | `cwd`, `id` | Read one Task in full, with its prompt and output. |
 | `task_switch_set` | tasks | `enabled`, `humanRequestQuote` | Turn Scripts may run Tasks on or off when the human asks. |
+| `scheduler_slots_get` | scheduler | — | See how many sessions may run at once and how many are busy. |
+| `scheduler_slots_set` | scheduler | `cap`, `quote` | Raise or lower the session limit when the human asks. |
 | `session_manager_help` | help | — | Start here: list every tool, or explain one tool or recipe. |
 <!-- /gen:mcp-tools -->
 
@@ -200,7 +202,7 @@ Rules the server enforces:
 
 - A new PRD must join a session that a person already approved. The server never creates a session.
 - A new PRD must have a `gate` and a `files` list.
-- A headless job cannot queue PRDs, unless it runs as `architect`. A session a person is in can queue PRDs.
+- Only a session a person is in, or a job run as `architect`, can queue PRDs.
 - A job with `SM_SCHEDULER_JOB_MCP_TOOLS` set can call only the tools in that list.
 - A pause set by an agent ends after 30 minutes. A pause set by a person stays until `scheduler_resume`.
 
@@ -210,13 +212,13 @@ Each PRD job runs as the PRD's persona, `dev-lead` by default, in its own worktr
 
 ### Scripts
 
-A script can start a macro with `POST /admin/macros/run`. It works only for a macro a person marked "Can be started by a script".
+A script can start a macro with `POST /admin/macros/run`, if a person marked it "Can be started by a script".
 
 ## Skills
 
 ### Plugin session-manager-dev
 
-On first launch, the app installs this plugin offline from the bundled `session-manager` marketplace, and keeps it up to date. To skip it, set `SM_SEED_DEV_PLUGIN_DISABLE=1`. To install it outside the app, run:
+On first launch, the app installs and updates this plugin offline from the bundled `session-manager` marketplace. To skip it, set `SM_SEED_DEV_PLUGIN_DISABLE=1`. To install it outside the app, run:
 
 ```bash
 claude plugin marketplace add StanislavBG/claude-code-session-manager
@@ -290,9 +292,9 @@ The app copies these into `~/.claude/agents/` on first launch.
 
 Off by default. Turn it on in App Settings, Startup.
 
-An npx install runs `npx claude-code-session-manager@latest`, so each login gets the newest release, or the cached copy if that fails within two minutes. The script is `~/.claude/session-manager/start-at-login.sh`, run by a desktop entry in `~/.config/autostart/` (Linux) or a launch agent in `~/Library/LaunchAgents/` (macOS).
+An npx install runs `npx claude-code-session-manager@latest` at each login, or the cached copy if that fails within two minutes. The script is `~/.claude/session-manager/start-at-login.sh`, run by a desktop entry in `~/.config/autostart/` (Linux) or a launch agent in `~/Library/LaunchAgents/` (macOS).
 
-A packaged build starts the installed app: a login item on macOS and Windows, the autostart folder for a Linux AppImage.
+A packaged build uses a login item (macOS, Windows) or the autostart folder (Linux AppImage).
 
 To remove it, turn the switch off, or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS). For a packaged macOS or Windows build, remove it from login items.
 

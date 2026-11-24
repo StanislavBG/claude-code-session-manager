@@ -37,6 +37,8 @@
  *   task_list({ cwd, since?, until?, pipeline?, runId?, step?, agent?, status?, source?, limit?, offset? }) -> GET /admin/tasks?cwd=<encoded>&...
  *   task_get({ cwd, id }) -> GET /admin/task?cwd=<encoded>&id=<encoded>
  *   task_switch_set({ enabled, humanRequestQuote, cwd? }) -> POST /admin/tasks/switch
+ *   scheduler_slots_get() -> GET /admin/scheduler/slots
+ *   scheduler_slots_set({ cap, quote }) -> POST /admin/scheduler/slots
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -653,6 +655,23 @@ const TOOLS = [
     },
   },
   {
+    name: 'scheduler_slots_get',
+    description: descriptionFor('scheduler_slots_get'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'scheduler_slots_set',
+    description: descriptionFor('scheduler_slots_set'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cap: { type: 'integer', description: 'The new machine-wide limit on parallel claude sessions (an integer between the min and max scheduler_slots_get reports)' },
+        quote: { type: 'string', description: "The human's own words from this session naming the limit and this number, quoted verbatim" },
+      },
+      required: ['cap', 'quote'],
+    },
+  },
+  {
     name: 'epic_get',
     description: descriptionFor('epic_get'),
     inputSchema: {
@@ -1202,6 +1221,15 @@ function customerFeedbackSubmitRefusal() {
   );
 }
 
+// The slots route answers { ok: false, error, reason } on a refusal and
+// { ok: false, error, details } on a bad body; both reach the agent verbatim.
+function slotsErrorText(result, fallback) {
+  const error = result.error ?? fallback;
+  const extra = result.reason ?? (result.details === undefined ? undefined
+    : (typeof result.details === 'string' ? result.details : JSON.stringify(result.details)));
+  return extra ? `${error}: ${extra}` : error;
+}
+
 // The Tasks switch is a human's choice: a scheduled job, a Task or any other
 // internal headless run (SM_KG_INTERNAL=1) is refused before any request.
 function taskSwitchSetRefusal() {
@@ -1359,6 +1387,31 @@ async function handleCallTool(request) {
         const error = result.error ?? 'task_switch_set failed';
         return errorResult(result.reason ? `${error}: ${result.reason}` : error);
       }
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_slots_get') {
+      const result = await adminRequest('GET', '/admin/scheduler/slots');
+      if (result?.ok === false) return errorResult(slotsErrorText(result, 'scheduler_slots_get failed'));
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_slots_set') {
+      if (!process.env.SM_CHAT_SESSION_ID) {
+        return errorResult('refused: scheduler_slots_set runs only in a Session Manager chat or terminal session where the human asked for the new limit; '
+          + 'say in your final result what limit the human should set.');
+      }
+      if (!Number.isInteger(args?.cap)) return errorResult('missing or invalid required argument: cap (integer)');
+      if (typeof args?.quote !== 'string' || args.quote.trim() === '') {
+        return errorResult('missing or invalid required argument: quote (the human\'s words, verbatim)');
+      }
+      // Identity comes from this process's env only; caller-supplied
+      // originClaudeSessionId / originProjectRoot / callerJobSlug are never read.
+      // A scheduled job's slug is forwarded so the route refuses it (403
+      // called_from_headless_job) with its own reason.
+      const payload = { cap: args.cap, quote: args.quote, originClaudeSessionId: process.env.SM_CHAT_SESSION_ID };
+      if (process.env.SM_PROJECT_ROOT) payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
+      if (process.env.SM_SCHEDULER_JOB_SLUG) payload.callerJobSlug = process.env.SM_SCHEDULER_JOB_SLUG;
+      const result = await adminRequest('POST', '/admin/scheduler/slots', payload);
+      if (result?.ok === false) return errorResult(slotsErrorText(result, 'scheduler_slots_set failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'epic_get') {

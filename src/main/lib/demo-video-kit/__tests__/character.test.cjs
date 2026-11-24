@@ -544,6 +544,8 @@ test.skipIf(process.platform === 'win32')('speakLines: too little time before th
 });
 
 // Resumable speak CLI: slow stub voices (2 s per call) at <root>/bin/<name>, each call logged to calls.jsonl.
+// When <root>/gate.<first text> exists (a FIFO the test made), the call blocks reading it after logging:
+// the test's open(w) returning proves the call started, and closing it lets the call go on.
 const { stopRun } = require('../resumableRun.cjs');
 const SLOW_SRC = [
   '#!/usr/bin/env node',
@@ -552,6 +554,7 @@ const SLOW_SRC = [
   "const get = (k) => a[a.indexOf(k) + 1];",
   "const items = a.includes('--lines') ? JSON.parse(fs.readFileSync(get('--lines'), 'utf8')) : [{ text: get('--text'), out: get('--out') }];",
   "fs.appendFileSync('calls.jsonl', JSON.stringify({ texts: items.map((i) => i.text) }) + '\\n');",
+  "if (fs.existsSync(`gate.${items[0].text}`)) fs.readFileSync(`gate.${items[0].text}`);",
   "if (items.some((i) => i.text === 'die')) process.kill(process.ppid, 'SIGKILL');",
   "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);",
   "for (const i of items) fs.writeFileSync(i.out, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60), Buffer.from(i.text)]));",
@@ -583,17 +586,27 @@ function speak(spec, ...flags) {
   return { status: r.status, stderr: r.stderr, result: JSON.parse(r.stdout) };
 }
 const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+function makeGate(root, text) {
+  const gate = path.join(root, `gate.${text}`);
+  const { spawnSync } = require('node:child_process');
+  expect(spawnSync('mkfifo', [gate]).status).toBe(0);
+  return gate;
+}
+/** Resolves with the gate's write handle once the gated voice call has opened it (the call is running). */
+const gateHeld = (gate) => fs.promises.open(gate, 'w');
 
 for (const [kind, lines] of [['batch', ['one', 'two']], ['perLine', ['one']]]) {
-  test.skipIf(process.platform === 'win32')(`CLI speak (${kind}): pending with exit 75, then the same command attaches to the same run`, () => {
+  test.skipIf(process.platform === 'win32')(`CLI speak (${kind}): pending with exit 75, then the same command attaches to the same run`, async () => {
     const { root, spec } = slowProject(slowVoices[kind]);
     const outs = lines.map((t) => path.join(root, `${t}.wav`));
     writeSpec(root, spec, lines.map((text, i) => ({ text, out: outs[i] })));
+    const gate = makeGate(root, lines[0]); // the voice cannot finish before the test lets it
     const first = speak(spec, '--wait', '1');
     expect(first.status).toBe(75);
     expect(first.result).toMatchObject({ ok: false, pending: true, wavs: 0, lines: lines.length });
     expect(first.result.pid).toBeGreaterThan(0);
     expect(first.result.message).toBe(`still speaking (0/${lines.length} WAVs so far); run the same command again`);
+    await (await gateHeld(gate)).close();
     const second = speak(spec, '--wait', '30');
     expect(second.status).toBe(0);
     expect(second.result).toEqual({ ok: true, outs });
@@ -601,15 +614,18 @@ for (const [kind, lines] of [['batch', ['one', 'two']], ['perLine', ['one']]]) {
   });
 }
 
-test.skipIf(process.platform === 'win32')('CLI speak: an edited spec mid-run stops the old run and starts a new one', () => {
+test.skipIf(process.platform === 'win32')('CLI speak: an edited spec mid-run stops the old run and starts a new one', async () => {
   const { root, spec } = slowProject(slowVoices.batch);
   writeSpec(root, spec, [{ text: 'old', out: 'old.wav' }]);
+  const gate = makeGate(root, 'old'); // the old call holds until the old run is stopped
   const first = speak(spec, '--wait', '1');
   expect(first.status).toBe(75);
+  const held = await gateHeld(gate); // the old voice call is running now
   writeSpec(root, spec, [{ text: 'new', out: 'new.wav' }]);
   const second = speak(spec, '--wait', '30');
   expect(second.status).toBe(0);
   expect(second.result).toEqual({ ok: true, outs: ['new.wav'] });
+  await held.close();
   expect(pidAlive(first.result.pid)).toBe(false);
   expect(calls(root)).toEqual([{ texts: ['old'] }, { texts: ['new'] }]);
   expect(fs.existsSync(path.join(root, 'old.wav'))).toBe(false);
@@ -808,10 +824,14 @@ test.skipIf(process.platform === 'win32')('CLI: spec.voice with no saved charact
 
 // Voice lane: a heavy fake command voice sleeps 400 ms per line, writes a real
 // 0.5 s WAV (16 kHz mono 16-bit) and logs its start/end to a shared file.
+// When `<log>.gate.<text>` exists (a FIFO the test made), the call blocks reading it
+// until the test closes its write end: the test then knows the call holds the lane
+// (its open() returned) and decides when it may leave, with no timer.
 const lane = require('../voiceLane.cjs');
 const HEAVY_SRC = [
   "const fs = require('fs');",
   "const [log, text, out] = process.argv.slice(2);",
+  "if (fs.existsSync(`${log}.gate.${text}`)) fs.readFileSync(`${log}.gate.${text}`);",
   "const start = Date.now();",
   "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);",
   "if (text === 'bad') { process.stderr.write('heavy voice exploded'); process.exit(4); }",
@@ -840,7 +860,6 @@ function heavyProject(logFile, name) {
   return { root, spec };
 }
 const readJsonl = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
-const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 
 test('wavSeconds reads byteRate and data size; 0 when unparseable', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-char-wav-'));
@@ -905,22 +924,51 @@ test.skipIf(process.platform === 'win32')('voice lane: two concurrent speak CLI 
   fs.writeFileSync(b.spec, JSON.stringify({ projectRoot: b.root, kind: 'marketing', lines: [{ text: 'b1', out: 'b1.wav' }, { text: 'b2', out: 'b2.wav' }] }));
   const env = { ...process.env };
   delete env.BASH_DEFAULT_TIMEOUT_MS;
-  const aChild = spawn(process.execPath, [CHAR_CJS, 'speak', a.spec, '--wait', '30'], { env, timeout: 30000 });
+  // alpha's first call blocks on this FIFO, holding the heavy lane until the test closes it
+  const gate = `${log}.gate.a1`;
+  expect(spawnSync('mkfifo', [gate]).status).toBe(0);
+  const aChild = spawn(process.execPath, [CHAR_CJS, 'speak', a.spec, '--wait', '30'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let aOut = '';
+  let aErr = '';
   aChild.stdout.on('data', (c) => { aOut += c; });
-  const aDone = new Promise((resolve) => aChild.on('exit', (code) => resolve(code)));
-  // wait until alpha holds the heavy lane
-  for (let i = 0; i < 100 && lane.laneSnapshot().heavy.length === 0; i++) await sleepMs(50);
-  expect(lane.laneSnapshot().heavy).toHaveLength(1);
-  const first = spawnSync(process.execPath, [CHAR_CJS, 'speak', b.spec, '--wait', '1'], { encoding: 'utf8', timeout: 30000, env });
-  expect(first.status).toBe(75);
-  const pending = JSON.parse(first.stdout);
-  expect(pending.lane).toMatchObject({ lane: 'heavy', position: 1, total: 2 });
-  expect(pending.message).toMatch(new RegExp(`voice lane: waiting, position 1 of 2 \\(ahead: video alpha inline:command\\)`));
-  const second = spawnSync(process.execPath, [CHAR_CJS, 'speak', b.spec, '--wait', '30'], { encoding: 'utf8', timeout: 30000, env });
-  expect(second.status).toBe(0);
-  expect(JSON.parse(second.stdout)).toEqual({ ok: true, outs: ['b1.wav', 'b2.wav'] });
-  expect(await aDone).toBe(0);
+  aChild.stderr.on('data', (c) => { aErr += c; });
+  const aDone = new Promise((resolve) => aChild.on('close', (code) => resolve(code)));
+  let gateFd = null;
+  let aSettled = false;
+  // open(w) on the FIFO returns once alpha's a1 call opened it to read: alpha holds the lane
+  const gateOpen = fs.promises.open(gate, 'w');
+  try {
+    gateFd = await Promise.race([
+      gateOpen,
+      aDone.then((code) => { throw new Error(`alpha exited ${code} before its first call: ${aOut}${aErr}`); }),
+    ]);
+    expect(lane.laneSnapshot().heavy).toHaveLength(1);
+    // alpha holds the lane until the gate closes, so beta can only ever wait behind it.
+    // Each call waits 1 s for beta's runner; repeat (same command attaches) until it reports its lane.
+    let first = null;
+    for (let i = 0; i < 30 && !(first && first.lane); i++) {
+      const r = spawnSync(process.execPath, [CHAR_CJS, 'speak', b.spec, '--wait', '1'], { encoding: 'utf8', timeout: 30000, env });
+      expect(r.status).toBe(75);
+      first = JSON.parse(r.stdout);
+    }
+    const pending = first;
+    expect(pending.lane).toMatchObject({ lane: 'heavy', position: 1, total: 2 });
+    expect(pending.message).toMatch(new RegExp(`voice lane: waiting, position 1 of 2 \\(ahead: video alpha inline:command\\)`));
+    await gateFd.close(); // alpha's a1 call reads EOF and finishes
+    const second = spawnSync(process.execPath, [CHAR_CJS, 'speak', b.spec, '--wait', '30'], { encoding: 'utf8', timeout: 30000, env });
+    expect(second.status).toBe(0);
+    expect(JSON.parse(second.stdout)).toEqual({ ok: true, outs: ['b1.wav', 'b2.wav'] });
+    expect(await aDone).toBe(0);
+    aSettled = true;
+  } finally {
+    if (gateFd) await gateFd.close(); // no-op when already closed
+    // a still-blocked open(w) (alpha never reached its call) returns once a reader opens the FIFO
+    try { fs.closeSync(fs.openSync(gate, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK)); } catch { /* gone */ }
+    if (!gateFd) await gateOpen.then((fd) => fd.close(), () => {});
+    // on a failure above, stop alpha's CLI; either way its exit is awaited before the test ends
+    if (!aSettled) aChild.kill('SIGTERM');
+    await aDone;
+  }
   expect(JSON.parse(aOut)).toMatchObject({ ok: true });
   // no two synthesis calls overlapped, machine-wide
   const calls = readJsonl(log).sort((x, y) => x.start - y.start);

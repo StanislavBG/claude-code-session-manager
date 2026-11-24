@@ -19,8 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // inverted render (as project-home-library-shots). Output folder (./shotsOutDir.ts, unit-tested by
 // tests/unit/library-shots-out-dir.spec.ts), the same convention as every screenshot spec:
 //   default              test-results/project-feedback/ (gitignored), so a normal run never dirties the tree
-//   SM_UPDATE_SHOTS=1    the tracked evidence folder
-//                        session-manager-operations/reviews/validation/project-home-feedback-tab/screens/
+//   SM_UPDATE_SHOTS=1    throws: this spec has no tracked evidence folder (none is committed)
 //   SM_SHOTS_OUT=<path>  that folder instead (wins over SM_UPDATE_SHOTS)
 const root = path.resolve(__dirname, '../..')
 const OUT = outDirFor(root, FEEDBACK_SHOTS)

@@ -35,11 +35,18 @@ describe.each(SPECS)('outDirFor($spec.specName)', ({ spec, file, png }) => {
     }
   })
 
-  it('writes the tracked (not ignored) evidence folder only when SM_UPDATE_SHOTS=1', () => {
+  it('SM_UPDATE_SHOTS=1 writes the tracked evidence folder, or throws when the spec declares none', () => {
+    const dir = spec.trackedEvidenceDir
+    if (dir === undefined) {
+      expect(() => outDirFor(root, spec, { SM_UPDATE_SHOTS: '1' })).toThrow(
+        new RegExp(`${spec.specName}[\\s\\S]*SM_SHOTS_OUT=<path>`),
+      )
+      return
+    }
     const out = outDirFor(root, spec, { SM_UPDATE_SHOTS: '1' })
-    expect(out).toBe(path.join(root, spec.trackedEvidenceDir))
-    expect(spec.trackedEvidenceDir.startsWith('test-results')).toBe(false)
-    expect(isIgnored(path.join(spec.trackedEvidenceDir, png))).toBe(false)
+    expect(out).toBe(path.join(root, dir))
+    expect(dir.startsWith('test-results')).toBe(false)
+    expect(isIgnored(path.join(dir, png))).toBe(false)
   })
 
   it('SM_SHOTS_OUT=<path> overrides the folder, even with SM_UPDATE_SHOTS=1', () => {
@@ -61,6 +68,24 @@ describe.each(SPECS)('outDirFor($spec.specName)', ({ spec, file, png }) => {
   })
 })
 
-it('the library evidence folder holds the committed PNGs', () => {
-  expect(git('ls-files', '--', LIBRARY_SHOTS.trackedEvidenceDir).trim()).not.toBe('')
+it('every declared trackedEvidenceDir really holds git-tracked files', () => {
+  const declared = SPECS.map(({ spec }) => spec.trackedEvidenceDir).filter((d): d is string => d !== undefined)
+  expect(declared).toContain(LIBRARY_SHOTS.trackedEvidenceDir)
+  for (const dir of declared) {
+    expect(git('ls-files', '--', dir).trim(), `${dir} holds no tracked file`).not.toBe('')
+  }
+})
+
+it('FEEDBACK_SHOTS declares no tracked folder, so SM_UPDATE_SHOTS=1 names the spec and suggests SM_SHOTS_OUT', () => {
+  expect(FEEDBACK_SHOTS.trackedEvidenceDir).toBeUndefined()
+  expect(() => outDirFor(root, FEEDBACK_SHOTS, { SM_UPDATE_SHOTS: '1' })).toThrow(/project-feedback/)
+  expect(() => outDirFor(root, FEEDBACK_SHOTS, { SM_UPDATE_SHOTS: '1' })).toThrow(/SM_SHOTS_OUT=<path>/)
+  // SM_SHOTS_OUT still wins, so the documented way out works.
+  const abs = path.join(root, 'test-results', 'custom-shots')
+  expect(outDirFor(root, FEEDBACK_SHOTS, { SM_SHOTS_OUT: abs, SM_UPDATE_SHOTS: '1' })).toBe(abs)
+})
+
+it('a header never names a tracked evidence folder its spec does not declare', () => {
+  const src = fs.readFileSync(path.join(root, 'tests/web-ui/project-feedback-shots.spec.ts'), 'utf8')
+  expect(src).not.toContain('project-home-feedback-tab')
 })

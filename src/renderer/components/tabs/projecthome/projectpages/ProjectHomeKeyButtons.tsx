@@ -1,5 +1,5 @@
 /**
- * Project Home's three key buttons — Pages, Videos, Tools — above the section
+ * Project Home's four key buttons — Pages, Videos, Tools, Feedback — above the section
  * area (Project Home v2 DESIGN_SPEC §1). Purely presentational: ProjectHome
  * owns the active tab and builds each library's numbers with
  * `libraryKeyStats` from its `useProjectPagesOutput` + `useMacroJobStatus`
@@ -9,13 +9,14 @@
  * Meta line: nothing at all → `Nothing generated yet`; a build queued or
  * running → `<n> building · <m> ready`; else `<n> page(s)|video(s) · latest
  * <ago>`. Tools shows the link-map findings count in an accent badge, hidden
- * while it is unknown (`null`).
+ * while it is unknown (`null`). Feedback shows this project's open website-feedback
+ * items in an accent badge, hidden at 0.
  */
 import { formatAgo } from '../../../../lib/formatTime'
 import { AlmanacIcon, type AlmanacIconName } from '../../../layout/AlmanacIcon'
 import type { MacroJobStatus } from '../../../../../preload/api'
 
-export type ProjectHomeTab = 'pages' | 'videos' | 'tools'
+export type ProjectHomeTab = 'pages' | 'videos' | 'tools' | 'feedback'
 
 /** One library's key-button numbers. */
 export interface KeyLibraryStats {
@@ -59,6 +60,11 @@ export function libraryKeyMeta(stats: KeyLibraryStats, noun: 'page' | 'video', n
 function toolsMeta(findingsCount: number | null): string {
   if (findingsCount === null) return 'Review MD network'
   return `Review MD network · ${findingsCount} finding${findingsCount === 1 ? '' : 's'}`
+}
+
+function feedbackMeta(openCount: number): string {
+  if (openCount === 0) return 'Website widget · inbox'
+  return `${openCount} open item${openCount === 1 ? '' : 's'}`
 }
 
 function KeyButton({
@@ -130,6 +136,7 @@ export function ProjectHomeKeyButtons({
   pages,
   videos,
   findingsCount,
+  feedbackOpenCount = 0,
 }: {
   tab: ProjectHomeTab
   onTabChange: (tab: ProjectHomeTab) => void
@@ -137,10 +144,12 @@ export function ProjectHomeKeyButtons({
   videos: KeyLibraryStats
   /** Link-map findings for the Tools badge; null hides the badge. */
   findingsCount: number | null
+  /** Open website-feedback items for the Feedback badge; 0 hides the badge. */
+  feedbackOpenCount?: number
 }) {
   const now = Date.now()
   return (
-    <div data-testid="project-home-keys" className="grid flex-none grid-cols-3 gap-3">
+    <div data-testid="project-home-keys" className="grid flex-none grid-cols-4 gap-3">
       <KeyButton
         tab="pages"
         label="Pages"
@@ -169,6 +178,16 @@ export function ProjectHomeKeyButtons({
         count={findingsCount}
         accentBadge
         selected={tab === 'tools'}
+        onTabChange={onTabChange}
+      />
+      <KeyButton
+        tab="feedback"
+        label="Feedback"
+        icon="send"
+        meta={feedbackMeta(feedbackOpenCount)}
+        count={feedbackOpenCount > 0 ? feedbackOpenCount : null}
+        accentBadge
+        selected={tab === 'feedback'}
         onTabChange={onTabChange}
       />
     </div>

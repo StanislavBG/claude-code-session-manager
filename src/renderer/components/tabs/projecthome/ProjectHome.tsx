@@ -20,6 +20,10 @@
  * The Tools key button's findings count is the last link-map scan the Tools
  * pane reported for this cwd (`onFindingsCount`) — unknown, so hidden, until
  * Tools first opens for the project; ProjectHome never scans on its own.
+ *
+ * The Feedback tab renders `ProjectFeedback` (Website widget + Inbox) for the tab's cwd in
+ * place of `ProjectPagesSection`; its key badge counts the open items in the `siteFeedback`
+ * store — 0, so hidden, until the Feedback tab first loads them for the project.
  */
 
 import { memo, useCallback, useMemo, useState } from 'react'
@@ -33,6 +37,8 @@ import { useMacroLaunch } from '../../../lib/useMacroLaunch'
 import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
 import { EmptyState } from '../../ui/EmptyState'
 import { ProjectPagesSection } from './projectpages/ProjectPagesSection'
+import { ProjectFeedback } from './ProjectFeedback'
+import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
 import { ProjectHomeKeyButtons, libraryKeyStats, type ProjectHomeTab } from './projectpages/ProjectHomeKeyButtons'
 import { useJobSettled, type BuildLaunch } from './projectpages/BuildingPanel'
 import type { MacroJobStatus } from '../../../../preload/api'
@@ -104,6 +110,8 @@ function ProjectHomeComponent() {
   // A queued/running job for a library's generate macro counts as one building entry.
   const pageStats = useMemo(() => libraryKeyStats(knowledge, jobStatus['builtin-project-home']), [knowledge, jobStatus])
   const videoStats = useMemo(() => libraryKeyStats(videos, jobStatus['builtin-demo-video']), [videos, jobStatus])
+  const feedbackItems = useSiteFeedback(selectSiteFeedback(cwd ?? '')).items
+  const feedbackOpenCount = useMemo(() => feedbackItems.filter((it) => it.status === 'open').length, [feedbackItems])
 
   if (!activeTab) {
     return <EmptyState title="Open a project to see its brief" />
@@ -111,28 +119,39 @@ function ProjectHomeComponent() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-[18px] overflow-hidden px-[28px] pt-[22px] pb-[20px] text-fg">
-      <ProjectHomeKeyButtons tab={tab} onTabChange={setTab} pages={pageStats} videos={videoStats} findingsCount={findingsCount} />
-      <ProjectPagesSection
+      <ProjectHomeKeyButtons
         tab={tab}
-        cwd={cwd}
-        knowledge={knowledge}
-        videos={videos}
-        personaName={personaName}
-        outcomes={outcomes}
-        loaded={loaded}
-        error={error}
-        onRetry={reload}
-        macros={macros}
-        launching={launching}
-        onLaunch={launch}
-        jobStatus={jobStatus}
-        onOpenSession={navigateToEpic}
-        launches={cwdLaunches}
-        onLaunched={recordLaunch}
-        onGoTools={() => setTab('tools')}
-        onFindingsCount={recordFindings}
-        library={library}
+        onTabChange={setTab}
+        pages={pageStats}
+        videos={videoStats}
+        findingsCount={findingsCount}
+        feedbackOpenCount={feedbackOpenCount}
       />
+      {tab === 'feedback' && cwd ? (
+        <ProjectFeedback cwd={cwd} />
+      ) : (
+        <ProjectPagesSection
+          tab={tab}
+          cwd={cwd}
+          knowledge={knowledge}
+          videos={videos}
+          personaName={personaName}
+          outcomes={outcomes}
+          loaded={loaded}
+          error={error}
+          onRetry={reload}
+          macros={macros}
+          launching={launching}
+          onLaunch={launch}
+          jobStatus={jobStatus}
+          onOpenSession={navigateToEpic}
+          launches={cwdLaunches}
+          onLaunched={recordLaunch}
+          onGoTools={() => setTab('tools')}
+          onFindingsCount={recordFindings}
+          library={library}
+        />
+      )}
     </div>
   )
 }

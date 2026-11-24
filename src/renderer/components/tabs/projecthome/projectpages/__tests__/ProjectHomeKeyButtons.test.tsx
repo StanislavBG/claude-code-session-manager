@@ -98,16 +98,17 @@ describe('ProjectHomeKeyButtons', () => {
     )
   }
 
-  it('renders Pages, Videos, Tools in order with aria-pressed on the active one only', () => {
+  it('renders Pages, Videos, Tools, Feedback in order with aria-pressed on the active one only', () => {
     const el = render({ tab: 'videos' })
     const btns = Array.from(el.querySelectorAll('[data-testid="project-home-key"]'))
-    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual(['pages', 'videos', 'tools'])
+    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual(['pages', 'videos', 'tools', 'feedback'])
     expect(btns.map((b) => b.querySelector('[data-testid="project-home-key-label"]')?.textContent)).toEqual([
       'Pages',
       'Videos',
       'Tools',
+      'Feedback',
     ])
-    expect(btns.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false'])
+    expect(btns.map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false', 'false'])
   })
 
   it('styles the selected key ink with an accent icon box; the others bg-hi with a structural border', () => {

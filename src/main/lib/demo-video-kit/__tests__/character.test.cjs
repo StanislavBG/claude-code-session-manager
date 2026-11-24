@@ -218,7 +218,7 @@ test('cast: every refusal names its reason', () => {
   expect(v(['Pip'])).toBe('cast[0] must be an object');
   expect(v([{ name: 'Pip' }, null])).toBe('cast[1] must be an object');
   expect(v([[]])).toBe('cast[0] must be an object');
-  expect(v([{ name: 'Pip', mood: 'x' }])).toBe('cast[0].mood is not a known key (name, voice, note)');
+  expect(v([{ name: 'Pip', mood: 'x' }])).toBe('cast[0].mood is not a known key (name, voice, note, sfx)');
   expect(v([{}])).toBe('cast[0].name must be a 1-40 char string');
   expect(v([{ name: '   ' }])).toBe('cast[0].name must be a 1-40 char string');
   expect(v([{ name: 'x'.repeat(41) }])).toBe('cast[0].name must be a 1-40 char string');

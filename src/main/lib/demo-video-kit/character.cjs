@@ -14,6 +14,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+// projectSounds.cjs requires this file only lazily, so this top-level require has no load cycle.
+const { validateSounds, validateMemberSfx } = require('./projectSounds.cjs');
 // Kit files are seeded to ~/.claude/session-manager/demo-video-kit/ and must
 // load standalone: node built-ins and this folder only (no ../opsOwnership.cjs).
 // Allowlisted for this literal in scripts/check-ops-path-literals.cjs ALLOWLIST.
@@ -75,7 +77,11 @@ function validateCharacterJson(c) {
   if (!v || typeof v !== 'object') return 'voice is required';
   const vErr = validateVoiceOrRef(v, 'voice');
   if (vErr) return vErr;
-  if ('cast' in c) return validateCast(c.cast, c.name);
+  if ('sounds' in c) {
+    const sErr = validateSounds(c.sounds);
+    if (sErr) return sErr;
+  }
+  if ('cast' in c) return validateCast(c.cast, c.name, c.sounds);
   return null;
 }
 
@@ -135,11 +141,13 @@ function voiceIdRefsOf(c) {
   return refs;
 }
 
-const CAST_KEYS = Object.freeze(['name', 'voice', 'note']);
+const CAST_KEYS = Object.freeze(['name', 'voice', 'note', 'sfx']);
 
 /** -> null when `cast` is a valid supporting cast for host `hostName`, else a reason.
- * A member without `voice` is valid: it never speaks. */
-function validateCast(cast, hostName) {
+ * A member without `voice` is valid: it never speaks, and is heard only through sound
+ * effects. A member's optional `sfx` names its signature sounds (built-in effects or the
+ * persona's `sounds.sfx`, passed as `sounds`). */
+function validateCast(cast, hostName, sounds) {
   if (!Array.isArray(cast) || cast.length > MAX_CAST_MEMBERS) {
     return `cast must be an array of at most ${MAX_CAST_MEMBERS} members`;
   }
@@ -164,6 +172,10 @@ function validateCast(cast, hostName) {
     }
     if ('note' in m && (typeof m.note !== 'string' || m.note.length < 1 || m.note.length > CAST_NOTE_MAX)) {
       return `${at}.note must be a 1-${CAST_NOTE_MAX} char string`;
+    }
+    if ('sfx' in m) {
+      const fErr = validateMemberSfx(m.sfx, `${at}.sfx`, sounds);
+      if (fErr) return fErr;
     }
   }
   return null;

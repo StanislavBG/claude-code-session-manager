@@ -3,6 +3,8 @@
 const { PassThrough } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
 import { describe, it, expect } from 'vitest';
 
 const { runServiceCli, CONFIRM_HINT, REVOKED_MSG } = require('../serviceStdioBridge.cjs');
@@ -64,12 +66,26 @@ describe('serviceStdioBridge CLI routing', () => {
   });
 
   it('bin/cli.cjs routes service before requiring electron; the bridge never requires electron', () => {
-    const cli = fs.readFileSync(path.join(__dirname, '../../../../../bin/cli.cjs'), 'utf8');
-    const route = cli.indexOf("process.argv[2] === 'service'");
-    expect(route).toBeGreaterThan(-1);
-    expect(route).toBeLessThan(cli.indexOf("require('electron')"));
-    const src = fs.readFileSync(path.join(__dirname, '../serviceStdioBridge.cjs'), 'utf8');
-    expect(src).not.toMatch(/require\(['"]electron['"]\)/);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'svc-noelectron-'));
+    try {
+      const preloadPath = path.join(dir, 'no-electron.cjs');
+      fs.writeFileSync(preloadPath, [
+        "const Module = require('node:module');",
+        'const orig = Module._load;',
+        'Module._load = function (req, ...rest) {',
+        "  if (req === 'electron') throw new Error('ELECTRON_REQUIRED');",
+        '  return orig.call(this, req, ...rest);',
+        '};',
+        '',
+      ].join('\n'));
+      const cliPath = path.join(__dirname, '../../../../../bin/cli.cjs');
+      const res = spawnSync(process.execPath, ['-r', preloadPath, cliPath, 'service'], { encoding: 'utf8', timeout: 20000 });
+      expect(res.status).toBe(2);
+      expect(res.stderr).toMatch(/usage:/);
+      expect(res.stderr).not.toContain('ELECTRON_REQUIRED');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

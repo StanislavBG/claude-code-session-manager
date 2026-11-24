@@ -171,6 +171,8 @@ export function SchedulerHistoryView({ scopeCwd = null }: { scopeCwd?: string | 
 function HistoryRow({ job }: { job: ScheduleJob }) {
   const [expanded, setExpanded] = useState(false)
   const [showLog, setShowLog] = useState(false)
+  // Main's flag only (job.cancelled) — a human cancel is a decision, not a red failure.
+  const cancelled = job.cancelled === true
 
   // Raw slice + derive outside the selector (React #185 class).
   const epicSessions = usePromptSessions((s) => s.sessions)
@@ -193,13 +195,13 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
-        <SchBadge status={job.status} />
+        <SchBadge status={job.status} cancelled={cancelled} />
         <div className="min-w-0">
           <div className="flex items-baseline gap-2 text-[14.5px] font-medium text-fg leading-snug text-pretty">
             {job.title}
             <LeakBadge leaked={job.leakedDescendants} />
           </div>
-          {job.error && !expanded && (job.status === 'failed' || job.status === 'needs_review') && (
+          {job.error && !expanded && !cancelled && (job.status === 'failed' || job.status === 'needs_review') && (
             <div className="text-[12.5px] mt-0.5 text-accent/80 truncate">{job.error}</div>
           )}
           {epicRef.epicId && (

@@ -240,3 +240,29 @@ describe('Footer band', () => {
     expect(el.querySelector('[data-testid="scheduler-footer"]')).toBeNull() // supervisor panel replaced the queue
   })
 })
+
+describe('WHOLE GRAPH minimap — cancelled rows', () => {
+  it('paints a cancelled failed / needs_review row in the neutral tone, a real failure stays red', async () => {
+    const jobs = [
+      ...chain(3),
+      job({ slug: '160-cf', dependsOn: ['101-s1'], status: 'failed', error: 'cancelled', cancelled: true } as Partial<ScheduleJob> & { slug: string }),
+      job({ slug: '161-cr', dependsOn: ['101-s1'], status: 'needs_review', cancelled: true } as Partial<ScheduleJob> & { slug: string }),
+      job({ slug: '162-real', dependsOn: ['101-s1'], status: 'failed', error: 'boom', exitCode: 1 }),
+    ]
+    const el = await mount(jobs)
+    const dots = all(el, '[data-testid="plan-minimap-dots"] > span[title]')
+    const dotFor = (n: string) => dots.find((d) => d.title.startsWith(`#${n} `))!
+    for (const n of ['160', '161']) {
+      const d = dotFor(n)
+      expect(d.dataset.tone).toBe('cancelled')
+      expect(d.className).toContain('bg-fg-faint/40')
+      expect(d.className).not.toContain('bg-red-600')
+      expect(d.className).not.toContain('bg-butter')
+      expect(d.title.endsWith('— cancelled')).toBe(true)
+    }
+    const real = dotFor('162')
+    expect(real.dataset.tone).toBe('failed')
+    expect(real.className).toContain('bg-red-600')
+    expect(real.title.endsWith('— failed')).toBe(true)
+  })
+})

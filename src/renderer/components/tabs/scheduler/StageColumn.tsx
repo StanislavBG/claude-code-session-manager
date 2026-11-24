@@ -21,8 +21,12 @@ const isDone = (s: string) => s === 'completed' || s === 'skipped'
 const isRunning = (s: string) => s === 'running' || s === 'investigating'
 const isAttention = (s: string) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
 
-/** 0 = running, 1 = needs attention, 2 = everything else in priority order, 3 = done. */
+/** Main's flag only (row.cancelled) — never re-derived here. */
+const isCancelled = (r: PlanRow) => r.cancelled === true
+
+/** 0 = running, 1 = needs attention, 2 = everything else in priority order, 3 = done or cancelled (settled). */
 function rank(r: PlanRow): number {
+  if (isCancelled(r)) return 3
   if (isRunning(r.status)) return 0
   if (isAttention(r.status)) return 1
   if (isDone(r.status)) return 3
@@ -85,8 +89,8 @@ export function StageColumn({ stage, epicId, now, hidden, indexBySlug, headChoic
   const shown = expanded ? ordered : ordered.slice(0, cap)
   const hiddenRows = expanded ? [] : ordered.slice(cap)
 
-  const failed = ordered.find((r) => r.status === 'failed')
-  const review = ordered.find((r) => r.status === 'needs_review')
+  const failed = ordered.find((r) => r.status === 'failed' && !isCancelled(r))
+  const review = ordered.find((r) => r.status === 'needs_review' && !isCancelled(r))
   const showPair = flagged > 0 && (failed !== undefined || review !== undefined)
   // The pair goes right after the last flagged row (flagged rows are contiguous after the running ones).
   const pairAfter = shown.reduce((last, r, i) => (rank(r) <= 1 ? i : last), -1)

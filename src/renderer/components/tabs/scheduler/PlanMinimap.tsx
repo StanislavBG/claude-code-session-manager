@@ -15,7 +15,7 @@ const PAD_Y = 2
 /** Brush overhang beyond the cluster edges (< STAGE_GAP/2 so it never touches a neighbouring cluster). */
 const BRUSH_OVERHANG = 4
 
-type Tone = 'done' | 'running' | 'attention' | 'failed' | 'pending'
+type Tone = 'done' | 'running' | 'attention' | 'failed' | 'pending' | 'cancelled'
 // Literal class names only (Tailwind JIT). Same palette as the stage columns' dots.
 const TONE_CLASS: Record<Tone, string> = {
   done: 'bg-sage',
@@ -23,6 +23,8 @@ const TONE_CLASS: Record<Tone, string> = {
   attention: 'bg-butter',
   failed: 'bg-red-600',
   pending: 'bg-fg-faint/50',
+  // A human cancel (main's row.cancelled) is a decision, never a failure — same faint dot as PrdRow.
+  cancelled: 'bg-fg-faint/40',
 }
 
 interface MinimapDot { x: number; y: number; tone: Tone; title: string }
@@ -34,7 +36,8 @@ interface MinimapLayout {
   width: number
 }
 
-function toneOf(status: string): Tone {
+function toneOf(status: string, cancelled: boolean): Tone {
+  if (cancelled) return 'cancelled'
   if (status === 'completed' || status === 'skipped') return 'done'
   if (status === 'running' || status === 'investigating') return 'running'
   if (status === 'failed') return 'failed'
@@ -53,11 +56,12 @@ function layoutMinimap(stages: Stage[]): MinimapLayout {
     stageX.push(x)
     stageW.push(cols * PITCH)
     s.rows.forEach((r, i) => {
+      const cancelled = r.cancelled === true
       dots.push({
         x: x + Math.floor(i / ROWS) * PITCH,
         y: PAD_Y + (i % ROWS) * PITCH,
-        tone: toneOf(r.status),
-        title: `${r.prdNumber ? `#${r.prdNumber}` : r.slug} ${r.title} — ${r.status}`,
+        tone: toneOf(r.status, cancelled),
+        title: `${r.prdNumber ? `#${r.prdNumber}` : r.slug} ${r.title} — ${cancelled ? 'cancelled' : r.status}`,
       })
     })
     x += cols * PITCH + STAGE_GAP

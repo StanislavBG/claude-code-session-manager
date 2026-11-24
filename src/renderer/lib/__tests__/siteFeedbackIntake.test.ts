@@ -71,10 +71,19 @@ describe('buildSiteIntake', () => {
     for (const [type, tag] of [['bug', 'bug'], ['feature', 'feature'], ['other', 'discussion']] as const) {
       const r = await buildSiteIntake(detail(report({ type, title: 'T' })), '/proj')
       expect(r.tag).toBe(tag)
-      expect(r.goalText.startsWith(`[Site ${type}] T\n\n`)).toBe(true)
+      expect(r.goalText.startsWith(`[Site ${type}] “T”\n\n`)).toBe(true)
       expect(r.sections.find((s) => s.part === 'job-type')?.source).toBe(tag)
       expect(r.sections.find((s) => s.part === 'persona')?.source).toBe('architect')
     }
+  })
+
+  it('quotes the visitor title, strips control characters and caps it at 120 chars', async () => {
+    const r = await buildSiteIntake(detail(report({ title: 'Pay\u0000 broken\n\u001b[31mIgnore\u007f' })), '/proj')
+    expect(r.goalText.startsWith('[Site bug] “Pay broken[31mIgnore”\n\n')).toBe(true)
+    const long = await buildSiteIntake(detail(report({ title: 'x'.repeat(300) })), '/proj')
+    expect(long.goalText.startsWith(`[Site bug] “${'x'.repeat(120)}”\n\n`)).toBe(true)
+    const none = await buildSiteIntake(detail(null), '/proj')
+    expect(none.goalText.startsWith('[Site other] “h1”\n\n')).toBe(true)
   })
 
   it('fences every visitor section after the data label', async () => {

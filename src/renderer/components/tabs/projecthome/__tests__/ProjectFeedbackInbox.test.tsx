@@ -4,6 +4,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ProjectFeedbackInbox } from '../ProjectFeedbackInbox'
 import { useSiteFeedback } from '../../../../state/siteFeedback'
+import { usePromptSessions } from '../../../../state/promptSessions'
+import { useToast } from '../../../../state/toast'
+
+vi.mock('../../../../lib/launchSession', () => ({ resolvePersonaBody: vi.fn(async () => null) }))
 import type {
   SiteFeedbackInboxItem,
   SiteFeedbackItemDetail,
@@ -99,6 +103,7 @@ const detail = (hostId: string, r: SiteFeedbackReport | null = report()): SiteFe
 let sf: Record<string, ReturnType<typeof vi.fn>>
 
 beforeEach(() => {
+  const linkedEpic: Record<string, string> = {}
   sf = {
     inboxList: vi.fn(async () => ({
       ok: true,
@@ -121,9 +126,13 @@ beforeEach(() => {
     })),
     inboxSetStatus: vi.fn(async ({ hostId, status }: { hostId: string; status: SiteFeedbackItemMeta['status'] }) => ({
       ok: true,
-      meta: meta(hostId, { status }),
+      meta: meta(hostId, { status, epicId: linkedEpic[hostId] ?? null }),
     })),
     inboxRemove: vi.fn(async ({ hostId }: { hostId: string }) => ({ ok: true, hostId })),
+    inboxLinkEpic: vi.fn(async ({ hostId, epicId }: { hostId: string; epicId: string }) => {
+      linkedEpic[hostId] = epicId
+      return { ok: true, meta: meta(hostId, { epicId }) }
+    }),
   }
   ;(window as unknown as { api: unknown }).api = { siteFeedback: sf }
 })
@@ -275,5 +284,101 @@ describe('ProjectFeedbackInbox plain text', () => {
     expect(el.querySelector('script')).toBeNull()
     expect(el.querySelector('img[src="x"]')).toBeNull()
     expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined()
+  })
+})
+
+describe('ProjectFeedbackInbox Open as Epic', () => {
+  let createPromptSession: ReturnType<typeof vi.fn>
+  let show: ReturnType<typeof vi.fn>
+  const realCreate = usePromptSessions.getState().createPromptSession
+  const realShow = useToast.getState().show
+
+  beforeEach(() => {
+    let n = 0
+    createPromptSession = vi.fn(async () => ({ id: `epic-${++n}` }))
+    usePromptSessions.setState({ createPromptSession } as never)
+    show = vi.fn()
+    useToast.setState({ show } as never)
+  })
+  afterEach(() => {
+    usePromptSessions.setState({ createPromptSession: realCreate } as never)
+    useToast.setState({ show: realShow } as never)
+  })
+
+  const openBtn = (el: HTMLElement) => q(el, 'site-feedback-open-epic') as HTMLButtonElement
+
+  it('creates a proposed Epic, links it, sets in_progress, then disables the button', async () => {
+    const el = await mount()
+    await openRow(el, 'FB-NEW01')
+    expect(openBtn(el).disabled).toBe(false)
+    act(() => openBtn(el).click())
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+    const [cwd, goalText, tag, , agent] = createPromptSession.mock.calls[0]
+    expect(cwd).toBe(CWD)
+    expect(String(goalText).startsWith('[Site bug] “Checkout button broken”')).toBe(true)
+    expect(tag).toBe('bug')
+    expect(agent).toBe('architect')
+    expect(sf.inboxLinkEpic).toHaveBeenCalledWith({ cwd: CWD, hostId: 'FB-NEW01', epicId: 'epic-1' })
+    expect(sf.inboxSetStatus).toHaveBeenLastCalledWith({ cwd: CWD, hostId: 'FB-NEW01', status: 'in_progress' })
+    expect(sf.inboxLinkEpic.mock.invocationCallOrder[0]).toBeLessThan(sf.inboxSetStatus.mock.invocationCallOrder[0])
+    expect(openBtn(el).disabled).toBe(true)
+    expect(q(el, 'site-feedback-retry-link')).toBeNull()
+    act(() => openBtn(el).click())
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('is disabled when the report already has a linked Epic', async () => {
+    sf.inboxGet.mockResolvedValueOnce({ ok: true, item: { ...detail('FB-NEW01'), meta: meta('FB-NEW01', { epicId: 'old' }) } })
+    const el = await mount()
+    await openRow(el, 'FB-NEW01')
+    expect(openBtn(el).disabled).toBe(true)
+    act(() => openBtn(el).click())
+    await flush()
+    expect(createPromptSession).not.toHaveBeenCalled()
+  })
+
+  it('is disabled while a press is in flight and a double press mints once', async () => {
+    let release!: (v: { id: string }) => void
+    createPromptSession.mockImplementationOnce(() => new Promise((r) => (release = r)))
+    const el = await mount()
+    await openRow(el, 'FB-NEW01')
+    act(() => {
+      openBtn(el).click()
+      openBtn(el).click()
+    })
+    await flush()
+    expect(openBtn(el).disabled).toBe(true)
+    await act(async () => release({ id: 'epic-x' }))
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+    expect(sf.inboxLinkEpic).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed link toasts an error and Retry link re-links the same Epic, minting exactly one', async () => {
+    sf.inboxLinkEpic.mockResolvedValueOnce({ ok: false, error: 'io', message: 'disk full' })
+    const el = await mount()
+    await openRow(el, 'FB-NEW01')
+    act(() => openBtn(el).click())
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+    expect(show).toHaveBeenCalledWith('error', expect.stringContaining('disk full'))
+    expect(sf.inboxSetStatus).not.toHaveBeenCalled()
+    expect(openBtn(el).disabled).toBe(true)
+    act(() => openBtn(el).click())
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+
+    const retry = q(el, 'site-feedback-retry-link') as HTMLButtonElement
+    expect(retry.textContent).toBe('Retry link')
+    act(() => retry.click())
+    await flush()
+    expect(createPromptSession).toHaveBeenCalledTimes(1)
+    expect(sf.inboxLinkEpic).toHaveBeenCalledTimes(2)
+    expect(sf.inboxLinkEpic).toHaveBeenLastCalledWith({ cwd: CWD, hostId: 'FB-NEW01', epicId: 'epic-1' })
+    expect(sf.inboxSetStatus).toHaveBeenLastCalledWith({ cwd: CWD, hostId: 'FB-NEW01', status: 'in_progress' })
+    expect(q(el, 'site-feedback-retry-link')).toBeNull()
+    expect(openBtn(el).disabled).toBe(true)
   })
 })

@@ -8,16 +8,18 @@
  * a marks table, details, page URL + viewport, and collapsible console / network lists; status
  * can be set and the report removed after a confirm. "Open as Epic" is a human press through the
  * New Epic mint path (createPromptSession — born proposed), built by lib/siteFeedbackIntake.ts with
- * every visitor-supplied part fenced as data; it then links the Epic and sets in_progress.
+ * every visitor-supplied part fenced as data; it then links the Epic and sets in_progress. The
+ * created Epic id is kept once the mint succeeds: a failed link offers 'Retry link' for that same
+ * Epic and the press never mints a second one.
  *
  * Every report field is visitor-supplied: it renders only as React text children — no
  * dangerouslySetInnerHTML, no auto-linking (the page URL is text, never an <a>).
  * Failures go to the toast channel; the store also keeps them as the cwd's `error`.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
-import { toast } from '../../../state/toast'
+import { toast, useToast } from '../../../state/toast'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { buildSiteIntake } from '../../../lib/siteFeedbackIntake'
 import { formatAgo } from '../../../lib/formatTime'
@@ -210,20 +212,46 @@ function Detail({ cwd, detail }: { cwd: string; detail: SiteFeedbackItemDetail }
     }
   }
   const linked = meta.epicId != null
-  const onOpenAsEpic = async () => {
-    if (busy || linked) return
+  // The Epic minted for THIS report, kept so a failed link is retried, never re-minted.
+  const [minted, setMinted] = useState<{ hostId: string; epicId: string } | null>(null)
+  const mintedEpicId = minted && minted.hostId === meta.hostId ? minted.epicId : null
+  const inFlight = useRef(false)
+  const showToast = (msg: string) => useToast.getState().show('error', msg)
+
+  const linkAndStart = async (epicId: string) => {
+    const link = await linkEpic(cwd, meta.hostId, epicId)
+    if (!link.ok) {
+      showToast(`Feedback: Epic created but not linked — ${link.message || link.error}. Use Retry link.`)
+      return
+    }
+    toastFailure(await setStatus(cwd, meta.hostId, 'in_progress'))
+  }
+  const press = async (run: () => Promise<void>) => {
+    if (inFlight.current) return
+    inFlight.current = true
     setBusy(true)
     try {
-      const { goalText, openingPrompt, sections, tag } = await buildSiteIntake(detail, cwd)
-      const session = await createPromptSession(cwd, goalText, tag, undefined, 'architect', openingPrompt, sections)
-      const link = toastFailure(await linkEpic(cwd, meta.hostId, session.id))
-      if (link.ok) toastFailure(await setStatus(cwd, meta.hostId, 'in_progress'))
+      await run()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      showToast(err instanceof Error ? err.message : String(err))
     } finally {
+      inFlight.current = false
       setBusy(false)
     }
   }
+  const onOpenAsEpic = () =>
+    press(async () => {
+      if (linked || mintedEpicId) return
+      const { goalText, openingPrompt, sections, tag } = await buildSiteIntake(detail, cwd)
+      const session = await createPromptSession(cwd, goalText, tag, undefined, 'architect', openingPrompt, sections)
+      setMinted({ hostId: meta.hostId, epicId: session.id })
+      await linkAndStart(session.id)
+    })
+  const onRetryLink = () =>
+    press(async () => {
+      if (linked || !mintedEpicId) return
+      await linkAndStart(mintedEpicId)
+    })
   const onRemove = async () => {
     setConfirmRemove(false)
     setBusy(true)
@@ -274,13 +302,31 @@ function Detail({ cwd, detail }: { cwd: string; detail: SiteFeedbackItemDetail }
         <button
           type="button"
           data-testid="site-feedback-open-epic"
-          disabled={busy || linked}
-          title={linked ? 'An Epic is already linked to this report' : 'Create a proposed Epic from this report'}
+          disabled={busy || linked || mintedEpicId != null}
+          title={
+            linked
+              ? 'An Epic is already linked to this report'
+              : mintedEpicId
+                ? 'An Epic was created for this report — use Retry link'
+                : 'Create a proposed Epic from this report'
+          }
           onClick={() => void onOpenAsEpic()}
           className="rounded border border-line px-2 py-0.5 text-[12px] hover:bg-bg-hover disabled:opacity-50"
         >
           Open as Epic
         </button>
+        {mintedEpicId && !linked && (
+          <button
+            type="button"
+            data-testid="site-feedback-retry-link"
+            disabled={busy}
+            title="Link the Epic already created for this report"
+            onClick={() => void onRetryLink()}
+            className="rounded border border-line px-2 py-0.5 text-[12px] hover:bg-bg-hover disabled:opacity-50"
+          >
+            Retry link
+          </button>
+        )}
         {confirmRemove ? (
           <>
             <button

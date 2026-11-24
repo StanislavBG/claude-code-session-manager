@@ -42,6 +42,20 @@ function markLine(m: SiteFeedbackMark): string {
   }
 }
 
+/** Max visitor-title length (code points) inside the Epic title. */
+export const SITE_TITLE_MAX = 120
+
+/** The visitor title with C0/C1 control characters removed, capped at SITE_TITLE_MAX code points. */
+export function cleanSiteTitle(title: string): string {
+  // eslint-disable-next-line no-control-regex
+  return Array.from(title.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')).slice(0, SITE_TITLE_MAX).join('')
+}
+
+/** '[Site <type>] “<title>”' — the visitor title quoted, so it reads as data. */
+export function siteEpicTitle(type: string, title: string): string {
+  return `[Site ${type}] “${cleanSiteTitle(title)}”`
+}
+
 const ARCHITECT_DESCRIPTION =
   "The primary Actor for an Epic's whole interactive conversation — plans, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies."
 
@@ -100,7 +114,7 @@ export async function buildSiteIntake(item: SiteFeedbackItemDetail, cwd: string)
   const title = item.report?.title ?? item.meta.hostId
   const tag = siteEpicTag(type)
   const intake = composeEpicIntake({
-    title: `[Site ${type}] ${title}`,
+    title: siteEpicTitle(type, title),
     goal: buildSiteGoal(item),
     tag,
     agentName: 'architect',

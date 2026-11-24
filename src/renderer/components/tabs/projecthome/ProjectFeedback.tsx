@@ -1,6 +1,6 @@
 /**
  * ProjectFeedback — Project Home ▸ Feedback: one project's website feedback, beside the
- * project it belongs to. Two sections: Website widget (this cwd's relay boxes) and Inbox
+ * project it belongs to. Two sections: Website widget (this cwd's relay boxes, managed by ProjectFeedbackWidgetCard) and Inbox
  * (the items those boxes delivered). A shell today — later PRDs fill each section in.
  *
  * Data comes only from the `siteFeedback` store (`state/siteFeedback.ts`): widgets and items
@@ -11,6 +11,7 @@
 import { useEffect } from 'react'
 import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
 import { toast } from '../../../state/toast'
+import { ProjectFeedbackWidgetCard } from './ProjectFeedbackWidgetCard'
 import type { SiteFeedbackResult } from '../../../../preload/api'
 
 function toastFailure<T>(r: SiteFeedbackResult<T>): void {
@@ -39,8 +40,11 @@ export function ProjectFeedback({ cwd }: { cwd: string }) {
             : state.widgets.length === 0
               ? 'No widget for this project yet'
               : `${state.widgets.length} widget${state.widgets.length === 1 ? '' : 's'}`}
-          {state.relayError ? ` · relay unreachable: ${state.relayError.message || state.relayError.error}` : ''}
+          {state.relayError && state.relayError.error !== 'not_linked'
+            ? ` · relay unreachable: ${state.relayError.message || state.relayError.error}`
+            : ''}
         </p>
+        <ProjectFeedbackWidgetCard cwd={cwd} />
       </section>
       <section data-testid="project-feedback-inbox" className="flex flex-col gap-2">
         <h2 className="text-[15px] font-semibold tracking-[-0.01em]">Inbox</h2>

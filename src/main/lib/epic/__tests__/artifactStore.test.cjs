@@ -267,9 +267,9 @@ test('listArtifacts reads the ledger through the injected fsImpl, not the real d
       if (file === ledger) return JSON.stringify({ version: 1, entries: [{ name: 'ghost.txt', createdAt: '2026-11-20T00:00:00.000Z' }] });
       return fs.readFileSync(file, enc);
     },
-    statSync: (file) => {
+    lstatSync: (file) => {
       if (file === path.join(epicDir, 'ghost.txt')) return { isFile: () => true };
-      return fs.statSync(file);
+      return fs.lstatSync(file);
     },
   };
   expect(fs.existsSync(ledger)).toBe(false);
@@ -288,23 +288,60 @@ test('listArtifacts hides an entry whose stored file was deleted (e.g. from the 
   expect(ledger.entries.map((e) => e.name).sort()).toEqual(['gone.txt', 'keep.txt']);
 });
 
-test('listArtifacts stats each entry through fsImpl and never throws on a stat error', async () => {
+test('listArtifacts lstats each entry through fsImpl and never throws on a stat error', async () => {
   await pub({ srcPath: mk('one.txt') });
   await pub({ srcPath: mk('two.txt') });
+  await pub({ srcPath: mk('three.txt') });
   const stats = [];
   const fake = {
     ...fs,
-    statSync: (file) => {
+    lstatSync: (file) => {
       stats.push(file);
       if (file.endsWith('two.txt')) { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
       if (file.endsWith('one.txt')) throw new Error('weird stat failure');
-      return fs.statSync(file);
+      return fs.lstatSync(file);
     },
   };
   let list;
   expect(() => { list = store.listArtifacts(root, { fsImpl: fake }); }).not.toThrow();
-  expect(stats.map((f) => path.basename(f)).sort()).toEqual(['one.txt', 'two.txt']);
-  expect(list.map((e) => e.name)).toEqual(['one.txt']);
+  expect(stats.map((f) => path.basename(f)).sort()).toEqual(['one.txt', 'three.txt', 'two.txt']);
+  // Any lstat error = not present.
+  expect(list.map((e) => e.name)).toEqual(['three.txt']);
+});
+
+test('storedFilePresent: regular file true; dangling symlink, symlink to a file, folder, missing → false', () => {
+  const dir = path.join(ns(), 'probe');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'real.txt');
+  fs.writeFileSync(file, 'x');
+  const dangling = path.join(dir, 'dangling.txt');
+  fs.symlinkSync(path.join(dir, 'nowhere.txt'), dangling);
+  const toFile = path.join(dir, 'tofile.txt');
+  fs.symlinkSync(file, toFile);
+  expect(store.storedFilePresent(file)).toBe(true);
+  expect(store.storedFilePresent(dangling)).toBe(false);
+  expect(store.storedFilePresent(toFile)).toBe(false);
+  expect(store.storedFilePresent(dir)).toBe(false);
+  expect(store.storedFilePresent(path.join(dir, 'missing.txt'))).toBe(false);
+  expect(store.storedFilePresent(path.join(file, 'under-a-file'))).toBe(false);
+  const throwing = { lstatSync: () => { throw new Error('boom'); } };
+  expect(() => store.storedFilePresent(file, throwing)).not.toThrow();
+  expect(store.storedFilePresent(file, throwing)).toBe(false);
+  expect(store.storedFilePresent(file, { lstatSync: () => null })).toBe(false);
+  expect(store.storedFileMissing).toBeUndefined();
+});
+
+test('listArtifacts keeps a regular file and hides a dangling symlink and a symlink to a real file', async () => {
+  const keep = await pub({ srcPath: mk('keep.txt') });
+  const a = await pub({ srcPath: mk('dangling.txt') });
+  const b = await pub({ srcPath: mk('linked.txt') });
+  expect(keep.ok && a.ok && b.ok).toBe(true);
+  const dir = path.join(ns(), EPIC);
+  fs.unlinkSync(path.join(dir, 'dangling.txt'));
+  fs.symlinkSync(path.join(dir, 'nowhere.txt'), path.join(dir, 'dangling.txt'));
+  fs.unlinkSync(path.join(dir, 'linked.txt'));
+  fs.symlinkSync(path.join(dir, 'keep.txt'), path.join(dir, 'linked.txt'));
+  expect(store.listArtifacts(root).map((e) => e.name)).toEqual(['keep.txt']);
 });
 
 test('publishArtifact and ingestDir have no fsImpl seam: writes use the real fs', () => {

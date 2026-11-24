@@ -361,3 +361,17 @@ test('dryRun reports missing rows without rewriting any ledger', () => {
   expect(real.compacted).toEqual(dry.compacted);
   expect(ledger(live)).toEqual(['here.png']);
 });
+
+test('pruneArtifacts compacts a dangling-symlink row and keeps the regular-file row', () => {
+  const dir = owner(['live-epic'], [
+    { name: 'here.png', createdAt: iso(1) },
+    { name: 'dangling.png', createdAt: iso(1) },
+  ]);
+  fs.unlinkSync(path.join(dir, 'dangling.png'));
+  fs.symlinkSync(path.join(dir, 'nowhere.png'), path.join(dir, 'dangling.png'));
+  const r = pruneArtifacts({ projectRoot: root, epicStatus, now: NOW, days: 30, tasksDays: 10 });
+  expect(ledger(dir)).toEqual(['here.png']);
+  expect(fs.existsSync(path.join(dir, 'here.png'))).toBe(true);
+  expect(r.missingRows).toEqual(['live-epic/dangling.png']);
+  expect(r.compacted).toEqual(['live-epic']);
+});

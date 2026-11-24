@@ -49,6 +49,7 @@ const nodeFs = require('node:fs');
 const path = require('node:path');
 const opsOwnership = require('../opsOwnership.cjs');
 const atomicFs = require('../util/atomicFs.cjs');
+const { storedFilePresent } = require('./artifactStore.cjs');
 
 const WRITER = 'artifacts';
 const NS = 'artifacts';
@@ -123,18 +124,11 @@ function childFiles(fsImpl, dir) {
   return entries.filter((e) => e.name !== LEDGER && !e.isSymbolicLink()).map((e) => e.name);
 }
 
-/** True only when lstat says the entry's stored file is gone. */
-function fileMissing(fsImpl, dir, name) {
-  try { fsImpl.lstatSync(path.join(dir, name)); return false; } catch (e) {
-    return !!e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
-  }
-}
-
-/** Ledger entries whose stored file still exists; records the dropped rows on ctx.result. */
+/** Ledger entries whose stored path is still a regular file (storedFilePresent); records the dropped rows on ctx.result. */
 function presentEntries(ctx, ownerId, dir, entries) {
   const live = [];
   for (const e of entries) {
-    if (fileMissing(ctx.fsImpl, dir, e.name)) ctx.result.missingRows.push(`${ownerId}/${e.name}`);
+    if (!storedFilePresent(path.join(dir, e.name), ctx.fsImpl)) ctx.result.missingRows.push(`${ownerId}/${e.name}`);
     else live.push(e);
   }
   return live;

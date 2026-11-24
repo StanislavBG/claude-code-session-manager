@@ -333,15 +333,20 @@ async function ingestDir({
 }
 
 /**
- * True only when a stat of the stored file says it is gone (ENOENT/ENOTDIR).
- * Any other stat error keeps the entry — the file may well exist. Never throws.
+ * storedFilePresent(file, fsImpl) → true only when lstat (no symlink
+ * following) says the stored path is a regular file. Publish never stores a
+ * symlink, so a symlink (dangling or not), a folder, or any lstat error counts
+ * as missing. The one rule shared by listArtifacts and the retention sweep
+ * (artifactRetention.cjs). Never throws.
+ * @param {string} file
+ * @param {{ lstatSync: (p: string) => { isFile: () => boolean } }} [fsImpl]
  */
-function storedFileMissing(file, fsImpl) {
+function storedFilePresent(file, fsImpl = fs) {
   try {
-    fsImpl.statSync(file);
+    const st = fsImpl.lstatSync(file);
+    return !!st && st.isFile() === true;
+  } catch {
     return false;
-  } catch (e) {
-    return !!e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
   }
 }
 
@@ -350,7 +355,7 @@ function storedFileMissing(file, fsImpl) {
  * `ownerId` (an Epic id, or `_tasks/<task-id>`). A missing or corrupt ledger
  * contributes [] for that owner. An entry whose stored file
  * (artifacts/<owner>/<name>) no longer exists — e.g. deleted from the OS file
- * manager — is omitted (one stat per entry through fsImpl); the daily sweep
+ * manager, or replaced by a symlink — is omitted (one lstat per entry through fsImpl); the daily sweep
  * (artifactRetention.cjs) compacts such rows out of the ledger. Never throws.
  */
 function listArtifacts(projectRoot, { fsImpl = fs } = {}) {
@@ -376,7 +381,7 @@ function listArtifacts(projectRoot, { fsImpl = fs } = {}) {
   }
   for (const { ownerId, dir } of owners) {
     for (const e of readLedger(path.join(dir, LEDGER), fsImpl)) {
-      if (storedFileMissing(path.join(dir, e.name), fsImpl)) continue;
+      if (!storedFilePresent(path.join(dir, e.name), fsImpl)) continue;
       out.push({ ...e, ownerId });
     }
   }
@@ -404,6 +409,7 @@ module.exports = {
   publishArtifact,
   ingestDir,
   listArtifacts,
+  storedFilePresent,
   stagingDirFor,
   inferKind,
   MAX_BYTES,

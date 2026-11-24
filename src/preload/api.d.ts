@@ -3668,16 +3668,29 @@ export interface SessionManagerAPI {
     refreshAgentSnapshot: (payload: EpicRefreshAgentSnapshotPayload) => Promise<EpicRefreshAgentSnapshotResult>;
     /** epic:purge — deletes a completed Epic's transcripts, run logs, history rows, PRDs, events and
      *  JSON, leaving a content-free tombstone + one audit record (lib/epic/epicPurge.cjs). Human-only:
-     *  the Purge button (typed-id confirm) is its only caller. */
+     *  the Purge button (typed-id confirm) is its only caller. `dryRun: true` deletes and writes
+     *  nothing and returns what a purge would remove (the confirm shows its count). */
     purge: (payload: EpicPurgePayload) => Promise<EpicPurgeResult>;
   };
 }
 
 export interface PromptSessionsReopenPayload { cwd: string; epicId: string }
 export interface EpicRefreshAgentSnapshotPayload { cwd: string; epicId: string }
-export interface EpicPurgePayload { cwd: string; epicId: string }
+export interface EpicPurgePayload { cwd: string; epicId: string; dryRun?: boolean }
+export type EpicPurgeArtifactKind =
+  | 'cli-transcript' | 'run-log' | 'history-rows' | 'prd-sources' | 'plan-records'
+  | 'event-log' | 'agent-snapshot' | 'archived-transcript' | 'epic-json' | 'index-row'
+export interface EpicPurgeArtifact { kind: EpicPurgeArtifactKind; path: string }
 export type EpicPurgeResult =
-  | { ok: true; removed: string[] }
+  | {
+      ok: true
+      /** true = nothing was touched; `removed` is then []. */
+      dryRun: boolean
+      artifacts: EpicPurgeArtifact[]
+      counts: Record<EpicPurgeArtifactKind, number>
+      total: number
+      removed: string[]
+    }
   | { ok: false; code: 'not_human' | 'invalid_epic_id' | 'invalid_cwd' | 'epic_running' | string; error: string };
 export type EpicRefreshAgentSnapshotResult =
   | { ok: true; changed: boolean; from: string | null; to: string; session: PromptSession }

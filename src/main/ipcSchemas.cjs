@@ -288,7 +288,8 @@ const promptSessionsReopen = z.object({ cwd: z.string().min(1).max(4096), epicId
 const epicRefreshAgentSnapshot = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE) }).strict();
 // epic:purge (lib/epic/epicPurge.cjs) — the human-only purge of a completed Epic's data.
 // Its ONLY caller is the Purge button (typed-id confirm); never exposed to scripts, MCP or admin routes.
-const epicPurge = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE) }).strict();
+// `dryRun: true` = read-only listing of what a purge would remove (the confirm shows its count).
+const epicPurge = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE), dryRun: z.boolean().optional() }).strict();
 
 // Renderer entry point for folding an Epic's isolated git worktree branch
 // back into its owning project's main tree (lib/epic/epicWorktreeMerge.cjs) — PRD

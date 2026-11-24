@@ -1168,8 +1168,9 @@ require('./lib/epic/epicAgentRefresh.cjs').registerEpicAgentRefreshHandlers();
 // Never wire purgeEpic into a script, MCP tool or admin route.
 {
   const { purgeEpic, PURGE_AUTHORITY_IPC } = require('./lib/epic/epicPurge.cjs');
-  ipcMain.handle('epic:purge', validated(schemas.epicPurge, async ({ cwd, epicId }) => {
+  ipcMain.handle('epic:purge', validated(schemas.epicPurge, async ({ cwd, epicId, dryRun }) => {
     require('./config.cjs').validatePath(cwd);
+    if (dryRun === true) return purgeEpic({ cwd, epicId, dryRun: true });
     return purgeEpic({ cwd, epicId, authority: PURGE_AUTHORITY_IPC });
   }));
 }

@@ -134,6 +134,28 @@ export interface SessionActionsBarProps {
   epicId?: string | null
 }
 
+/** Human labels for epicPurge.cjs's artifact kinds, in purge order. */
+const PURGE_KIND_LABELS: ReadonlyArray<readonly [string, string]> = [
+  ['cli-transcript', 'transcript'],
+  ['run-log', 'run log'],
+  ['history-rows', 'history file'],
+  ['prd-sources', 'PRD folder'],
+  ['plan-records', 'plan record'],
+  ['event-log', 'event log'],
+  ['agent-snapshot', 'agent snapshot'],
+  ['archived-transcript', 'archived transcript'],
+  ['epic-json', 'session file'],
+  ['index-row', 'index row'],
+]
+
+/** " (2 transcripts, 1 run log)" from a dry run's counts; "" when all zero. */
+function purgeCountBreakdown(counts: Record<string, number>): string {
+  const parts = PURGE_KIND_LABELS.filter(([k]) => (counts[k] ?? 0) > 0).map(
+    ([k, label]) => `${counts[k]} ${label}${counts[k] === 1 ? '' : 's'}`,
+  )
+  return parts.length ? ` (${parts.join(', ')})` : ''
+}
+
 export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionActionsBarProps) {
   const personas = useAgentPersonas()
   const { launch, launching, cwd } = useMacroLaunch(onSelect, personas)
@@ -152,6 +174,34 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
   const [purgeTyped, setPurgeTyped] = useState('')
   const [purging, setPurging] = useState(false)
   const purgeOpen = purgeFor !== null && purgeFor === epicId
+  // The dry run's artifact count for the open confirm (keyed by Epic id so a late reply for
+  // another Epic is ignored). Confirm stays disabled until a count for THIS Epic has arrived.
+  const [purgePreview, setPurgePreview] = useState<
+    { for: string; total: number; counts: Record<string, number> } | { for: string; error: string } | null
+  >(null)
+  const preview = purgePreview && purgePreview.for === epicId ? purgePreview : null
+  const previewCounted = preview !== null && 'total' in preview
+
+  // Open the confirm and ask main what a purge WOULD remove (read-only dry run).
+  const openPurge = async () => {
+    if (!epicId || !epicCwd) return
+    setPurgeFor(epicId)
+    setPurgeTyped('')
+    setPurgePreview(null)
+    try {
+      const r = await window.api.promptSessions.purge({ cwd: epicCwd, epicId, dryRun: true })
+      if (!r.ok) {
+        setPurgePreview({ for: epicId, error: r.error })
+        useToast.getState().show('error', r.error)
+        return
+      }
+      setPurgePreview({ for: epicId, total: r.total, counts: r.counts })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setPurgePreview({ for: epicId, error: msg })
+      useToast.getState().show('error', msg)
+    }
+  }
 
   // The one human action that moves an existing Epic onto the current persona
   // version (lib/epic/epicAgentRefresh.cjs re-snapshots + audits main-side).
@@ -179,7 +229,7 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
   // The one human action that deletes a completed Epic's data (lib/epic/epicPurge.cjs
   // via epic:purge). Gated on typing the Epic id; never reachable from a script.
   const purge = async () => {
-    if (!epicId || !epicCwd || purgeTyped !== epicId) return
+    if (!epicId || !epicCwd || purgeTyped !== epicId || !previewCounted) return
     const show = useToast.getState().show
     setPurging(true)
     try {
@@ -198,7 +248,8 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
       })
       setPurgeFor(null)
       setPurgeTyped('')
-      show('info', `Session ${epicId} purged.`)
+      setPurgePreview(null)
+      show('info', `Session ${epicId} purged (${r.total} artifact${r.total === 1 ? '' : 's'} removed).`)
     } catch (err) {
       show('error', err instanceof Error ? err.message : String(err))
     } finally {
@@ -266,10 +317,7 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
         {epicId && epicCompleted && (
           <button
             type="button"
-            onClick={() => {
-              setPurgeFor(epicId)
-              setPurgeTyped('')
-            }}
+            onClick={() => void openPurge()}
             disabled={!epicCwd || purging || purgeOpen}
             title="Permanently delete this completed session's transcripts, logs, PRDs and history"
             data-testid="epic-purge"
@@ -300,6 +348,13 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
             This permanently deletes the session&apos;s transcripts, run logs, PRDs, events and history. Type{' '}
             <code className="font-mono text-fg">{epicId}</code> to confirm.
           </span>
+          <span data-testid="epic-purge-count" className={preview && 'error' in preview ? 'text-red-500' : 'text-fg'}>
+            {preview === null
+              ? 'Counting what will be deleted…'
+              : 'error' in preview
+                ? `Could not count what will be deleted: ${preview.error}`
+                : `${preview.total} artifact${preview.total === 1 ? '' : 's'} will be deleted${purgeCountBreakdown(preview.counts)}.`}
+          </span>
           <input
             type="text"
             data-testid="epic-purge-input"
@@ -315,7 +370,7 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
               type="button"
               data-testid="epic-purge-confirm"
               onClick={() => void purge()}
-              disabled={purgeTyped !== epicId || purging}
+              disabled={purgeTyped !== epicId || purging || !previewCounted}
               className={`${BTN} bg-red-600 text-white border-transparent`}
             >
               {purging ? 'Purging…' : 'Purge forever'}
@@ -326,6 +381,7 @@ export function SessionActionsBar({ onNew, onSelect, epicId = null }: SessionAct
               onClick={() => {
                 setPurgeFor(null)
                 setPurgeTyped('')
+                setPurgePreview(null)
               }}
               disabled={purging}
               className={SECONDARY}

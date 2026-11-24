@@ -176,11 +176,24 @@ export function CaptureChrome(props: CaptureChromeProps) {
     const el = surfaceRef.current;
     if (!open || !el) return;
     let closing = false;
+    // Whether a popover was already open when the current gesture's pointerdown arrived. A
+    // popover the gesture itself opened (pin, box, element creation) must survive its trailing
+    // pointerup / mouseup / click. null = no pointerdown seen (a bare click).
+    let openAtDown: boolean | null = null;
     const stop = (e: globalThis.Event) => e.stopPropagation();
     const noScroll = (e: globalThis.Event) => e.preventDefault();
     const intercept = (e: globalThis.Event) => {
       const target = e.target instanceof Element ? e.target : null;
       if (target?.closest(`[${POPOVER_ATTR}]`)) return;
+      if (e.type === 'pointerdown' || e.type === 'touchstart') openAtDown = live.current.popover !== null;
+      const openedByGesture = openAtDown === false && !closing;
+      if (e.type === 'click') {
+        const wasOpenedByGesture = openedByGesture;
+        openAtDown = null;
+        if (wasOpenedByGesture) return;
+      } else if (openedByGesture) {
+        return;
+      }
       const popoverOpen = live.current.popover !== null;
       const starts = e.type === 'pointerdown' || (e.type === 'click' && !closing);
       if (e.type === 'pointerdown') closing = false;

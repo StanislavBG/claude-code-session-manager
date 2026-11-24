@@ -198,31 +198,28 @@ async function drag(page: Page, from: [number, number], to: [number, number], st
   await page.mouse.up();
 }
 
-/**
- * §5.5: creating a pin or box opens its comment popover. In today's build the click that ends
- * the creating gesture closes it again at once (CaptureChrome's capture-phase click intercept
- * sees a popover that pointerdown just opened) — reported as a finding, src/ is out of this PRD's
- * scope. So the popover is (re)opened the second documented way: clicking the numbered badge.
- */
-async function openPopover(page: Page, badge: string): Promise<void> {
-  await page.waitForTimeout(100);
-  if ((await popover(page).count()) === 0) await widget(page).getByRole('button', { name: badge, exact: true }).click();
+/** §5.5: creating a pin, box or element opens its comment popover with the textarea focused. */
+async function openPopover(page: Page, _badge: string): Promise<void> {
   await expect(popover(page)).toBeVisible();
   await expect(popover(page).locator('[data-part="popover-text"]')).toBeFocused();
 }
 
-/**
- * Text tool: places the label input at (x, y). A real mouse click loses it in today's build —
- * the input is focused on pointerdown, then mousedown's default focus change blurs it, and an
- * empty blur discards it (reported as a finding; src/ is out of scope). A synthetic pointerdown
- * has no default focus change, so it drives the same MarksLayer path the click is meant to.
- */
+/** Text tool: a real mouse click places the focused, empty label input at (x, y). */
 async function placeTextInput(page: Page, x: number, y: number): Promise<void> {
-  await widget(page)
-    .locator('[data-part="marks-hit"]')
-    .dispatchEvent('pointerdown', { button: 0, clientX: x, clientY: y, pointerId: 1, isPrimary: true, bubbles: true });
+  await page.mouse.click(x, y);
   await expect(textInput(page)).toBeVisible();
   await expect(textInput(page)).toBeFocused();
+}
+
+/** Resolves once nothing inside the widget's shadow root is transitioning or animating. */
+async function widgetSettled(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const root = document.getElementById('feedback-widget-host')?.shadowRoot as
+      | (ShadowRoot & { getAnimations?: () => Animation[] })
+      | null
+      | undefined;
+    return !!root?.getAnimations && root.getAnimations().length === 0;
+  });
 }
 
 /** Draws one mark with every one of the six tools. Leaves the popover closed. */
@@ -474,7 +471,7 @@ test("a host '* { color: red !important }' rule does not change the widget", asy
     await markAllSix(page);
     const annotating = await widgetOnly(page);
     await describeAndTitle(page, 'Isolation check');
-    await page.waitForTimeout(600); // panel enter transition settled
+    await widgetSettled(page);
     const review = await widgetOnly(page);
     shots.push([idle, annotating, review]);
   }

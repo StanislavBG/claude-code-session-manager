@@ -434,7 +434,11 @@ export function App(props: AppProps) {
         <ElementPicker
           active={annotating && state.tool === 'element'}
           color={color}
-          onCreate={marks.add}
+          onCreate={(mark) => {
+            marks.add(mark);
+            // §5.5: a picked element opens its comment popover like a pin or box does.
+            if (!(state.config.flow === 'note' && marks.marks.length === 0)) apply({ type: 'popover', id: mark.id });
+          }}
           onHover={(el) => apply({ type: 'hover', target: el })}
         />
       </CaptureChrome>

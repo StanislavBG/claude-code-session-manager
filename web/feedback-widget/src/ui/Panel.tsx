@@ -126,7 +126,7 @@ export function panelCss(): string {
     `.fw-pn-headrow{display:flex;align-items:center;gap:6px}`,
     `.fw-pn-eyebrow{flex:1;min-width:0;font-family:${fonts.mono};font-weight:500;font-size:10.5px;line-height:1.3;letter-spacing:.1em;` +
       `text-transform:uppercase;color:${c.accent};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`,
-    `.fw-pn-headline{font-family:${fonts.serif};font-weight:600;font-size:22px;line-height:1.2;color:${c.ink}}`,
+    `.fw-pn-headline{font-family:${fonts.serif};font-weight:600;font-size:22px;line-height:1.2;max-width:10em;color:${c.ink}}`,
     `.fw-pn-back{height:30px;padding:0 10px;border-radius:7px;border:1px solid ${c.rule};font-weight:600;font-size:12.5px;color:${c['ink-2']}}`,
     `.fw-pn-back:hover{background:${c['paper-2']}}`,
     `.fw-pn-close{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;color:${c['ink-3']}}`,

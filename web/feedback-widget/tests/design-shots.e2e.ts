@@ -13,10 +13,12 @@ import { expect, test, type Page } from '@playwright/test';
 import { build } from 'esbuild';
 import { createServer, type Server } from 'node:http';
 import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
+import { FONT_FACES as WIDGET_FONT_FACES, FONTS_DIR } from '../src/ui/tokens';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const widgetRoot = join(here, '..');
@@ -52,6 +54,7 @@ const TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json',
   '.css': 'text/css',
+  '.woff2': 'font/woff2',
 };
 
 // The States board's font stylesheet, and every face it uses.
@@ -109,7 +112,7 @@ const HOST_PAGE = `<!DOCTYPE html>
 <meta charset="utf-8">
 <title>Stand-in host</title>
 <link rel="stylesheet" href="./host.css">
-<script>window.FeedbackConfig = ${JSON.stringify({ ...DEFAULTS, user: { id: 'u_1', name: 'Ada Reporter' } })};</script>
+<script>window.FeedbackConfig = ${JSON.stringify({ ...DEFAULTS, endpoint: '/host/submit', user: { id: 'u_1', name: 'Ada Reporter' } })};</script>
 </head>
 <body>
 <header><b>Lumen Stays</b><nav><a>Stays</a><a>Trips</a><a>Help</a></nav><button id="search">Search</button></header>
@@ -151,6 +154,12 @@ test.beforeAll(async () => {
   });
   await mkdir(join(tmp, 'host'));
   await writeFile(join(tmp, 'host', 'feedback.js'), bundled.outputFiles[0].text);
+  // The same woff2 files the vite plugin `feedback-widget-copy-fonts` emits, next to feedback.js.
+  await mkdir(join(tmp, 'host', FONTS_DIR));
+  for (const f of WIDGET_FONT_FACES) {
+    const src = join(widgetRoot, 'node_modules', f.pkg, 'files', f.file);
+    await writeFile(join(tmp, 'host', FONTS_DIR, f.file), readFileSync(src));
+  }
   await writeFile(join(tmp, 'host', 'index.html'), HOST_PAGE);
   await writeFile(join(tmp, 'host', 'host.css'), HOST_CSS);
 
@@ -244,11 +253,91 @@ async function widgetPainted(page: Page): Promise<boolean> {
   });
 }
 
+const hostLocator = (page: Page) => page.locator('#feedback-widget-host');
+const toolbarOf = (page: Page) => hostLocator(page).getByRole('toolbar', { name: 'Markup tools' });
+
+async function openAnnotate(page: Page): Promise<string | null> {
+  if (!(await widgetPainted(page))) return 'widget renders no launcher yet (no UI in shadow root)';
+  await page.evaluate(() => window.Feedback?.open());
+  await expect(toolbarOf(page)).toBeVisible();
+  return null;
+}
+
+async function armTool(page: Page, name: string): Promise<void> {
+  const b = toolbarOf(page).getByRole('button', { name, exact: true });
+  await b.click();
+  await expect(b).toHaveAttribute('aria-pressed', 'true');
+}
+
+async function hoverCentre(page: Page, selector: string): Promise<void> {
+  const box = (await page.locator(selector).boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 3 });
+}
+
+/** One mark of every kind, with real mouse input; every popover closed again. */
+async function seedMarks(page: Page): Promise<void> {
+  const w = hostLocator(page);
+  const popover = w.locator('[data-part="popover"]');
+  await armTool(page, 'Pin');
+  await page.mouse.click(240, 330);
+  await expect(popover).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+
+  await armTool(page, 'Element');
+  await hoverCentre(page, '#book');
+  await expect(w.locator('[data-part="pick-outline"]')).toBeVisible();
+  const book = (await page.locator('#book').boundingBox())!;
+  await page.mouse.click(book.x + book.width / 2, book.y + book.height / 2);
+  await expect(popover).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+
+  await armTool(page, 'Box');
+  await page.mouse.move(420, 430);
+  await page.mouse.down();
+  await page.mouse.move(600, 560, { steps: 8 });
+  await page.mouse.up();
+  await expect(popover).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+
+  await armTool(page, 'Arrow');
+  await page.mouse.move(760, 380);
+  await page.mouse.down();
+  await page.mouse.move(900, 480, { steps: 8 });
+  await page.mouse.up();
+
+  await armTool(page, 'Draw');
+  await page.mouse.move(980, 420);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(980 + i * 10, 420 + Math.round(Math.sin(i / 2) * 30));
+  await page.mouse.up();
+
+  await armTool(page, 'Text');
+  await page.mouse.click(820, 260);
+  const input = w.locator('[data-part="text-input"]');
+  await expect(input).toBeFocused();
+  await input.fill('Too slow');
+  await page.keyboard.press('Enter');
+  await expect(input).toHaveCount(0);
+}
+
+async function openDescribe(page: Page): Promise<string | null> {
+  const r = await openAnnotate(page);
+  if (r) return r;
+  await seedMarks(page);
+  await toolbarOf(page).locator('[data-part="describe"]').click();
+  const title = hostLocator(page).locator('#fw-pn-title');
+  await expect(title).toBeFocused();
+  await title.fill('Price overlaps the photo');
+  return null;
+}
+
 /**
- * How to reach each scene on the real widget. Returns null when reached, else the skip reason.
- * Scenes without a driver are skipped until the UI PRD that lands them adds one here.
+ * How to reach each scene on the real widget. Returns null when reached, else the reason it is not reachable (a failure).
  */
-const DRIVERS: Partial<Record<SceneId, (page: Page) => Promise<string | null>>> = {
+const DRIVERS: Record<SceneId, (page: Page) => Promise<string | null>> = {
   idle: async (page) => ((await widgetPainted(page)) ? null : 'widget renders no launcher yet (no UI in shadow root)'),
   'launcher-hover': async (page) => {
     if (!(await widgetPainted(page))) return 'widget renders no launcher yet (no UI in shadow root)';
@@ -257,15 +346,75 @@ const DRIVERS: Partial<Record<SceneId, (page: Page) => Promise<string | null>>> 
     await launcher.hover();
     return null;
   },
-  'annotate-empty': async (page) => {
-    if (!(await widgetPainted(page))) return 'widget renders no launcher yet (no UI in shadow root)';
-    await page.evaluate(() => window.Feedback?.open());
-    const toolbar = page.locator('#feedback-widget-host').getByRole('toolbar');
-    try {
-      await toolbar.first().waitFor({ state: 'visible', timeout: 3000 });
-    } catch {
-      return 'Feedback.open() shows no toolbar yet (§5.3 not built)';
-    }
+  'annotate-empty': async (page) => openAnnotate(page),
+  annotate: async (page) => {
+    const r = await openAnnotate(page);
+    if (r) return r;
+    await seedMarks(page);
+    await armTool(page, 'Pin');
+    await page.mouse.move(640, 760);
+    return null;
+  },
+  pick: async (page) => {
+    const r = await openAnnotate(page);
+    if (r) return r;
+    await armTool(page, 'Element');
+    await hoverCentre(page, '#book');
+    await expect(hostLocator(page).locator('[data-part="pick-outline"]')).toBeVisible();
+    return null;
+  },
+  tools: async (page) => {
+    const r = await openAnnotate(page);
+    if (r) return r;
+    await seedMarks(page);
+    await hostLocator(page).getByRole('button', { name: 'Pin 1', exact: true }).click();
+    await expect(hostLocator(page).locator('[data-part="popover"]')).toBeVisible();
+    return null;
+  },
+  'tools-pick': async (page) => {
+    const r = await openAnnotate(page);
+    if (r) return r;
+    await seedMarks(page);
+    await armTool(page, 'Element');
+    await hoverCentre(page, '#search');
+    await expect(hostLocator(page).locator('[data-part="pick-outline"]')).toBeVisible();
+    return null;
+  },
+  describe: async (page) => {
+    const r = await openDescribe(page);
+    return r;
+  },
+  sending: async (page) => {
+    // Hold the submit request open: the panel stays in `sending`.
+    await page.route('**/host/submit', () => new Promise<void>(() => undefined));
+    const r = await openDescribe(page);
+    if (r) return r;
+    await hostLocator(page).locator('[data-part="send"]').click();
+    return null;
+  },
+  error: async (page) => {
+    await page.route('**/host/submit', (route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' }),
+    );
+    const r = await openDescribe(page);
+    if (r) return r;
+    await hostLocator(page).locator('[data-part="send"]').click();
+    return null;
+  },
+  discard: async (page) => {
+    const r = await openAnnotate(page);
+    if (r) return r;
+    await seedMarks(page);
+    await page.keyboard.press('Escape');
+    return null;
+  },
+  sent: async (page) => {
+    await page.route('**/host/submit', (route) =>
+      route.fulfill({ status: 201, contentType: 'application/json', body: '{"id":"FB-1042"}' }),
+    );
+    const r = await openDescribe(page);
+    if (r) return r;
+    await hostLocator(page).locator('[data-part="send"]').click();
     return null;
   },
 };
@@ -275,9 +424,16 @@ test.describe('widget shots (built widget on the stand-in host)', () => {
     test(scene.id, async ({ page }) => {
       await page.goto(`${base}/host/index.html`, { waitUntil: 'networkidle' });
       await expect(page.locator('#feedback-widget-host')).toHaveCount(1);
-      const drive = DRIVERS[scene.id];
-      const reason = drive ? await drive(page) : `no driver yet for "${scene.id}" (needs seeded marks/draft)`;
-      test.skip(reason !== null, `${scene.id}: ${reason}`);
+      const reason = await DRIVERS[scene.id](page);
+      expect(reason, `${scene.id}: widget scene is not reachable`).toBeNull();
+      if (scene.marker) {
+        await expect(
+          hostLocator(page).getByRole('button', { name: scene.marker, exact: true }).or(
+            // The send chip is "⌘↵" on macOS and "Ctrl↵" elsewhere; the label text is the same.
+            hostLocator(page).getByText(scene.marker.replace(/\s*⌘↵$/, ''), { exact: true }),
+          ).first(),
+        ).toBeVisible({ timeout: 10_000 });
+      }
       await waitForFonts(page);
       await settledShot(page, join(shotsDir, 'widget', `${scene.id}.png`));
     });

@@ -83,10 +83,12 @@ const $$ = (sel: string) => Array.from(host.querySelectorAll<HTMLElement>(sel));
 const hit = () => $('[data-part="marks-hit"]')!;
 const marks = () => api.marks as Mark[];
 
-function pointer(type: string, x: number, y: number, el: Element = hit()): void {
+function pointer(type: string, x: number, y: number, el: Element = hit()): PointerEvent {
+  const e = new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 1, button: 0 });
   act(() => {
-    el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: 1, button: 0 }));
+    el.dispatchEvent(e);
   });
+  return e;
 }
 function drag(from: [number, number], ...to: [number, number][]): void {
   pointer('pointerdown', ...from);
@@ -250,6 +252,13 @@ describe('draw (§5.4)', () => {
 
 describe('text (§5.4)', () => {
   const input = () => $<HTMLInputElement>('[data-part="text-input"]');
+
+  it('prevents the pointerdown default so the compatibility mousedown cannot blur the new input', () => {
+    mount({ tool: 'text' });
+    const e = pointer('pointerdown', 50, 80);
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(input());
+  });
 
   it('places a 240 px dashed input in the mark colour; Enter commits a chip', () => {
     mount({ tool: 'text', color: MARK_COLORS.green });

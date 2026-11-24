@@ -224,6 +224,35 @@ describe('capture surface', () => {
   });
 });
 
+describe('a popover opened by the current gesture', () => {
+  it('survives the same gesture\'s pointerup, mouseup and click', () => {
+    const child = vi.fn();
+    const dispatch = vi.fn();
+    const closed = state([{ type: 'open' }, { type: 'addMark', id: 'm1' }]);
+    const opened = state([{ type: 'open' }, { type: 'addMark', id: 'm1' }, { type: 'popover', id: 'm1' }]);
+    const tree = (st: ReturnType<typeof state>) => (
+      <CaptureChrome state={st} dispatch={dispatch} capture={capture()}>
+        <div class="marks" onClick={child} />
+      </CaptureChrome>
+    );
+    act(() => render(tree(closed), container));
+    const marks = q('.marks')!;
+    const fire = (type: string) => marks.dispatchEvent(new window.MouseEvent(type, { bubbles: true, cancelable: true }));
+    fire('pointerdown');
+    act(() => render(tree(opened), container)); // pointerdown opened the popover
+    fire('pointerup');
+    fire('mouseup');
+    fire('click');
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(child).toHaveBeenCalledTimes(1);
+    // The next gesture, with the popover still open, only closes it.
+    fire('pointerdown');
+    fire('click');
+    expect(dispatch).toHaveBeenCalledWith({ type: 'popover', id: null });
+    expect(child).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('hint chip', () => {
   it('matches §5.2: dot, SCREENSHOT label, tool hint, Esc chip', () => {
     mount({ state: opened() });

@@ -451,6 +451,9 @@ export function MarksLayer(props: MarksLayerProps) {
         create({ id: id(), kind: 'pin', color: col, x: p.x, y: p.y });
         return;
       case 'text':
+        // Suppress the compatibility mousedown: its default focus change would blur the input
+        // that is about to take focus, and an empty blur discards the draft.
+        e.preventDefault();
         setText({ x: p.x, y: p.y, color: col, value: '' });
         return;
       case 'box':

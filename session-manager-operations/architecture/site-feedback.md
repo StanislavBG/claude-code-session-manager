@@ -162,6 +162,23 @@ Auth errors common to owner routes: 401 `missing_token` / `invalid_token`; 403 `
 
 The executable spec is the test mock `src/main/lib/feedback-remote/__tests__/helpers/relayBoxesMock.cjs`.
 
+### Screenshot fonts
+
+The capture embeds the fonts the page uses from these sources, in order:
+
+1. Readable `document.styleSheets` — modern-screenshot does this itself.
+2. `document.adoptedStyleSheets`, except the widget's own sheet ([`fontSheets.ts`](../../web/feedback-widget/src/fontSheets.ts)).
+3. Cross-origin stylesheets it cannot read, re-fetched with CORS (`fontSheets.ts`).
+4. FontFace API faces, matched to the font files in Resource Timing by glyph widths ([`fontProbe.ts`](../../web/feedback-widget/src/fontProbe.ts)).
+
+Steps 2-4 share `FONT_BUDGET_MS` = 3000 ms inside `CAPTURE_TIMEOUT_MS` = 8000 ms ([`capture.ts`](../../web/feedback-widget/src/capture.ts)).
+
+It cannot embed faces loaded from a `data:` URL or from in-memory bytes, files whose fetch is blocked by
+CSP `connect-src` or missing CORS, or files no longer in Resource Timing (cleared buffer). A family
+left out logs one console warning starting `[feedback-widget] screenshot fonts not embedded`.
+
+**Host fix:** declare the faces with `@font-face` in a stylesheet the page can read, as Three Winds did (its commit `36dba90`).
+
 ### Bilko operational rules
 
 - **Bilko PRDs 1928-1938 implement this contract** (confirmed 2026-11-23); Bilko owns the relay code.

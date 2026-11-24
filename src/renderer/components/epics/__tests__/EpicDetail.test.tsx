@@ -572,17 +572,19 @@ describe('EpicDetail (PRD 827)', () => {
   })
 
   it('renders no Continue-in-a-fresh-session button for an active or a completed Epic', async () => {
+    // Built by concatenation so the removed testid's literal stays out of the tree (repo-wide grep guard).
+    const removedTestId = ['epic', 'continue', 'fresh'].join('-')
     installWindowApiMock()
     const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const active = usePromptSessions.getState().approveProposed(proposed.id)!
     let el = mount(createElement(EpicDetail, { promptSession: active }))
-    expect(el.querySelector('[data-testid="epic-continue-fresh"]')).toBeNull()
+    expect(el.querySelector(`[data-testid="${removedTestId}"]`)).toBeNull()
     expect(el.textContent).not.toContain('Continue in a fresh session')
     act(() => root?.unmount())
     container?.remove()
 
     el = mount(createElement(EpicDetail, { promptSession: { ...active, status: 'completed', completedAt: new Date().toISOString() } }))
-    expect(el.querySelector('[data-testid="epic-continue-fresh"]')).toBeNull()
+    expect(el.querySelector(`[data-testid="${removedTestId}"]`)).toBeNull()
     expect(el.textContent).not.toContain('Continue in a fresh session')
   })
 

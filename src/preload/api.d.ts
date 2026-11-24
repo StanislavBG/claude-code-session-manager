@@ -3568,8 +3568,8 @@ export interface SessionManagerAPI {
      *  Kind allowlist is enforced main-side (ipcSchemas.cjs) — this channel is
      *  append-only, no read/list IPC exists. */
     append: (
-      kind: 'epic_create' | 'epic_approve' | 'epic_complete' | 'epic_delete' | 'epic_resume' | 'epic_duplicate' | 'epic_draft_update' | 'epic_continue',
-      fields: { cwd: string; epicId: string; source: string; fromEpicId?: string },
+      kind: 'epic_create' | 'epic_approve' | 'epic_complete' | 'epic_delete' | 'epic_resume' | 'epic_duplicate' | 'epic_draft_update',
+      fields: { cwd: string; epicId: string; source: string },
     ) => Promise<{ ok: boolean }>;
   };
   git: {
@@ -3821,7 +3821,7 @@ export interface PromptSessionsCreateEpicPayload {
     text: string;
     source?: string;
     /** Which part of its AIM slot this entry is; absent on Epics minted before AIM sections. */
-    part?: 'persona' | 'grounding' | 'injection' | 'handoff' | 'reference' | 'job-type' | 'goal';
+    part?: 'persona' | 'grounding' | 'injection' | 'reference' | 'job-type' | 'goal';
   }>;
   /** Adopt an existing CLI session of this project instead of minting one. */
   restoreSessionId?: string;

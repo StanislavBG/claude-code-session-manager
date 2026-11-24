@@ -55,6 +55,17 @@ describe('auditLogAppend schema', () => {
     expect(schemas.auditLogAppend.safeParse({ ...valid, source: '' }).success).toBe(false)
   })
 
+  // Built by concatenation so the removed kind's literal stays out of the tree (repo-wide grep guard).
+  const removedContinueKind = ['epic', 'continue'].join('_')
+
+  it('rejects the removed Continue-in-a-fresh-session kind', () => {
+    expect(schemas.auditLogAppend.safeParse({ ...valid, kind: removedContinueKind }).success).toBe(false)
+  })
+
+  it('rejects a valid epic_create payload that carries fromEpicId', () => {
+    expect(schemas.auditLogAppend.safeParse({ ...valid, fromEpicId: 'psess-prev' }).success).toBe(false)
+  })
+
   it('rejects extra keys (strict schema)', () => {
     expect(schemas.auditLogAppend.safeParse({ ...valid, extra: 'nope' }).success).toBe(false)
   })

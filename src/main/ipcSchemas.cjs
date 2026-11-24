@@ -1311,15 +1311,12 @@ const AUDIT_LOG_KIND = z.enum([
   'epic_resume',
   'epic_duplicate',
   'epic_draft_update',
-  'epic_continue',
 ]);
 const auditLogAppend = z.object({
   kind: AUDIT_LOG_KIND,
   cwd: z.string().min(1).max(4096),
   epicId: z.string().min(1).max(256),
   source: z.string().min(1).max(256),
-  /** epic_continue only: the Epic the new session continues from. */
-  fromEpicId: z.string().min(1).max(256).optional(),
 }).strict();
 
 // ──────────────────────────────────────────── Exchanges (PRD 324 read path)

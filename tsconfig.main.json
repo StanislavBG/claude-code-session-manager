@@ -41,6 +41,7 @@
     "src/main/lib/mdDocRefs.cjs",
     "src/main/lib/process/procGroupRss.cjs",
     "src/main/lib/project-pages/playerBridge.cjs",
+    "src/main/lib/epic/artifactAdminRoutes.cjs",
     "src/main/scheduler/utilizationHold.cjs",
     "src/main/ipcSchemas.cjs"
   ]

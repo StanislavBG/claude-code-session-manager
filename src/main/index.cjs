@@ -1198,8 +1198,8 @@ ipcMain.handle('epicDelegationStats:get', validated(schemas.epicDelegationStatsG
 }));
 // Renderer Epic lifecycle trace (PRD 940) — append-only, no read/list IPC.
 // Kind allowlist enforced by schemas.auditLogAppend, not here.
-ipcMain.handle('auditLog:append', validated(schemas.auditLogAppend, async ({ kind, cwd, epicId, source, fromEpicId }) => {
-  appendAuditEvent(kind, { cwd, epicId, source, ...(fromEpicId ? { fromEpicId } : {}) });
+ipcMain.handle('auditLog:append', validated(schemas.auditLogAppend, async ({ kind, cwd, epicId, source }) => {
+  appendAuditEvent(kind, { cwd, epicId, source });
   return { ok: true };
 }));
 git.register(ipcMain);

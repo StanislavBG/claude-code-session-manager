@@ -417,6 +417,51 @@ export interface MacroJobStatus {
   finishedAt: string | null;
 }
 
+/** Kind of a published artifact (lib/epic/artifactStore.cjs KINDS). */
+export type ArtifactKind = 'video' | 'audio' | 'image' | 'doc' | 'data' | 'other';
+
+/** Who produced an artifact (artifactStore.cjs cleanProducer). */
+export interface ArtifactProducer {
+  epicId: string | null;
+  prdSlug: string | null;
+  sessionId: string | null;
+  taskId: string | null;
+}
+
+/** One artifacts:list row — a ledger entry + its owner folder + the owning Epic's title. */
+export interface ArtifactEntry {
+  /** File name inside `artifacts/<ownerId>/`. */
+  name: string;
+  title?: string | null;
+  kind?: ArtifactKind | string;
+  /** Bytes. */
+  size?: number;
+  sha256?: string;
+  /** ISO timestamp. */
+  createdAt?: string;
+  producer?: ArtifactProducer | null;
+  /** Epic id, or `_tasks/<task-id>` for Task-owned artifacts. */
+  ownerId: string;
+  epicTitle: string | null;
+}
+
+export type ArtifactsListResult =
+  | { ok: true; artifacts: ArtifactEntry[] }
+  | { ok: false; error: string };
+
+/** One artifacts:worktrees row. `aheadOfBase` = commits on `branch` not on the base, null when unknown. */
+export interface ArtifactWorktree {
+  epicId: string;
+  title: string | null;
+  path: string;
+  branch: string;
+  aheadOfBase: number | null;
+}
+
+export type ArtifactsWorktreesResult =
+  | { ok: true; worktrees: ArtifactWorktree[] }
+  | { ok: false; error: string };
+
 /** One user-defined sidebar HOT KEYS macro (macroLibrary.cjs). `projects` = absolute cwds or `'*'` (every project); a surface `'project-home'` macro is always `['*']` (only its generated artifacts are per project). */
 /** One "Needs you" item an outside app posted (main/lib/feedback-remote/needsYouStore.cjs StoredItemSchema). */
 export interface NeedsYouItem {
@@ -3259,6 +3304,13 @@ export interface SessionManagerAPI {
     inboxImage(p: { id: string; index: number }): Promise<
       { ok: true; dataUrl: string } | { ok: false; error: string }
     >;
+  };
+  /** File Explorer reads of a project's Artifacts store and unmerged Epic worktrees (lib/epic/artifactIpc.cjs). Read-only. */
+  artifacts: {
+    /** Ledger entries of every owner, newest first, each joined with its Epic's title (null for Tasks / unknown). */
+    list: (p: { cwd: string }) => Promise<ArtifactsListResult>;
+    /** Active Epics of `cwd` with an on-disk, git-registered worktree. */
+    worktrees: (p: { cwd: string }) => Promise<ArtifactsWorktreesResult>;
   };
   /** Website-feedback widgets + inbox (siteFeedbackIpc.cjs), one method per channel. */
   siteFeedback: {

@@ -7,6 +7,7 @@ import { useProjectsPrefs } from '../../state/projectsPrefs'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { FileTree, type FileTreeReveal } from '../layout/FileTree'
 import { EditorView } from './EditorView'
+import { ArtifactsSection } from './ArtifactsSection'
 import { Tooltip } from '../ui/Tooltip'
 import { compactPath } from '../../lib/compactPath'
 import { useHomeDir } from '../../lib/useHomeDir'
@@ -293,6 +294,8 @@ function ProjectsWorkspaceComponent() {
               {compactPath(rootCwd, homeDir)}
             </div>
             <div className="flex-1 min-h-0 overflow-auto">
+              {/* Project face only: the project's Artifacts store, above the tree (hidden when empty). */}
+              {navFace === 'project' && <ArtifactsSection cwd={rootCwd} onOpenFile={openInline} />}
               <FileTree
                 cwd={rootCwd}
                 activeTabId={activeTab?.id ?? null}

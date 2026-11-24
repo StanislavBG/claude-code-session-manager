@@ -7,10 +7,57 @@
  */
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+const { readJsonOrSync, writeJsonAtomicSync } = require('../util/atomicFs.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { isProvablyDead, DEFAULT_GRACE_MS } = require('./reservationExpiry.cjs');
 
 const investigations = new Map(); // slug -> { claimedAt, pid }
+
+/*
+ * Persisted machine runtime state (survives restarts), unlike the
+ * process-local reservations above: <schedulerHome>/scheduler-runtime-state.json.
+ * Today it holds one key, `environmentReportSince` — epoch ms of the first
+ * time environment enforcement was evaluated on this machine. The report-only
+ * week (schedulerConfig.environmentEnforcement) is measured from it. Written
+ * once, atomically, and never reset: a restart re-reads the same value.
+ */
+const RUNTIME_STATE_FILE = 'scheduler-runtime-state.json';
+
+function runtimeStatePath() {
+  const { schedulerHome } = require('./schedulerPaths.cjs');
+  return path.join(schedulerHome(), RUNTIME_STATE_FILE);
+}
+
+/** @type {Map<string, number>} statePath -> environmentReportSince (memo; the value never changes once written) */
+const reportSinceMemo = new Map();
+
+function validStamp(v) {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/**
+ * The persisted environmentReportSince (epoch ms), writing `now` first if no
+ * valid value is on disk yet. Never overwrites an existing value. Throws only
+ * if the state file cannot be written.
+ * @param {{ now?: number, statePath?: string }} [opts]
+ * @returns {number}
+ */
+function ensureEnvironmentReportSince({ now = Date.now(), statePath = runtimeStatePath() } = {}) {
+  const memo = reportSinceMemo.get(statePath);
+  if (memo) return memo;
+  const state = readJsonOrSync(statePath, null);
+  const obj = state && typeof state === 'object' && !Array.isArray(state) ? state : {};
+  let since = validStamp(obj.environmentReportSince);
+  if (!since) {
+    since = now;
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    writeJsonAtomicSync(statePath, { ...obj, environmentReportSince: since });
+  }
+  reportSinceMemo.set(statePath, since);
+  return since;
+}
 
 function investigationCount() { return investigations.size; }
 
@@ -47,7 +94,7 @@ function expireDeadInvestigations({ liveSlugs, pidAlive, now = Date.now(), grace
   return expired;
 }
 
-function __resetForTests() { investigations.clear(); }
+function __resetForTests() { investigations.clear(); reportSinceMemo.clear(); }
 
 module.exports = {
   investigationCount,
@@ -55,5 +102,7 @@ module.exports = {
   stampInvestigationPid,
   releaseInvestigation,
   expireDeadInvestigations,
+  runtimeStatePath,
+  ensureEnvironmentReportSince,
   __resetForTests,
 };

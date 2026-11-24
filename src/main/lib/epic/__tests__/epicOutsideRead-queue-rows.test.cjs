@@ -161,7 +161,7 @@ test('remote.listJobRows returns full deep-copied rows; listJobs projection is u
   expect(rows[0]).not.toBe(raw[0]);
   expect(rows[0].statusHistory).not.toBe(raw[0].statusHistory);
   const projected = await scheduler.remote.listJobs();
-  expect(Object.keys(projected[0]).sort()).toEqual(['agentType', 'cwd', 'epicId', 'phase', 'slug', 'sourcePromptId', 'status', 'title']);
+  expect(Object.keys(projected[0]).sort()).toEqual(['agentType', 'cancelled', 'cwd', 'epicId', 'phase', 'slug', 'sourcePromptId', 'status', 'title']);
 });
 
 test('a cancelled failed row does not block an otherwise verified Epic (listJobRows)', async () => {

@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * environmentEnforce.test.cjs — enforcement is the default (PRD 3805): a
+ * environmentEnforce.test.cjs — enforcement (PRD 3805; the scheduler default
+ * after a machine's report-only week, PRD 3942 / environmentReportWeek.test.cjs): a
  * sandbox-required environment without its OS sandbox is refused (never
  * downgraded to tool rules) and the scheduler parks it
  * 'environment_unavailable: <missing deps>'; the guard hook denies
@@ -36,12 +37,16 @@ function withEnv(key, value, fn) {
   }
 }
 
-describe('enforcement is the default', () => {
-  it("scheduler config defaults to 'enforce'; only an explicit 'report' opts out", () => {
-    expect(schedulerConfig.DEFAULT_ENVIRONMENT_ENFORCEMENT).toBe('enforce');
-    withEnv('SM_ENVIRONMENT_ENFORCEMENT', undefined, () => expect(schedulerConfig.environmentEnforcement()).toBe('enforce'));
-    withEnv('SM_ENVIRONMENT_ENFORCEMENT', 'bogus', () => expect(schedulerConfig.environmentEnforcement()).toBe('enforce'));
-    withEnv('SM_ENVIRONMENT_ENFORCEMENT', 'report', () => expect(schedulerConfig.environmentEnforcement()).toBe('report'));
+describe('enforcement after the report week', () => {
+  it("scheduler config defaults to 'report' on a fresh machine; 'enforce' only by env or after 7 days", () => {
+    const statePath = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'env-enf-')), 'scheduler-runtime-state.json');
+    const now = Date.now();
+    expect(schedulerConfig.DEFAULT_ENVIRONMENT_ENFORCEMENT).toBe('report');
+    withEnv('SM_ENVIRONMENT_ENFORCEMENT', undefined, () => expect(schedulerConfig.environmentEnforcement({ now, statePath })).toBe('report'));
+    withEnv('SM_ENVIRONMENT_ENFORCEMENT', 'bogus', () => expect(schedulerConfig.environmentEnforcement({ now, statePath })).toBe('report'));
+    withEnv('SM_ENVIRONMENT_ENFORCEMENT', 'enforce', () => expect(schedulerConfig.environmentEnforcement({ now, statePath })).toBe('enforce'));
+    withEnv('SM_ENVIRONMENT_ENFORCEMENT', undefined, () => expect(schedulerConfig.environmentEnforcement({ now: now + schedulerConfig.ENVIRONMENT_REPORT_WINDOW_MS, statePath })).toBe('enforce'));
+    withEnv('SM_ENVIRONMENT_ENFORCEMENT', 'report', () => expect(schedulerConfig.environmentEnforcement({ now: now + schedulerConfig.ENVIRONMENT_REPORT_WINDOW_MS, statePath })).toBe('report'));
   });
 });
 

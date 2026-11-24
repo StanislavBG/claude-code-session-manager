@@ -185,21 +185,49 @@ module.exports = {
   // Environment enforcement (jobSandboxPolicy.cjs + guard-tool-risk): what a
   // job's environment profile would block — OS sandbox required but
   // unavailable, WebFetch/WebSearch not allowed, host off the allow-list.
-  // 'enforce' (default since the report-only week ended, PRD 3805): a job
-  // whose environment needs the OS sandbox and cannot get it parks
-  // needs_review 'environment_unavailable: <missing deps>', and the hook
-  // denies WebFetch/WebSearch the environment disallows. 'report' is the
-  // opt-out: appends an 'environment_would_block' audit record and blocks
-  // nothing. Override with SM_ENVIRONMENT_ENFORCEMENT=report|enforce
-  // (anything else → 'enforce').
-  DEFAULT_ENVIRONMENT_ENFORCEMENT: 'enforce',
+  // 'report' (the default for a machine's first week, PRD 3942): appends an
+  // 'environment_would_block' audit record and blocks nothing. The week runs
+  // from environmentReportSince, persisted once in scheduler runtime state
+  // (schedulerRuntimeState.ensureEnvironmentReportSince) the first time this
+  // is evaluated; ENVIRONMENT_REPORT_WINDOW_MS later the machine switches to
+  // 'enforce' by itself: a job whose environment needs the OS sandbox and
+  // cannot get it parks needs_review 'environment_unavailable: <missing
+  // deps>', and the hook denies WebFetch/WebSearch the environment
+  // disallows. The readiness banner names the switch date and any missing
+  // packages. SM_ENVIRONMENT_ENFORCEMENT=report|enforce overrides both ways
+  // ('report' always wins); anything else follows the persisted week.
+  DEFAULT_ENVIRONMENT_ENFORCEMENT: 'report',
+  ENVIRONMENT_REPORT_WINDOW_MS: 7 * 24 * 60 * 60_000,
   environmentEnforcement,
+  environmentEnforcementStatus,
 };
 
-/** @returns {'report'|'enforce'} */
-function environmentEnforcement() {
+/**
+ * @param {{ now?: number, statePath?: string }} [opts]
+ * @returns {{ mode: 'report'|'enforce', source: 'env'|'report-week'|'unpersisted', reportSince: number|null, enforceFrom: number|null }}
+ */
+function environmentEnforcementStatus({ now = Date.now(), statePath } = {}) {
   const raw = String(process.env.SM_ENVIRONMENT_ENFORCEMENT || '').trim().toLowerCase();
-  return raw === 'report' ? 'report' : 'enforce';
+  if (raw === 'report') return { mode: 'report', source: 'env', reportSince: null, enforceFrom: null };
+  if (raw === 'enforce') return { mode: 'enforce', source: 'env', reportSince: null, enforceFrom: null };
+  let since;
+  try {
+    since = require('./schedulerRuntimeState.cjs').ensureEnvironmentReportSince({ now, ...(statePath ? { statePath } : {}) });
+  } catch {
+    // Cannot persist the start of the week: stay in the safe default rather
+    // than park every sandbox-required job.
+    return { mode: module.exports.DEFAULT_ENVIRONMENT_ENFORCEMENT, source: 'unpersisted', reportSince: null, enforceFrom: null };
+  }
+  const enforceFrom = since + module.exports.ENVIRONMENT_REPORT_WINDOW_MS;
+  return { mode: now >= enforceFrom ? 'enforce' : 'report', source: 'report-week', reportSince: since, enforceFrom };
+}
+
+/**
+ * @param {{ now?: number, statePath?: string }} [opts]
+ * @returns {'report'|'enforce'}
+ */
+function environmentEnforcement(opts) {
+  return environmentEnforcementStatus(opts).mode;
 }
 
 function quietMachineWaitMs() {

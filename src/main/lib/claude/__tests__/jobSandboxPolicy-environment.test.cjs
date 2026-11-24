@@ -8,6 +8,8 @@
  * Run: timeout 300 npx vitest run src/main/lib/claude/__tests__/jobSandboxPolicy-environment.test.cjs
  */
 
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const policy = require('../jobSandboxPolicy.cjs');
 const { BUILTIN_ENVIRONMENTS } = require('../environmentProfiles.cjs');
@@ -125,16 +127,19 @@ describe('profile-driven argv', () => {
 });
 
 describe('report-mode would-block records', () => {
-  it('scheduler config reads the mode: enforce by default, report only when set', () => {
+  it('scheduler config reads the mode: report on a fresh machine, env overrides both ways', () => {
     const prev = process.env.SM_ENVIRONMENT_ENFORCEMENT;
+    const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'env-mode-')), 'scheduler-runtime-state.json');
     try {
       delete process.env.SM_ENVIRONMENT_ENFORCEMENT;
-      expect(schedulerConfig.DEFAULT_ENVIRONMENT_ENFORCEMENT).toBe('enforce');
-      expect(schedulerConfig.environmentEnforcement()).toBe('enforce');
+      expect(schedulerConfig.DEFAULT_ENVIRONMENT_ENFORCEMENT).toBe('report');
+      expect(schedulerConfig.environmentEnforcement({ statePath })).toBe('report');
       process.env.SM_ENVIRONMENT_ENFORCEMENT = 'report';
-      expect(schedulerConfig.environmentEnforcement()).toBe('report');
+      expect(schedulerConfig.environmentEnforcement({ statePath })).toBe('report');
+      process.env.SM_ENVIRONMENT_ENFORCEMENT = 'enforce';
+      expect(schedulerConfig.environmentEnforcement({ statePath })).toBe('enforce');
       process.env.SM_ENVIRONMENT_ENFORCEMENT = 'bogus';
-      expect(schedulerConfig.environmentEnforcement()).toBe('enforce');
+      expect(schedulerConfig.environmentEnforcement({ statePath })).toBe('report');
     } finally {
       if (prev === undefined) delete process.env.SM_ENVIRONMENT_ENFORCEMENT;
       else process.env.SM_ENVIRONMENT_ENFORCEMENT = prev;

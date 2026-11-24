@@ -27,7 +27,7 @@ const { resolveProjectRoot } = require('../opsOwnership.cjs');
 const { nodeShellCommand } = require('../appRuntime.cjs');
 const { readJsonOrSync } = require('../util/atomicFs.cjs');
 const { sandboxDependencies, sandboxInstallHint } = require('../claude/jobSandboxPolicy.cjs');
-const { environmentEnforcement } = require('../scheduler/schedulerConfig.cjs');
+const { environmentEnforcementStatus } = require('../scheduler/schedulerConfig.cjs');
 
 const SCHEDULER_MCP_NAME = 'session-manager-scheduler';
 const DEV_PLUGIN_ENABLED_KEY = 'session-manager-dev@session-manager';
@@ -457,16 +457,24 @@ function whichOnPath(name) {
   return null;
 }
 
+/** A local-timezone calendar date, e.g. "Nov 30, 2026". */
+function formatLocalDate(ms) {
+  return new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 /**
- * Can headless jobs get the OS sandbox their environment requires? Under
- * 'enforce' (the default) a job whose environment needs it (dev-lead,
+ * Can headless jobs get the OS sandbox their environment requires? A machine
+ * runs a report-only week first (schedulerConfig.environmentEnforcementStatus,
+ * PRD 3942); from `enforceFrom` a job whose environment needs it (dev-lead,
  * validator) parks 'environment_unavailable: <missing>' when bwrap/socat
- * (linux) or sandbox-exec (macOS) is missing — so the banner names the
- * packages to install. Under 'report' mode it is never a failure.
- * `sandboxDeps` / `platform` / `mode` are injectable for tests.
- * @param {{ sandboxDeps?: { available: boolean, missing?: string[] }|null, platform?: string, mode?: string }} [opts]
+ * (linux) or sandbox-exec (macOS) is missing — so during the week the banner
+ * names the date enforcement starts and the packages to install, and under
+ * 'enforce' it is a failure. `sandboxDeps` / `platform` / `mode` /
+ * `enforceFrom` are injectable for tests; with no `mode` both come from the
+ * scheduler config.
+ * @param {{ sandboxDeps?: { available: boolean, missing?: string[] }|null, platform?: string, mode?: string, enforceFrom?: number|null }} [opts]
  */
-function checkJobSandbox({ sandboxDeps = null, platform = process.platform, mode } = {}) {
+function checkJobSandbox({ sandboxDeps = null, platform = process.platform, mode, enforceFrom = null } = {}) {
   const base = { id: 'job-sandbox', label: 'OS sandbox packages installed for headless jobs' };
   let deps = sandboxDeps;
   if (!deps) {
@@ -474,15 +482,32 @@ function checkJobSandbox({ sandboxDeps = null, platform = process.platform, mode
       deps = { available: false, missing: [`sandbox dependency probe failed: ${(e && e.message) || e}`] };
     }
   }
-  const effectiveMode = mode === 'report' || mode === 'enforce' ? mode : environmentEnforcement();
-  if (deps.available) return { ...base, ok: true, detail: 'OS sandbox dependencies present', fix: null };
+  let effectiveMode;
+  let from = enforceFrom;
+  if (mode === 'report' || mode === 'enforce') {
+    effectiveMode = mode;
+  } else {
+    const status = environmentEnforcementStatus();
+    effectiveMode = status.mode;
+    from = status.enforceFrom;
+  }
+  const date = effectiveMode === 'report' && typeof from === 'number' && Number.isFinite(from) ? formatLocalDate(from) : null;
+  if (deps.available) {
+    const detail = date
+      ? `OS sandbox dependencies present — report mode until enforcement starts ${date}`
+      : 'OS sandbox dependencies present';
+    return { ...base, ok: true, detail, fix: null };
+  }
   const missing = Array.isArray(deps.missing) && deps.missing.length ? deps.missing : ['unknown'];
   const hint = sandboxInstallHint({ platform, missing });
   const fix = hint.packages.length
-    ? `Install ${hint.packages.join(', ')}${hint.command ? ` (${hint.command})` : ''}, then restart Session Manager`
+    ? `Install ${hint.packages.join(', ')}${hint.command ? ` (${hint.command})` : ''}${date ? ` before ${date}` : ''}, then restart Session Manager`
     : `Run Session Manager on Linux (bubblewrap + socat) or macOS (sandbox-exec)`;
   if (effectiveMode === 'report') {
-    return { ...base, ok: true, warn: true, detail: `missing: ${missing.join(', ')} — report mode: jobs fall back to tool rules`, fix };
+    const detail = date
+      ? `missing: ${missing.join(', ')} — report mode until ${date}: jobs fall back to tool rules now; from ${date} headless dev-lead and validator jobs will park with environment_unavailable until installed`
+      : `missing: ${missing.join(', ')} — report mode: jobs fall back to tool rules`;
+    return { ...base, ok: true, warn: true, detail, fix };
   }
   return {
     ...base,

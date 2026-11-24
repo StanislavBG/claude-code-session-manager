@@ -482,7 +482,7 @@ describe('apiFontCss', () => {
     for (const p of probesMade) expect(fonts.has(p)).toBe(false);
   });
 
-  it('second pass only probes candidates the first pass left unmatched', async () => {
+  it('second pass probes every fetched file, including ones the first pass matched', async () => {
     const { apiFontCss } = await freshModule();
     const plain = pageFace({ family: 'Mix', weight: '400' });
     const heavy = pageFace({ family: 'Mix', weight: '900' });
@@ -497,7 +497,37 @@ describe('apiFontCss', () => {
     const out = await apiFontCss(new Set(['mix']), { doc, fetchBytes, measure });
     expect(out.cssText.match(/@font-face/g)).toHaveLength(2);
     const second = probesMade.filter((p) => p.desc.weight === '900');
-    expect(second.map((p) => fileId(p.bytes))).toEqual([5]);
+    expect(second.map((p) => fileId(p.bytes))).toEqual([7, 5]);
+  });
+
+  it('one variable file backing weights 400 and 700 embeds both faces, encoded once', async () => {
+    const { apiFontCss } = await freshModule();
+    const regular = pageFace({ family: 'One', weight: '400' });
+    const bold = pageFace({ family: 'One', weight: '700' });
+    const { doc, fonts } = fakeDoc([regular, bold]);
+    resourceNames = ['https://x.test/one-var.woff2'];
+    const fetchBytes = vi.fn(async () => fontBytes(8));
+    // The file draws its 700 instance only when the probe face says weight 700.
+    const measure = probeMeasure(
+      fonts,
+      { 'normal 400 normal 64px "One"': widthsA, 'normal 700 normal 64px "One"': widthsB },
+      { 8: (cp, desc) => (desc.weight === '700' ? widthsB(cp) : widthsA(cp)) },
+    );
+    const btoaSpy = vi.spyOn(globalThis, 'btoa');
+    const out = await apiFontCss(new Set(['one']), { doc, fetchBytes, measure });
+    expect(fetchBytes).toHaveBeenCalledTimes(1);
+    expect(btoaSpy).toHaveBeenCalledTimes(1);
+    const rules = out.cssText.split('\n').filter((r) => r.includes('@font-face'));
+    expect(rules).toHaveLength(2);
+    expect(rules.some((r) => r.includes('font-weight:400'))).toBe(true);
+    expect(rules.some((r) => r.includes('font-weight:700'))).toBe(true);
+    const srcs = rules.map((r) => /src:url\("([^"]+)"\)/.exec(r)?.[1]);
+    expect(srcs[0]).toMatch(/^data:font\/woff2;base64,/);
+    expect(srcs[1]).toBe(srcs[0]);
+    expect([...out.families]).toEqual(['one']);
+    const second = probesMade.filter((p) => p.desc.weight === '700');
+    expect(second.map((p) => fileId(p.bytes))).toEqual([8]);
+    for (const p of probesMade) expect(fonts.has(p)).toBe(false);
   });
 
   it('fetches nothing with no requested families or no loaded API faces', async () => {

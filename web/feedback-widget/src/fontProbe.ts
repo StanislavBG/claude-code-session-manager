@@ -382,11 +382,17 @@ export async function apiFontCss(
 
     const infos = new Map<FaceInfo, FontFace>();
     for (const f of pending) infos.set(faceInfo(f), f);
+    // One file can back several faces (a variable font registered per weight): encode once.
+    const dataUrlByUrl = new Map<string, string>();
     const record = (info: FaceInfo, url: string) => {
       const f = infos.get(info);
       const bytes = bytesByUrl.get(url);
       if (!f || !bytes) return;
-      const dataUrl = bytesToDataUrl(bytes);
+      let dataUrl = dataUrlByUrl.get(url);
+      if (dataUrl === undefined) {
+        dataUrl = bytesToDataUrl(bytes);
+        dataUrlByUrl.set(url, dataUrl);
+      }
       faceCache.set(f, { dataUrl });
       emit(f, dataUrl);
     };
@@ -398,20 +404,15 @@ export async function apiFontCss(
     for (const [info, url] of first) record(info, url);
     if (Date.now() >= deadline) return result();
 
-    // Pass 2 (variable fonts): unmatched faces vs unmatched files, probes copy the face's
-    // weight, style and stretch so the file renders at the same axis position.
-    const usedUrls = new Set(first.values());
-    const restFiles = files.filter((c) => !usedUrls.has(c.url));
+    // Pass 2 (variable fonts): unmatched faces vs every fetched file — a file pass 1 matched
+    // may still back another face (one variable file, several weights). Probes copy the
+    // face's weight, style and stretch so the file renders at the same axis position.
     const unmatched = [...infos.keys()].filter((info) => !first.has(info));
     const missed: FaceInfo[] = [];
     for (const info of unmatched) {
-      if (!restFiles.length) {
-        missed.push(info);
-        continue;
-      }
       if (Date.now() >= deadline) return result();
       const f = infos.get(info)!;
-      const probesFor = await registerProbes(restFiles, {
+      const probesFor = await registerProbes(files, {
         weight: String(f.weight ?? 'normal'),
         style: String(f.style ?? 'normal'),
         stretch: String(f.stretch ?? 'normal'),

@@ -349,13 +349,16 @@ function fmtMin(ms) {
 /**
  * ' (<N> min left before the job deadline, <M> min kept in reserve)' when
  * env.SM_SCHEDULER_JOB_DEADLINE_MS is set, else ''. The one suffix both the batch time-limit
- * error and the voice-lane timeout use, so the two messages say the same thing.
+ * error and the voice-lane timeout use, so the two messages say the same thing. reserveMs,
+ * when given, is printed as the reserve kept (the lane fixes it when its wait starts) instead
+ * of speakReserveMs(time left).
  */
-function deadlineContext({ now = Date.now(), env = process.env } = {}) {
+function deadlineContext({ now = Date.now(), env = process.env, reserveMs } = {}) {
   const deadline = jobDeadline(env);
   if (deadline === null) return '';
   const leftMs = deadline - now;
-  return ` (${fmtMin(leftMs)} min left before the job deadline, ${fmtMin(speakReserveMs(leftMs))} min kept in reserve)`;
+  const kept = reserveMs === undefined || reserveMs === null ? speakReserveMs(leftMs) : reserveMs;
+  return ` (${fmtMin(leftMs)} min left before the job deadline, ${fmtMin(kept)} min kept in reserve)`;
 }
 
 /**
@@ -378,8 +381,10 @@ function lanePositionLine(pos) {
 
 /**
  * Run one synthesis call `fn` (-> {ok, error?}) inside the voice lane of rv's voice.
- * ctx: {root, kind, label, onLanePosition?}. Always leaves the lane; the usage line
- * carries ok, audioSeconds (sum over `outs`' WAV headers) and wallMs.
+ * ctx: {root, kind, label, onLanePosition?, clock?, waitTurn?} (clock / waitTurn are test
+ * seams, default Date.now / voiceLane.waitTurn). Always leaves the lane; the usage line
+ * carries ok, audioSeconds (sum over `outs`' WAV headers) and wallMs. A lane-wait failure
+ * names the minutes left when it failed and the reserve fixed when the wait started.
  */
 function inLane(ctx, rv, outs, fn) {
   const lane = require('./voiceLane.cjs');
@@ -388,10 +393,14 @@ function inLane(ctx, rv, outs, fn) {
   let granted = false;
   let ok = false;
   try {
-    const now = Date.now();
+    const clock = typeof ctx.clock === 'function' ? ctx.clock : Date.now;
+    const waitTurn = typeof ctx.waitTurn === 'function' ? ctx.waitTurn : lane.waitTurn;
+    const now = clock();
     const env = process.env;
     const left = laneWaitMs({ now, env });
-    const w = lane.waitTurn(ticket, {
+    const deadline = jobDeadline(env);
+    const reserveMs = deadline === null ? undefined : speakReserveMs(deadline - now);
+    const w = waitTurn(ticket, {
       timeoutMs: Math.max(1, left),
       onPosition: (pos) => {
         if (pos.position > 0) process.stderr.write(`${lanePositionLine(pos)}\n`);
@@ -399,7 +408,7 @@ function inLane(ctx, rv, outs, fn) {
       },
     });
     if (!w.ok) {
-      return { ok: false, error: `${w.error}${deadlineContext({ now, env })}` };
+      return { ok: false, error: `${w.error}${deadlineContext({ now: clock(), env, reserveMs })}` };
     }
     granted = true;
     const r = fn();
@@ -696,6 +705,7 @@ module.exports = {
   deadlineContext,
   speakReserveMs,
   lanePositionLine,
+  inLane,
   LANE_WAIT_DEFAULT_MS,
   validateCharacterJson,
   validateCharacterJs,

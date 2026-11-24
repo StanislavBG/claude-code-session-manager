@@ -974,6 +974,36 @@ test.skipIf(process.platform === 'win32')('voice lane: a wait past the job deadl
   expect(lane.laneSnapshot().heavy).toEqual([]);
 });
 
+test('inLane: a wait that runs out while waiting names the minutes left at failure and the reserve kept', () => {
+  const T = 1_000_000_000;
+  const reads = [T, T + 30 * 60000];
+  const clock = () => (reads.length > 1 ? reads.shift() : reads[0]);
+  const prev = process.env.SM_SCHEDULER_JOB_DEADLINE_MS;
+  process.env.SM_SCHEDULER_JOB_DEADLINE_MS = String(T + 40 * 60000);
+  let waitedMs = null;
+  let ran = false;
+  try {
+    const rv = { voiceId: 'stub-voice', voice: { engine: 'command' }, entry: null };
+    const waitTurn = (_ticket, { timeoutMs }) => { waitedMs = timeoutMs; return { ok: false, error: 'voice lane: timed out' }; };
+    const r = charMod.inLane({ root: LANE_HOME, kind: 'video', label: 'video stub', clock, waitTurn }, rv, [], () => { ran = true; return { ok: true }; });
+    expect(ran).toBe(false);
+    expect(waitedMs).toBe(30 * 60000);
+    expect(r.ok).toBe(false);
+    expect(r.error.endsWith(' (10 min left before the job deadline, 10 min kept in reserve)')).toBe(true);
+    expect(r.error).toBe('voice lane: timed out (10 min left before the job deadline, 10 min kept in reserve)');
+  } finally {
+    if (prev === undefined) delete process.env.SM_SCHEDULER_JOB_DEADLINE_MS; else process.env.SM_SCHEDULER_JOB_DEADLINE_MS = prev;
+  }
+  expect(Object.values(lane.laneSnapshot()).flat()).toEqual([]);
+});
+
+test('deadlineContext: an explicit reserveMs is printed as the reserve kept', () => {
+  const now = 1_000_000_000;
+  const env = { SM_SCHEDULER_JOB_DEADLINE_MS: String(now + 10 * 60000) };
+  expect(charMod.deadlineContext({ now, env, reserveMs: 10 * 60000 })).toBe(' (10 min left before the job deadline, 10 min kept in reserve)');
+  expect(charMod.deadlineContext({ now, env })).toBe(' (10 min left before the job deadline, 2.5 min kept in reserve)');
+});
+
 test.skipIf(process.platform === 'win32')('voice lane: two concurrent speak CLI runs with a heavy voice never overlap; the second waits at position 1', async () => {
   const { spawn, spawnSync } = require('node:child_process');
   const log = path.join(LANE_HOME, `overlap-${Date.now()}.jsonl`);

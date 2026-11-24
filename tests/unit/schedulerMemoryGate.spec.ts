@@ -1,91 +1,119 @@
 /**
- * Unit tests for memoryLimitedBatchSize — the pure helper that clamps the
- * scheduler's launch batch when available system memory is low.
+ * Unit tests for the scheduler's memory launch gate — loadGate.measuredMemoryGate
+ * with an EMPTY sample store, whose too-few-samples fallback is the old flat rule:
+ * every job (running or new) reserves 2,500 MB, no spike buffer. Plus
+ * availableForJobs, the host-reserve guard applied before the gate.
  *
  * Incident coverage: 2026-06-10 OOM killed Electron when 5 concurrent claude -p
- * jobs exhausted 23 GB RAM. Gate ensures each new slot has at least
- * MIN_FREE_MB_PER_JOB (1500 MB) headroom.
+ * jobs exhausted 23 GB RAM. The gate ensures each new slot has headroom.
+ * (PRD 4019 replaced the flat helper with measured reservations; PRD 4081 moved
+ * these cases onto the measured gate's fallback.)
  */
 import { describe, it, expect } from 'vitest'
 import { createRequire } from 'node:module'
+import os from 'node:os'
+import path from 'node:path'
 
 const require = createRequire(import.meta.url)
-const { memoryLimitedBatchSize, availableForJobs } = require('../../src/main/scheduler.cjs') as {
-  memoryLimitedBatchSize: (availableMb: number, minPerJob: number, runningCount: number, batchLen: number, consumedMb?: number) => number
+const { availableForJobs } = require('../../src/main/scheduler.cjs') as {
   availableForJobs: (availableMb: number, reservedHostMb: number) => number
 }
+const { measuredMemoryGate } = require('../../src/main/lib/scheduler/loadGate.cjs') as {
+  measuredMemoryGate: (args: {
+    jobBudgetMb: number
+    running?: Array<{ agentType: string; rssMb: number }>
+    batch?: Array<{ agentType: string }>
+    stats: unknown
+  }) => { allowed: number; measured: boolean }
+}
+const { createJobMemoryStats } = require('../../src/main/lib/scheduler/jobMemoryStats.cjs') as {
+  createJobMemoryStats: (deps: { storePath: string; now: () => number }) => unknown
+}
 
-const MIN = 1500
+// A store path that never exists → zero samples → fallback reservations.
+const emptyStats = createJobMemoryStats({
+  storePath: path.join(os.tmpdir(), `sm-empty-mem-store-${process.pid}-${Date.now()}`, 'none.jsonl'),
+  now: () => 1,
+})
 
-describe('memoryLimitedBatchSize', () => {
+/** Jobs admitted from a batch of `batchLen`, with `runningCount` jobs whose RSS sums to `consumedMb`. */
+function gate(availableMb: number, runningCount: number, batchLen: number, consumedMb = 0): number {
+  const perJobRss = runningCount > 0 ? Math.max(0, consumedMb) / runningCount : 0
+  const result = measuredMemoryGate({
+    jobBudgetMb: availableMb,
+    running: Array.from({ length: runningCount }, () => ({ agentType: 'dev-lead', rssMb: perJobRss })),
+    batch: Array.from({ length: batchLen }, () => ({ agentType: 'dev-lead' })),
+    stats: emptyStats,
+  })
+  expect(result.measured).toBe(false)
+  return result.allowed
+}
+
+describe('measuredMemoryGate fallback (empty store = flat 2,500 MB/job)', () => {
   it('passes full batch when memory is ample', () => {
     // 0 running, 3 in batch, 20 GB free → allow all 3
-    expect(memoryLimitedBatchSize(20_000, MIN, 0, 3)).toBe(3)
+    expect(gate(20_000, 0, 3)).toBe(3)
   })
 
   it('passes full batch when availableMb is Infinity (non-Linux / fail-open)', () => {
-    expect(memoryLimitedBatchSize(Infinity, MIN, 0, 5)).toBe(5)
+    expect(gate(Infinity, 0, 5)).toBe(5)
   })
 
   it('allows 0 when even 1 job would exceed threshold (0 running)', () => {
-    // need MIN*1 = 1500 MB; only 1000 available
-    expect(memoryLimitedBatchSize(1000, MIN, 0, 3)).toBe(0)
+    // need 2500 MB; only 1000 available
+    expect(gate(1000, 0, 3)).toBe(0)
   })
 
   it('allows 0 when running jobs already consume headroom', () => {
-    // 3 running, need 1500*4 = 6000 for +1; only 5999 available
-    expect(memoryLimitedBatchSize(5999, MIN, 3, 2)).toBe(0)
+    // 3 running, need 2500*4 = 10000 for +1; only 9999 available
+    expect(gate(9999, 3, 2)).toBe(0)
   })
 
   it('clamps batch from 3 to 1 when memory is tight', () => {
-    // 0 running; need 1500*3=4500 for 3 jobs, 1500*2=3000 for 2, 1500*1=1500 for 1
-    // available=2000 → allows 1 (2000 >= 1500*1), not 2 (2000 < 1500*2)
-    expect(memoryLimitedBatchSize(2000, MIN, 0, 3)).toBe(1)
+    // 0 running; 1 job needs 2500, 2 need 5000 → 3333 allows 1
+    expect(gate(3333, 0, 3)).toBe(1)
   })
 
   it('clamps batch from 2 to 1 when 1 job is already running', () => {
-    // 1 running; need 1500*2=3000 for 1 more, 1500*3=4500 for 2 more
-    // available=3500 → allows 1 (3500 >= 3000), not 2 (3500 < 4500)
-    expect(memoryLimitedBatchSize(3500, MIN, 1, 2)).toBe(1)
+    // 1 running; +1 needs 5000, +2 needs 7500 → 5833 allows 1
+    expect(gate(5833, 1, 2)).toBe(1)
   })
 
   it('passes batch of 0 unchanged (no-op)', () => {
-    expect(memoryLimitedBatchSize(1000, MIN, 0, 0)).toBe(0)
+    expect(gate(1000, 0, 0)).toBe(0)
   })
 
-  it('allows exactly at boundary (available === minPerJob * slots)', () => {
-    // 0 running, batch=2; need 3000; available=3000 → allows 2
-    expect(memoryLimitedBatchSize(3000, MIN, 0, 2)).toBe(2)
+  it('allows exactly at boundary (available === 2500 * slots)', () => {
+    // 0 running, batch=2; need 5000; available=5000 → allows 2
+    expect(gate(5000, 0, 2)).toBe(2)
   })
 
   it('one below boundary is clamped', () => {
-    expect(memoryLimitedBatchSize(2999, MIN, 0, 2)).toBe(1)
+    expect(gate(4999, 0, 2)).toBe(1)
   })
 })
 
-describe('memoryLimitedBatchSize consumedMb credit', () => {
-  const M = 2500
-
-  it('(a) 2 running with consumedMb 0 equals the old 4-arg result', () => {
-    for (const avail of [4000, 7500, 9999, 10_000, 12_500]) {
-      expect(memoryLimitedBatchSize(avail, M, 2, 3, 0)).toBe(memoryLimitedBatchSize(avail, M, 2, 3))
+describe('measuredMemoryGate fallback running-RSS credit', () => {
+  it('(a) 2 running with consumedMb 0 needs the full 2500 per running job', () => {
+    for (const [avail, want] of [[4000, 0], [7500, 1], [9999, 1], [10_000, 2], [12_500, 3]]) {
+      expect(gate(avail, 2, 3, 0)).toBe(want)
     }
   })
 
   it('(b) 1 running with consumedMb 2500 behaves like 0 running', () => {
     for (const avail of [1000, 2500, 4999, 5000, 7500]) {
-      expect(memoryLimitedBatchSize(avail, M, 1, 3, 2500)).toBe(memoryLimitedBatchSize(avail, M, 0, 3))
+      expect(gate(avail, 1, 3, 2500)).toBe(gate(avail, 0, 3))
     }
   })
 
   it('(c) oversized consumedMb never admits more than 0-running would', () => {
     for (const avail of [0, 2499, 2500, 5000, 7500]) {
-      expect(memoryLimitedBatchSize(avail, M, 1, 4, 99_999)).toBeLessThanOrEqual(memoryLimitedBatchSize(avail, M, 0, 4))
+      expect(gate(avail, 1, 4, 99_999)).toBeLessThanOrEqual(gate(avail, 0, 4))
     }
   })
 
   it('ignores negative consumedMb', () => {
-    expect(memoryLimitedBatchSize(2500, M, 1, 2, -5000)).toBe(memoryLimitedBatchSize(2500, M, 1, 2))
+    expect(gate(2500, 1, 2, -5000)).toBe(gate(2500, 1, 2))
   })
 })
 
@@ -102,7 +130,7 @@ describe('availableForJobs', () => {
   it('floors at 0 when MemAvailable is below the reserve', () => {
     // host already starved → 0 budget → gate defers all jobs
     expect(availableForJobs(2038, RESERVE)).toBe(0)
-    expect(memoryLimitedBatchSize(availableForJobs(2038, RESERVE), MIN, 0, 3)).toBe(0)
+    expect(gate(availableForJobs(2038, RESERVE), 0, 3)).toBe(0)
   })
 
   it('fails open (Infinity) on non-Linux where MemAvailable is unknown', () => {
@@ -110,10 +138,9 @@ describe('availableForJobs', () => {
   })
 
   it('composed gate: 3 GB reserve + 2.5 GB/job needs ~5.5 GB free to start one job', () => {
-    const MIN_JOB = 2500
     // 5000 MB available → 2000 after reserve → 0 jobs (need 2500 for one)
-    expect(memoryLimitedBatchSize(availableForJobs(5000, RESERVE), MIN_JOB, 0, 2)).toBe(0)
+    expect(gate(availableForJobs(5000, RESERVE), 0, 2)).toBe(0)
     // 5600 MB available → 2600 after reserve → exactly 1 job
-    expect(memoryLimitedBatchSize(availableForJobs(5600, RESERVE), MIN_JOB, 0, 2)).toBe(1)
+    expect(gate(availableForJobs(5600, RESERVE), 0, 2)).toBe(1)
   })
 })

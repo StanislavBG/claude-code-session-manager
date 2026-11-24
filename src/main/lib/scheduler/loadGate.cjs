@@ -3,8 +3,8 @@
 /**
  * loadGate.cjs — CPU-load launch gate for the scheduler (PRD 1085).
  *
- * The scheduler already gates launches on free memory (scheduler.cjs's
- * memoryLimitedBatchSize) and on a static per-project cap
+ * The scheduler already gates launches on free memory (measuredMemoryGate
+ * below, PRD 4019) and on a static per-project cap
  * (schedulerConfig.projectJobCap). Neither sees CPU. Observed 2026-09-01 on
  * starry-night-ships: 4 concurrent executors each running a Godot test
  * battery under its own Xvfb, loadavg 12.95 on 14 cores. Under that

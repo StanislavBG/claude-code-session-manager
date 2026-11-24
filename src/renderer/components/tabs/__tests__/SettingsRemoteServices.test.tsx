@@ -1,0 +1,204 @@
+// @vitest-environment jsdom
+import { createElement } from 'react'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { createRoot, type Root } from 'react-dom/client'
+import { act } from 'react-dom/test-utils'
+import { SettingsRemoteServices, SERVICE_TOOLS } from '../SettingsRemoteServices'
+import { useToast } from '../../../state/toast'
+import { useSessions } from '../../../state/sessions'
+import type { WebRemoteServicesListResult } from '../../../../preload/api'
+
+let container: HTMLDivElement | null = null
+let root: Root | null = null
+let list: WebRemoteServicesListResult
+let api: Record<string, ReturnType<typeof vi.fn>>
+let clipboard: ReturnType<typeof vi.fn>
+
+const service = {
+  serviceId: 'svc-1', name: 'Kiln', homeCwd: '/home/u/Self', scope: [...SERVICE_TOOLS],
+  relayClientId: 'rc-1', pairedAt: 1_700_000_000_000, lastSeenAt: 1_700_000_000_000,
+}
+const pendingEntry = {
+  pairingId: 'pair-1', name: 'Kiln', homeCwd: '/home/u/Self', scope: [...SERVICE_TOOLS],
+  createdAt: Date.now(), expiresAt: Date.now() + 300_000,
+}
+
+async function flush() {
+  for (let i = 0; i < 5; i++) await Promise.resolve()
+}
+
+async function mount(props: { enabled?: boolean; hasDevice?: boolean } = {}) {
+  container = document.createElement('div')
+  document.body.appendChild(container)
+  root = createRoot(container)
+  await act(async () => {
+    root!.render(createElement(SettingsRemoteServices, { enabled: props.enabled ?? true, hasDevice: props.hasDevice ?? true }))
+    await flush()
+  })
+}
+
+const q = (id: string) => container!.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+const qa = (id: string) => container!.querySelectorAll(`[data-testid="${id}"]`)
+const click = async (el: HTMLElement | null) => {
+  expect(el).not.toBeNull()
+  await act(async () => {
+    el!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+  })
+}
+const type = async (el: HTMLElement | null, value: string) => {
+  const input = el as HTMLInputElement
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+  await act(async () => {
+    setter.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+  })
+}
+const lastToast = () => useToast.getState().toasts.at(-1)
+
+async function openFormAndStart(name = 'Kiln') {
+  await click(q('remote-service-pair'))
+  await type(q('remote-service-name'), name)
+  await click(q('remote-service-start'))
+}
+
+beforeEach(() => {
+  list = { ok: true, services: [], pending: [], relayOrphans: [] }
+  api = {
+    servicesList: vi.fn(async () => list),
+    servicePairStart: vi.fn(async () => ({
+      ok: true, code: 'ABCD1234', pairingId: 'pair-1', codeExpiresAt: Date.now() + 5 * 60 * 1000, deviceId: 'dev12345abcdef',
+    })),
+    serviceConfirmSas: vi.fn(async () => ({ ok: true, service })),
+    serviceRevoke: vi.fn(async () => ({ ok: true, relayRevoked: true })),
+    relayClientRevoke: vi.fn(async () => ({ ok: true })),
+  }
+  clipboard = vi.fn(async () => ({ ok: true }))
+  ;(window as unknown as { api: unknown }).api = { webRemote: api, clipboard: { writeText: clipboard } }
+  useToast.setState({ toasts: [], history: [], unreadCount: 0 })
+  useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/u/Self' }, { id: 't2', cwd: '/home/u/Other' }] as never })
+})
+
+afterEach(() => {
+  act(() => root?.unmount())
+  container?.remove()
+  container = null
+  root = null
+  vi.clearAllMocks()
+})
+
+describe('SettingsRemoteServices', () => {
+  it('is collapsed by default: one Pair a service… button, no form', async () => {
+    await mount()
+    expect(q('remote-service-pair')?.textContent).toContain('Pair a service…')
+    expect(q('remote-service-form')).toBeNull()
+    expect(q('remote-service-code')).toBeNull()
+  })
+
+  it('opens a form with a 64-char name, a home project picker and all six tools ticked', async () => {
+    await mount()
+    await click(q('remote-service-pair'))
+    expect(q('remote-service-form')).not.toBeNull()
+    expect((q('remote-service-name') as HTMLInputElement).maxLength).toBe(64)
+    const select = q('remote-service-home') as HTMLSelectElement
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['/home/u/Self', '/home/u/Other'])
+    expect(SERVICE_TOOLS).toHaveLength(6)
+    for (const tool of SERVICE_TOOLS) {
+      expect((q(`remote-service-scope-${tool}`) as HTMLInputElement).checked).toBe(true)
+    }
+    await click(q('remote-service-scope-macro_run'))
+    await type(q('remote-service-name'), 'Kiln')
+    await click(q('remote-service-start'))
+    expect(api.servicePairStart).toHaveBeenCalledWith({
+      name: 'Kiln', homeCwd: '/home/u/Self', scope: SERVICE_TOOLS.filter((t) => t !== 'macro_run'),
+    })
+  })
+
+  it('shows the code with a 5-minute countdown and copies the pair command', async () => {
+    await mount()
+    await openFormAndStart()
+    expect(q('remote-service-code')?.textContent).toBe('ABCD1234')
+    expect(q('remote-service-countdown')?.textContent).toMatch(/expires in (5:00|4:5\d)/)
+    await click(q('remote-service-copy'))
+    expect(clipboard).toHaveBeenCalledTimes(1)
+    const cmd = clipboard.mock.calls[0][0] as string
+    expect(cmd).toMatch(/^npx claude-code-session-manager service pair --code ABCD1234 --device dev12345 --name Kiln --state-dir \S+$/)
+  })
+
+  it.each([
+    ['relay_unsupported', 'The bilko.run relay does not accept services yet'],
+    ['device_token_invalid', 'Re-pair this desktop with the phone first'],
+    ['rate_limited', 'Too many codes this hour'],
+  ])('shows %s inline', async (error, text) => {
+    api.servicePairStart.mockResolvedValueOnce({ ok: false, error })
+    await mount()
+    await openFormAndStart()
+    expect(q('remote-service-error')?.textContent).toBe(text)
+    expect(q('remote-service-code')).toBeNull()
+    expect(useToast.getState().toasts).toHaveLength(0)
+  })
+
+  it('routes any other error to an error toast', async () => {
+    api.servicePairStart.mockResolvedValueOnce({ ok: false, error: 'boom' })
+    await mount()
+    await openFormAndStart()
+    expect(q('remote-service-error')).toBeNull()
+    expect(lastToast()?.kind).toBe('error')
+    expect(lastToast()?.message).toContain('boom')
+  })
+
+  it('empty state renders no list headings or rows', async () => {
+    await mount()
+    expect(container!.textContent).not.toContain('Paired services')
+    expect(container!.textContent).not.toContain('Relay clients without a service')
+    expect(qa('remote-service-row')).toHaveLength(0)
+    expect(qa('remote-relay-orphan-row')).toHaveLength(0)
+  })
+
+  it('is disabled with an explanation while Web Remote is off or no device is paired', async () => {
+    list = { ok: true, services: [service], pending: [], relayOrphans: [] }
+    await mount({ enabled: false })
+    expect((q('remote-service-pair') as HTMLButtonElement).disabled).toBe(true)
+    expect(q('remote-service-disabled')?.textContent).toContain('Allow remote control from the web')
+    expect(api.servicesList).not.toHaveBeenCalled()
+    act(() => root?.unmount())
+    container?.remove()
+    await mount({ hasDevice: false })
+    expect((q('remote-service-pair') as HTMLButtonElement).disabled).toBe(true)
+    expect(q('remote-service-disabled')?.textContent).toContain('Pair a device')
+  })
+
+  it('confirms a pending SAS and Deny hides it', async () => {
+    list = { ok: true, services: [], pending: [pendingEntry], relayOrphans: [] }
+    await mount()
+    expect((q('remote-service-sas-confirm') as HTMLButtonElement).disabled).toBe(true)
+    await type(q('remote-service-sas-input'), '123456')
+    await click(q('remote-service-sas-confirm'))
+    expect(api.serviceConfirmSas).toHaveBeenCalledWith('pair-1', '123456')
+    await click(q('remote-service-sas-deny'))
+    expect(q('remote-service-sas-confirm')).toBeNull()
+  })
+
+  it('lists paired services and revokes one behind a confirm', async () => {
+    list = { ok: true, services: [service], pending: [], relayOrphans: [] }
+    await mount()
+    expect(qa('remote-service-row')).toHaveLength(1)
+    expect(container!.textContent).toContain('Paired services')
+    await click(q('remote-service-revoke'))
+    expect(api.serviceRevoke).not.toHaveBeenCalled()
+    await click(q('remote-service-revoke-confirm'))
+    expect(api.serviceRevoke).toHaveBeenCalledWith('svc-1')
+  })
+
+  it('lists relay orphans and revokes one behind a confirm', async () => {
+    list = { ok: true, services: [], pending: [], relayOrphans: [{ clientId: 'rc-9', clientName: 'old kiln', issuedAt: null }] }
+    await mount()
+    expect(qa('remote-relay-orphan-row')).toHaveLength(1)
+    expect(container!.textContent).not.toContain('Paired services')
+    await click(q('remote-relay-orphan-revoke'))
+    expect(api.relayClientRevoke).not.toHaveBeenCalled()
+    await click(q('remote-relay-orphan-revoke-confirm'))
+    expect(api.relayClientRevoke).toHaveBeenCalledWith('rc-9')
+  })
+})

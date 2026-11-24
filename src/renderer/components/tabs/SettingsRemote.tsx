@@ -5,6 +5,7 @@ import { Badge } from '../ui/Badge'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { SectionLabel, PillButton, RemoteCard, RevokeButton, SasBanner, EmptyState } from '../remote/remoteUi'
 import type { WebRemoteDevice, WebRemoteStatus } from '../../../preload/api'
+import { SettingsRemoteServices } from './SettingsRemoteServices'
 
 type PairingStep = 'idle' | 'enter-otp' | 'pairing'
 
@@ -65,7 +66,7 @@ function DeviceCard({
 const errMsg = (e: unknown) => (e as Error)?.message || String(e)
 
 /**
- * Sub-view of Settings > Phone remote. Machine-wide (relay + paired devices),
+ * Sub-view of Settings > Web remote. Machine-wide (relay + paired devices),
  * so HOME face only — a Settings sub-view rather than a LeftNav destination.
  */
 export function SettingsRemote() {
@@ -407,6 +408,12 @@ export function SettingsRemote() {
           </div>
         )}
       </div>
+
+      <SettingsRemoteServices
+        enabled={enabled}
+        hasDevice={devices.length > 0}
+        refreshKey={(status?.clients ?? []).map((c) => `${c.key}:${c.state}`).join(',')}
+      />
 
       <div>
         <SectionLabel right={

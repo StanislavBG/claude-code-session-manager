@@ -165,6 +165,10 @@ under the ops root's `tasks/` folder (the owner signed off on 2026-11-22).
   `goalText` afterwards, because iteration belongs in follow-up messages and one short-lived Epic per unit of
   work is the intended shape. The queue row's `renameEpic` is a cosmetic carve-out (typo, clarity), never a
   repurposing.
+  A defect found mid-Epic, even outside its goal, is a side plan in that same Epic: the Epic that finds a defect
+  owns it. Only a human can open an Epic, so "this needs a new Epic" handed the defect to nobody — five of
+  twenty Epics did that, one finding three times running. A side plan has its own validate PRD and plan card,
+  so the Epic's own goal and objective stay unchanged.
 
 ## Context packs
 

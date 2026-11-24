@@ -52,8 +52,7 @@ Any new feature touching sessions, navigation, or per-project state must map ont
 - **The opening prompt is AIM — Actor, Input, Mission, in that order**, composed only by
   `composeEpicIntake` (`lib/epicIntake.ts`) — framing, never a second source of what the CLI loads.
 - **A context pack = plugin + always-on rules**, per Epic (`PromptSession.packs`), loaded every turn/job ([detail](session-manager-operations/architecture/domain-model.md#context-packs)).
-- **An Epic's title + objective are fixed for the life of its session.** Iterate in follow-ups; start a
-  new Epic, never repurpose one. (Queue-row rename: cosmetic only.)
+- **An Epic's title + objective are fixed for the life of its session.** Iterate in follow-ups; mid-Epic defects are its side plans; never repurpose. (Row rename: cosmetic.)
 - **Lifecycle is the single `status` field**, specified only in
   [`prompt-sessions/README.md`](session-manager-operations/prompt-sessions/README.md#lifecycle);
   **every Epic is born `proposed`**. Link there; never restate it.

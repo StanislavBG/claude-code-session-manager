@@ -2544,6 +2544,22 @@ function currentAutoDispatchHold(config) {
   });
 }
 
+/**
+ * The auto-fix investigation probe is an automatic `claude -p` too, but it is
+ * launched from spawnJob's failure path and the periodic auto-fix pass, never
+ * through tickBody — so it checks the same hold itself. Returns the hold (and
+ * appends one 'investigation_held' audit event for this deferral) or null.
+ * A deferral stamps nothing on the row: it stays eligible for the periodic
+ * auto-fix pass (selectAutoFixTargets), which launches it once the hold clears.
+ */
+function investigationHold(slug, config) {
+  const hold = currentAutoDispatchHold(config);
+  if (!hold) return null;
+  console.log(`[scheduler] investigation held for ${slug}: ${hold.reason} — ${hold.detail ?? ''}`);
+  appendAuditEvent('investigation_held', { slug, reason: hold.reason });
+  return hold;
+}
+
 function utilizationReading() {
   const windows = lastGoodUsagePayload
     ? usageWindows(lastGoodUsagePayload).map((w) => ({ window: w.name, percent: w.utilization, resetsAt: w.resets_at }))
@@ -2849,6 +2865,10 @@ function _setLoadGateForTests(gate) { loadGate = gate; }
 // without forking a real child job (whose completion tick races the next test).
 let dispatchSpawnJob = (...args) => spawnJob(...args);
 function _setSpawnJobForTests(fn) { dispatchSpawnJob = fn || ((...args) => spawnJob(...args)); }
+// The periodic auto-fix pass launches investigations through this indirection
+// so a test can record them without forking a real probe child.
+let dispatchSpawnInvestigation = (...args) => spawnInvestigation(...args);
+function _setSpawnInvestigationForTests(fn) { dispatchSpawnInvestigation = fn || ((...args) => spawnInvestigation(...args)); }
 
 // Last tickQueue outcome, kept for the UI. tickQueue already computes a precise
 // reason for every way a batch can come back empty (dependency holds, slot
@@ -6697,6 +6717,18 @@ function readRunOutcomeSidecars(runDir, slug) {
 const INVESTIGATION_LAUNCH_KEY = 'investigation';
 
 async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) {
+  // Auto-dispatch hold first — before anything below can spawn a process
+  // (probeClaudeVersion included). A held needs_review row stays eligible for
+  // the periodic auto-fix pass; a plain 'failed' row (never a
+  // selectAutoFixTargets target) waits in deferredInvestigations, which that
+  // same pass drains once the hold clears.
+  const queueState = await readQueue().catch(() => null);
+  if (investigationHold(failedJob.slug, queueState?.config)) {
+    if (failedJob.status !== 'needs_review' && !deferredInvestigations.has(failedJob.slug)) {
+      deferredInvestigations.set(failedJob.slug, { failedJob, runDir });
+    }
+    return { deferred: true, held: true };
+  }
   // A row waiting on its own red preflight spends nothing on the model
   // ladder: the precondition is the cause, not the work.
   if (reviewLadder.hasActivePreflightHold(failedJob)) {
@@ -6708,7 +6740,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   // B1: probes e4f82da2/d374e6bf died on the same HTTP 400 as the runs
   // they were investigating) there is nothing to diagnose — skip, loudly.
   {
-    const state = await readQueue().catch(() => null);
+    const state = queueState;
     const block = state?.launchBlocks?.[INVESTIGATION_LAUNCH_KEY];
     const jobBlock = state?.launchBlocks?.[launchFailure.launchBlockKeyFor(failedJob)];
     const gate = launchFailure.evaluateLaunchGate(block || jobBlock, { now: Date.now(), claudeVersion: await probeClaudeVersion() });
@@ -8952,7 +8984,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
             const fixSlugExists = (slug) => prdPaths.candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${slug}.md`)));
             if (
               process.env.SM_AUTOFIX_DISABLE !== '1' &&
-              reviewLadder.isEligibleForImmediateAutoFix(s.jobs[i2], s.jobs, fixSlugExists)
+              reviewLadder.isEligibleForImmediateAutoFix(s.jobs[i2], s.jobs, fixSlugExists) &&
+              // Under the auto-dispatch hold: stamp nothing, leave the row
+              // eligible for the periodic auto-fix pass once the hold clears.
+              !investigationHold(s.jobs[i2].slug, s.config)
             ) {
               const isRetryAttempt = s.jobs[i2].autoFixAttempted === true;
               const isDeadFixPlanReopen = reviewLadder.isFixPlanDead(s.jobs[i2], s.jobs);
@@ -12310,7 +12345,13 @@ async function reverifyNeedsReview() {
     const targets = reviewLadder.selectAutoFixTargets(queueForResumeAndAutofix.jobs, {
       fixSlugExists: (s) => prdPaths.candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${s}.md`))),
     }).filter((job) => job.slug !== gateShadowSlug);
+    // Hold clear: start any investigation a hold deferred for a plain
+    // 'failed' row (spawnInvestigation parked it in deferredInvestigations).
+    if (!currentAutoDispatchHold(queueForResumeAndAutofix.config)) drainDeferredInvestigation();
     for (const job of targets) {
+      // Auto-dispatch hold: check BEFORE the attempt stamp below so a held
+      // row is left un-attempted and this pass picks it up once it clears.
+      if (investigationHold(job.slug, queueForResumeAndAutofix.config)) continue;
       const runId = job.runId || reviewLadder.resolveRunId(job);
       const runDir = path.join(schedulerPaths.runsDir(), runId);
       const isRetryAttempt = job.autoFixAttempted === true;
@@ -12337,7 +12378,7 @@ async function reverifyNeedsReview() {
         }
       });
       console.log(`[scheduler] auto-fix: needs_review ${job.slug} → authoring fix-plan (${isRetryAttempt ? 'retry' : '1/1'}${isDeadFixPlanReopen ? ', dead fix-plan child reopen' : ''})`);
-      spawnInvestigation(job, runDir, { deadChild }).catch((e) => {
+      dispatchSpawnInvestigation(job, runDir, { deadChild }).catch((e) => {
         console.error('[scheduler] auto-fix spawnInvestigation error', job.slug, e);
       });
     }
@@ -14309,6 +14350,7 @@ module.exports = {
   _setPeriodicReverifyEnabledForTests,
   _setLoadGateForTests,
   _setSpawnJobForTests,
+  _setSpawnInvestigationForTests,
   _mutateForTests: mutate, // mutate() has no other exported call site; test-only seam.
   reconcile,
   broadcast,

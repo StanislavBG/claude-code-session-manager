@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 25 (character.cjs: speak resolves {voiceId}, speaks kokoro, honours spec.voice)', () => {
-  expect(KIT_VERSION).toBe('25');
+test('KIT_VERSION is bumped to 26 (character.cjs: every synthesis call runs in the voice lane)', () => {
+  expect(KIT_VERSION).toBe('26');
 });
 
 test('KIT_DIGEST matches the shipped kit files (a kit file changed without a version bump?)', () => {

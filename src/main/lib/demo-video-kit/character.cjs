@@ -7,7 +7,9 @@
 // speakLines runs a {lines} (batch) voice once per speaker with a JSON manifest
 // of { text, out }, and a kokoro voice once per speaker through kokoroSay.cjs, each
 // with a time limit capped by SM_SCHEDULER_JOB_DEADLINE_MS. {voiceId} voices
-// resolve through voiceLibrary.cjs.
+// resolve through voiceLibrary.cjs. Every synthesis call runs inside the kit
+// voice lane (voiceLane.cjs): it waits its turn (bounded by laneWaitMs), prints
+// its position to stderr while waiting, and logs a usage line when it leaves.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -26,6 +28,8 @@ const BATCH_TIMEOUT_CEILING_MS = 180 * 60 * 1000;
 const SPEAK_DEADLINE_MARGIN_MS = 45 * 60 * 1000;
 const MIN_BATCH_TIMEOUT_MS = 60 * 1000;
 const WAV_HEADER_BYTES = 44;
+const LANE_WAIT_DEFAULT_MS = 6 * 60 * 60 * 1000;
+const WAV_SCAN_BYTES = 64 * 1024;
 
 const PERSONALITY_TEXT = Object.freeze({ who: 400, speech: 400, readingLevel: 40 });
 const NEVER_SAY_MAX_ITEMS = 40;
@@ -280,6 +284,92 @@ function isWav(file) {
   }
 }
 
+/** Seconds of audio in a WAV from its RIFF fmt byteRate and data chunk size; 0 when unparseable. */
+function wavSeconds(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const size = fs.fstatSync(fd).size;
+    const buf = Buffer.alloc(Math.min(size, WAV_SCAN_BYTES));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    if (buf.length < 12 || buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WAVE') return 0;
+    let byteRate = 0;
+    for (let off = 12; off + 8 <= buf.length;) {
+      const id = buf.toString('latin1', off, off + 4);
+      const len = buf.readUInt32LE(off + 4);
+      if (id === 'fmt ' && off + 16 <= buf.length) byteRate = buf.readUInt32LE(off + 16);
+      if (id === 'data') {
+        if (!(byteRate > 0)) return 0;
+        const bytes = Math.min(len, Math.max(0, size - off - 8));
+        return bytes / byteRate;
+      }
+      off += 8 + len + (len % 2);
+    }
+    return 0;
+  } catch {
+    return 0;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
+ * How long one synthesis call may wait for its voice lane: the time left before
+ * env.SM_SCHEDULER_JOB_DEADLINE_MS minus SPEAK_DEADLINE_MARGIN_MS when that is set
+ * (may be <= 0: no time left), else LANE_WAIT_DEFAULT_MS (6 h).
+ */
+function laneWaitMs({ now = Date.now(), env = process.env } = {}) {
+  const raw = env && env.SM_SCHEDULER_JOB_DEADLINE_MS;
+  const deadline = Number(raw);
+  if (raw !== undefined && raw !== null && raw !== '' && Number.isFinite(deadline)) return deadline - now - SPEAK_DEADLINE_MARGIN_MS;
+  return LANE_WAIT_DEFAULT_MS;
+}
+
+/** 'voice lane: waiting, position 1 of 2 (ahead: video demo inline:command)' — ahead = the lane holder. */
+function lanePositionLine(pos) {
+  const h = pos && Array.isArray(pos.ahead) && pos.ahead.length ? pos.ahead[0] : null;
+  const ahead = h ? `${h.label ?? '?'} ${h.voiceId ?? '?'}` : '?';
+  return `voice lane: waiting, position ${pos.position} of ${pos.total} (ahead: ${ahead})`;
+}
+
+/**
+ * Run one synthesis call `fn` (-> {ok, error?}) inside the voice lane of rv's voice.
+ * ctx: {root, kind, label, onLanePosition?}. Always leaves the lane; the usage line
+ * carries ok, audioSeconds (sum over `outs`' WAV headers) and wallMs.
+ */
+function inLane(ctx, rv, outs, fn) {
+  const lane = require('./voiceLane.cjs');
+  const voiceId = rv.voiceId ? String(rv.voiceId) : `inline:${rv.voice.engine}`;
+  const ticket = lane.enterLane({ lane: lane.laneFor(rv.voice, rv.entry), voiceId, label: ctx.label, projectRoot: ctx.root, kind: ctx.kind });
+  let granted = false;
+  let ok = false;
+  try {
+    const left = laneWaitMs();
+    const w = lane.waitTurn(ticket, {
+      timeoutMs: Math.max(1, left),
+      onPosition: (pos) => {
+        if (pos.position > 0) process.stderr.write(`${lanePositionLine(pos)}\n`);
+        if (typeof ctx.onLanePosition === 'function') ctx.onLanePosition({ lane: ticket.lane, ...pos });
+      },
+    });
+    if (!w.ok) {
+      const why = left <= 0 ? ` (no time left before the job deadline minus a ${SPEAK_DEADLINE_MARGIN_MS / 60000} min margin)` : '';
+      return { ok: false, error: `${w.error}${why}` };
+    }
+    granted = true;
+    const r = fn();
+    ok = !!(r && r.ok);
+    return r;
+  } finally {
+    if (granted) {
+      const audioSeconds = outs.reduce((sum, o) => sum + wavSeconds(o), 0);
+      lane.leaveLane(ticket, { ok, audioSeconds: Math.round(audioSeconds * 1000) / 1000 });
+    } else {
+      lane.leaveLane(ticket, { ok: false, record: false });
+    }
+  }
+}
+
 /**
  * Run the voice command (no shell). -> {ok, status, error?}
  * ok only when the command exited 0 AND wrote a WAV to `out`; the error carries
@@ -447,6 +537,10 @@ function kokoroItems(voice, items) {
  * kokoroSay.sayKokoro (its id, speed, lang). Grouped outs must end in .wav and be
  * distinct; groups run within batchTimeoutMs and succeed only when every out is a
  * WAV. No fallback voice: the first failure stops the run.
+ * Every call (per line, per batch group, per kokoro group) runs in the voice lane
+ * voiceLane.laneFor(voice, entry); opts.kind (default 'video') and opts.label
+ * (default 'video <basename of root>') go on the lane ticket and usage line, and
+ * opts.onLanePosition(pos) sees each lane position change.
  * -> {ok: true, outs} | {ok: false, line?, lines?, speaker?, error}
  */
 function speakLines(projectRoot, lines, opts = {}) {
@@ -457,6 +551,12 @@ function speakLines(projectRoot, lines, opts = {}) {
     return { ok: false, error: e.message };
   }
   if (!Array.isArray(lines) || lines.length === 0) return { ok: false, error: 'lines must be a non-empty array of { text, out, speaker? }' };
+  const laneCtx = {
+    root,
+    kind: opts && typeof opts.kind === 'string' && opts.kind ? opts.kind : 'video',
+    label: opts && typeof opts.label === 'string' && opts.label ? opts.label : `video ${path.basename(root)}`,
+    onLanePosition: opts ? opts.onLanePosition : undefined,
+  };
   const override = opts && opts.voice !== undefined && opts.voice !== null ? opts.voice : undefined;
   if (override !== undefined) {
     const ov = typeof override === 'string' ? { voiceId: override } : override;
@@ -502,12 +602,12 @@ function speakLines(projectRoot, lines, opts = {}) {
       if (!l.out.toLowerCase().endsWith('.wav')) return { ok: false, line: i, error: `line ${i}: ${what} voice's out must end in .wav` };
       const abs = path.resolve(root, l.out);
       let b = groups.get(name);
-      if (!b) { b = { kind, voice, label: voiceLabel(rv), indices: [], seen: new Map() }; groups.set(name, b); }
+      if (!b) { b = { kind, voice, rv, label: voiceLabel(rv), indices: [], seen: new Map() }; groups.set(name, b); }
       if (b.seen.has(abs)) return { ok: false, line: i, error: `line ${i}: out ${abs} repeats line ${b.seen.get(abs)}'s out` };
       b.seen.set(abs, i);
       b.indices.push(i);
     }
-    resolved.push({ name, voice, label: voiceLabel(rv), text: l.text, out: l.out });
+    resolved.push({ name, voice, rv, label: voiceLabel(rv), text: l.text, out: l.out });
   }
   const itemsOf = (b) => b.indices.map((j) => ({ text: resolved[j].text, out: path.resolve(root, resolved[j].out) }));
   for (const [name, b] of groups) {
@@ -518,20 +618,20 @@ function speakLines(projectRoot, lines, opts = {}) {
   const outs = [];
   const spoken = new Set();
   for (let i = 0; i < resolved.length; i++) {
-    const { name, voice, label, text, out } = resolved[i];
+    const { name, voice, rv, label, text, out } = resolved[i];
     const b = groups.get(name);
     if (b) {
       if (!spoken.has(name)) {
         spoken.add(name);
         const items = itemsOf(b);
-        const r = b.kind === 'kokoro' ? speakKokoro(b.voice, items, root) : speakBatch(b.voice, items, root);
+        const r = inLane(laneCtx, b.rv, items.map((it) => it.out), () => (b.kind === 'kokoro' ? speakKokoro(b.voice, items, root) : speakBatch(b.voice, items, root)));
         if (!r.ok) {
           const who = b.kind === 'kokoro' ? `"${name}" ${b.label}` : `"${name}"`;
           return { ok: false, line: b.indices[0], lines: b.indices.slice(), speaker: name, error: `${who}: ${r.error}` };
         }
       }
     } else {
-      const r = speakWithCommand(voice, text, out, { cwd: root });
+      const r = inLane(laneCtx, rv, [path.resolve(root, out)], () => speakWithCommand(voice, text, out, { cwd: root }));
       if (!r.ok) return { ok: false, line: i, speaker: name, error: `"${name}"${label.startsWith('voice ') ? ` ${label}` : ''}: ${r.error}` };
     }
     outs.push(out);
@@ -547,6 +647,10 @@ module.exports = {
   buildCommandArgv,
   buildBatchArgv,
   isBatchVoice,
+  wavSeconds,
+  laneWaitMs,
+  lanePositionLine,
+  LANE_WAIT_DEFAULT_MS,
   validateCharacterJson,
   validateCharacterJs,
   validatePersonality,
@@ -566,12 +670,14 @@ module.exports = {
 };
 
 // CLI: node character.cjs speak spec.json [--wait <seconds>]
-//   (spec { projectRoot, lines: [{ text, out, speaker? }], voice? }; voice = a library
-//   voice id or an inline voice replacing the host's voice for this run)
+//   (spec { projectRoot, lines: [{ text, out, speaker? }], voice?, kind?, label? }; voice = a
+//   library voice id or an inline voice replacing the host's voice for this run; kind and
+//   label name the run in the voice lane and its usage log)
 // speakLines runs in a detached runner (resumableRun.cjs) keyed by the sha256
 // of the spec bytes, state in <abs spec>.run/. Each call waits one slice: the
 // result (exit 0/1) or, while still speaking, a pending line with exit 75 —
-// run the same command again to attach to the same run.
+// run the same command again to attach to the same run. The runner writes its
+// latest voice lane position to <abs spec>.run/lane.json; the pending line carries it.
 const SPEAK_USAGE = 'usage: node character.cjs speak spec.json [--wait seconds]';
 const EXIT_PENDING = 75;
 const MAX_WAIT_S = 840;
@@ -587,6 +693,8 @@ function speakWaitMs(flags, env = process.env) {
   if (!(bash > 0)) return 90 * 1000;
   return Math.min(MAX_WAIT_S * 1000, Math.max(10 * 1000, bash - 30 * 1000));
 }
+
+const lanePath = (stateDir) => path.join(stateDir, 'lane.json');
 
 function specOuts(spec) {
   const lines = spec && Array.isArray(spec.lines) ? spec.lines : [];
@@ -622,11 +730,15 @@ async function speakCli(specPath, flags) {
     if (allWavs()) return { result: prior.result };
     rr.stopRun(stateDir);
   }
-  rr.startOrAttach({ stateDir, key, argv: [__filename, '__speak-run', absSpec, key], cwd: path.dirname(absSpec) });
+  const att = rr.startOrAttach({ stateDir, key, argv: [__filename, '__speak-run', absSpec, key], cwd: path.dirname(absSpec) });
+  if (att.started) fs.rmSync(lanePath(stateDir), { force: true });
   const w = await rr.waitForResult({ stateDir, key, waitMs });
   if (w.status === 'done') return { result: w.result };
   if (w.status === 'lost') return { result: { ok: false, error: `speak runner (node character.cjs __speak-run ${absSpec}): ${w.error}` } };
   const wavs = outs.filter((o) => o && isWav(o)).length;
+  let lane = null;
+  try { const j = JSON.parse(fs.readFileSync(lanePath(stateDir), 'utf8')); if (j && j.key === key && j.pos) lane = j.pos; } catch { /* not in a lane yet */ }
+  const waiting = lane && lane.position > 0 ? `; ${lanePositionLine(lane)}` : '';
   return {
     pending: true,
     result: {
@@ -636,7 +748,8 @@ async function speakCli(specPath, flags) {
       elapsedS: Math.round(w.elapsedMs / 1000),
       wavs,
       lines: outs.length,
-      message: `still speaking (${wavs}/${outs.length} WAVs so far); run the same command again`,
+      ...(lane ? { lane: { lane: lane.lane, position: lane.position, total: lane.total, ahead: lane.ahead } } : {}),
+      message: `still speaking (${wavs}/${outs.length} WAVs so far${waiting}); run the same command again`,
     },
   };
 }
@@ -651,7 +764,14 @@ function speakRunner(specPath, key) {
     const got = crypto.createHash('sha256').update(bytes).digest('hex');
     result = got !== key
       ? { ok: false, error: `spec ${specPath} changed since this run started` }
-      : speakLines(spec && spec.projectRoot, spec && spec.lines, { voice: spec ? spec.voice : undefined });
+      : speakLines(spec && spec.projectRoot, spec && spec.lines, {
+        voice: spec ? spec.voice : undefined,
+        kind: spec ? spec.kind : undefined,
+        label: spec ? spec.label : undefined,
+        onLanePosition: (pos) => {
+          try { fs.writeFileSync(lanePath(stateDir), JSON.stringify({ key, pos })); } catch { /* stateDir gone: run stopped */ }
+        },
+      });
   } catch (e) {
     result = { ok: false, error: `cannot read spec ${specPath}: ${e.message}` };
   }

@@ -5,6 +5,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { readCharacter, speakWithCommand, buildCommandArgv, validateCharacterJson, characterDir } = require('../character.cjs');
 
+// Every speak call goes through the voice lane: keep its tickets and usage log out of ~.
+const LANE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-char-lane-'));
+process.env.SM_VOICE_LANE_DIR = path.join(LANE_HOME, 'lane');
+process.env.SM_VOICES_HOME = path.join(LANE_HOME, 'voices');
+delete process.env.SM_SCHEDULER_JOB_DEADLINE_MS;
+
 const tmp = [];
 afterEach(() => { while (tmp.length) fs.rmSync(tmp.pop(), { recursive: true, force: true }); });
 
@@ -799,3 +805,138 @@ test.skipIf(process.platform === 'win32')('CLI: spec.voice with no saved charact
   expect(charMod.speakLines(root, [{ text: 'one', out: 'a.wav' }], { voice: { engine: 'nope' } })).toMatchObject({ ok: false, error: expect.stringMatching(/^spec\.voice\.engine/) });
   expect(kokoroCalls(root)).toHaveLength(1);
 });
+
+// Voice lane: a heavy fake command voice sleeps 400 ms per line, writes a real
+// 0.5 s WAV (16 kHz mono 16-bit) and logs its start/end to a shared file.
+const lane = require('../voiceLane.cjs');
+const HEAVY_SRC = [
+  "const fs = require('fs');",
+  "const [log, text, out] = process.argv.slice(2);",
+  "const start = Date.now();",
+  "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);",
+  "if (text === 'bad') { process.stderr.write('heavy voice exploded'); process.exit(4); }",
+  "const data = Buffer.alloc(16000);",
+  "const h = Buffer.alloc(44);",
+  "h.write('RIFF', 0, 'latin1'); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8, 'latin1');",
+  "h.write('fmt ', 12, 'latin1'); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);",
+  "h.writeUInt32LE(16000, 24); h.writeUInt32LE(32000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);",
+  "h.write('data', 36, 'latin1'); h.writeUInt32LE(data.length, 40);",
+  "fs.writeFileSync(out, Buffer.concat([h, data]));",
+  "fs.appendFileSync(log, JSON.stringify({ text, start, end: Date.now() }) + '\\n');",
+].join('\n');
+function heavyProject(logFile, name) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-char-heavy-'));
+  tmp.push(base);
+  const root = path.join(base, name);
+  fs.mkdirSync(path.join(root, 'session-manager-operations'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'heavy.cjs'), HEAVY_SRC);
+  const voice = { engine: 'command', command: [process.execPath, 'heavy.cjs', logFile, '{text}', '{out}'] };
+  const dir = characterDir(root);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'character.json'), JSON.stringify({ name: 'Bit', palette: ['#fff'], voice }));
+  fs.writeFileSync(path.join(dir, 'character.js'), 'window.c={mount(){},pose(){},mouth(){}};');
+  const spec = path.join(root, 'spec.json');
+  runDirs.push(`${spec}.run`);
+  return { root, spec };
+}
+const readJsonl = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('wavSeconds reads byteRate and data size; 0 when unparseable', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-char-wav-'));
+  tmp.push(d);
+  const data = Buffer.alloc(48000);
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0, 'latin1'); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8, 'latin1');
+  h.write('fmt ', 12, 'latin1'); h.writeUInt32LE(16, 16); h.writeUInt32LE(32000, 28);
+  h.write('data', 36, 'latin1'); h.writeUInt32LE(data.length, 40);
+  fs.writeFileSync(path.join(d, 'ok.wav'), Buffer.concat([h, data]));
+  fs.writeFileSync(path.join(d, 'fake.wav'), Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60)]));
+  expect(charMod.wavSeconds(path.join(d, 'ok.wav'))).toBe(1.5);
+  expect(charMod.wavSeconds(path.join(d, 'fake.wav'))).toBe(0);
+  expect(charMod.wavSeconds(path.join(d, 'missing.wav'))).toBe(0);
+});
+
+test('laneWaitMs: job deadline minus 45 min when set, else 6 h', () => {
+  const now = 1_000_000_000;
+  expect(charMod.laneWaitMs({ now, env: {} })).toBe(6 * 60 * 60 * 1000);
+  expect(charMod.laneWaitMs({ now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: String(now + 60 * 60 * 1000) } })).toBe(15 * 60 * 1000);
+  expect(charMod.laneWaitMs({ now, env: { SM_SCHEDULER_JOB_DEADLINE_MS: '' } })).toBe(6 * 60 * 60 * 1000);
+});
+
+test.skipIf(process.platform === 'win32')('voice lane: a failing voice still leaves the lane and logs ok:false', () => {
+  const log = path.join(LANE_HOME, `fail-${Date.now()}.jsonl`);
+  const { root } = heavyProject(log, 'failproj');
+  const r = charMod.speakLines(root, [{ text: 'bad', out: 'a.wav' }], { kind: 'tiktok' });
+  expect(r).toMatchObject({ ok: false, line: 0, speaker: 'Bit' });
+  expect(r.error).toMatch(/heavy voice exploded/);
+  expect(lane.laneSnapshot().heavy).toEqual([]);
+  const [u] = lane.readUsage({ projectRoot: root });
+  expect(u).toMatchObject({ voiceId: 'inline:command', projectRoot: root, lane: 'heavy', kind: 'tiktok', ok: false, audioSeconds: 0 });
+  expect(u.wallMs).toBeGreaterThanOrEqual(400);
+});
+
+test.skipIf(process.platform === 'win32')('voice lane: a wait past the job deadline fails naming the lane position and leaves the lane', () => {
+  const log = path.join(LANE_HOME, `late-${Date.now()}.jsonl`);
+  const { root } = heavyProject(log, 'lateproj');
+  const holder = lane.enterLane({ lane: 'heavy', voiceId: 'other', label: 'video other', projectRoot: '/x', kind: 'video' });
+  const prev = process.env.SM_SCHEDULER_JOB_DEADLINE_MS;
+  process.env.SM_SCHEDULER_JOB_DEADLINE_MS = String(Date.now() + 10 * 60 * 1000);
+  try {
+    const r = charMod.speakLines(root, [{ text: 'hi', out: 'a.wav' }]);
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/timed out after \d+ ms at position 1 of 2/);
+    expect(r.error).toMatch(/no time left before the job deadline/);
+    expect(readJsonl(log)).toEqual([]);
+  } finally {
+    if (prev === undefined) delete process.env.SM_SCHEDULER_JOB_DEADLINE_MS; else process.env.SM_SCHEDULER_JOB_DEADLINE_MS = prev;
+    lane.leaveLane(holder, { record: false });
+  }
+  expect(lane.laneSnapshot().heavy).toEqual([]);
+});
+
+test.skipIf(process.platform === 'win32')('voice lane: two concurrent speak CLI runs with a heavy voice never overlap; the second waits at position 1', async () => {
+  const { spawn, spawnSync } = require('node:child_process');
+  const log = path.join(LANE_HOME, `overlap-${Date.now()}.jsonl`);
+  const a = heavyProject(log, 'alpha');
+  const b = heavyProject(log, 'beta');
+  const aTexts = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8'];
+  fs.writeFileSync(a.spec, JSON.stringify({ projectRoot: a.root, lines: aTexts.map((t) => ({ text: t, out: `${t}.wav` })) }));
+  fs.writeFileSync(b.spec, JSON.stringify({ projectRoot: b.root, kind: 'marketing', lines: [{ text: 'b1', out: 'b1.wav' }, { text: 'b2', out: 'b2.wav' }] }));
+  const env = { ...process.env };
+  delete env.BASH_DEFAULT_TIMEOUT_MS;
+  const aChild = spawn(process.execPath, [CHAR_CJS, 'speak', a.spec, '--wait', '30'], { env, timeout: 30000 });
+  let aOut = '';
+  aChild.stdout.on('data', (c) => { aOut += c; });
+  const aDone = new Promise((resolve) => aChild.on('exit', (code) => resolve(code)));
+  // wait until alpha holds the heavy lane
+  for (let i = 0; i < 100 && lane.laneSnapshot().heavy.length === 0; i++) await sleepMs(50);
+  expect(lane.laneSnapshot().heavy).toHaveLength(1);
+  const first = spawnSync(process.execPath, [CHAR_CJS, 'speak', b.spec, '--wait', '1'], { encoding: 'utf8', timeout: 30000, env });
+  expect(first.status).toBe(75);
+  const pending = JSON.parse(first.stdout);
+  expect(pending.lane).toMatchObject({ lane: 'heavy', position: 1, total: 2 });
+  expect(pending.message).toMatch(new RegExp(`voice lane: waiting, position 1 of 2 \\(ahead: video alpha inline:command\\)`));
+  const second = spawnSync(process.execPath, [CHAR_CJS, 'speak', b.spec, '--wait', '30'], { encoding: 'utf8', timeout: 30000, env });
+  expect(second.status).toBe(0);
+  expect(JSON.parse(second.stdout)).toEqual({ ok: true, outs: ['b1.wav', 'b2.wav'] });
+  expect(await aDone).toBe(0);
+  expect(JSON.parse(aOut)).toMatchObject({ ok: true });
+  // no two synthesis calls overlapped, machine-wide
+  const calls = readJsonl(log).sort((x, y) => x.start - y.start);
+  expect(calls).toHaveLength(10);
+  for (let i = 1; i < calls.length; i++) expect(calls[i].start).toBeGreaterThanOrEqual(calls[i - 1].end);
+  // beta's first lane line is position 1, behind alpha
+  const runLog = fs.readFileSync(path.join(`${b.spec}.run`, 'run.log'), 'utf8');
+  const laneLines = runLog.split('\n').filter((l) => l.startsWith('voice lane:'));
+  expect(laneLines[0]).toBe('voice lane: waiting, position 1 of 2 (ahead: video alpha inline:command)');
+  // usage: one line per call with kind, voice id, audio seconds and wall time
+  const ua = lane.readUsage({ projectRoot: a.root, limit: 100 });
+  const ub = lane.readUsage({ projectRoot: b.root, limit: 100 });
+  expect(ua).toHaveLength(8);
+  expect(ub).toHaveLength(2);
+  for (const u of ua) expect(u).toMatchObject({ voiceId: 'inline:command', kind: 'video', lane: 'heavy', ok: true, audioSeconds: 0.5 });
+  for (const u of ub) expect(u).toMatchObject({ voiceId: 'inline:command', kind: 'marketing', lane: 'heavy', ok: true, audioSeconds: 0.5 });
+  for (const u of [...ua, ...ub]) expect(u.wallMs).toBeGreaterThanOrEqual(400);
+  expect(lane.laneSnapshot().heavy).toEqual([]);
+}, 60000);

@@ -108,6 +108,7 @@ const { createLoadGate, topCpuConsumers, formatLoadGateDetail, measuredMemoryGat
 const jobMemoryStats = require('./lib/scheduler/jobMemoryStats.cjs');
 const { openLog, withChildAndLog } = require('./lib/process/childWithLog.cjs');
 const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
+const { reniceLeftovers } = require('./lib/process/leftoverRenice.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
@@ -9604,6 +9605,9 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
   const tickStartedAt = Date.now();
   // evaluate() only runs once slots and memory admit a batch, so the CPU sampler
   // needs every tick to keep a reference reading about a minute old.
+  // Leftover chat/aux tool processes (their turn's claude gone) drop to nice 19
+  // first, so the sample sees them as idle-priority load (PRD 4022). Never throws.
+  if (process.platform === 'linux') reniceLeftovers();
   loadGate.observe();
   {
     const stale = () => gen !== tickGeneration;

@@ -273,26 +273,40 @@ function decodeMono(file, dir, tag) {
 
 const BUILTIN_LIST = SFX_NAMES.join(', ');
 
+// Mutable so a test can shorten the limit; production never changes it.
+const BED_COMMAND_LIMITS = { timeoutMs: 300000 };
+const BED_STDERR_TAIL = 500;
+
+/** Lazy, memoised persona reader for the cue/bed pre-pass; throws when character.json exists but is unusable. */
+function personaLoader(projectRoot) {
+  let persona;
+  return () => {
+    if (persona === undefined) {
+      const { inspectCharacter } = require('./character.cjs');
+      persona = inspectCharacter(projectRoot);
+      if (!persona.ok && persona.exists) throw new Error(`project persona unusable: ${persona.error}`);
+    }
+    return persona;
+  };
+}
+
+const hasRoot = (projectRoot) => projectRoot !== undefined && projectRoot !== null;
+
 /**
  * Resolve every cue name before any audio work: built-ins map to null, a persona
  * sounds.sfx name to its WAV path. Throws a named reason for anything else.
  * The persona is read only when some cue is not built-in.
  */
-function resolveCueFiles(cues, projectRoot) {
+function resolveCueFiles(cues, projectRoot, getPersona) {
   const files = new Map();
-  let persona;
   for (const cue of cues) {
     const name = cue && cue.name;
     if (SFX_NAMES.includes(name) || files.has(name)) continue;
-    if (projectRoot === undefined || projectRoot === null) {
+    if (!hasRoot(projectRoot)) {
       throw new Error(`unknown sfx: ${name} (built-in: ${BUILTIN_LIST}; pass projectRoot to use the persona's own sounds)`);
     }
-    const { inspectCharacter } = require('./character.cjs');
     const { findProjectSound, soundFile, checkSoundWav } = require('./projectSounds.cjs');
-    if (persona === undefined) {
-      persona = inspectCharacter(projectRoot);
-      if (!persona.ok && persona.exists) throw new Error(`project persona unusable: ${persona.error}`);
-    }
+    const persona = getPersona();
     const found = persona.ok ? findProjectSound(persona.json, name) : null;
     if (!found || found.kind !== 'sfx') {
       const s = persona.ok && persona.json.sounds && Array.isArray(persona.json.sounds.sfx) ? persona.json.sounds.sfx : [];
@@ -311,21 +325,109 @@ function resolveCueFiles(cues, projectRoot) {
 }
 
 /**
+ * Resolve spec.bed before any audio work -> {style} for a built-in bed, {name, file}
+ * for a file-backed persona bed, {name, command} for a command bed. Throws a named reason.
+ */
+function resolveBed(bed, style, projectRoot, getPersona) {
+  if (bed === undefined || bed === null) return { style };
+  if (Object.prototype.hasOwnProperty.call(STYLES, bed)) return { style: bed };
+  const styles = Object.keys(STYLES).join(', ');
+  if (!hasRoot(projectRoot)) {
+    throw new Error(`unknown bed: ${bed} (built-in styles: ${styles}; pass projectRoot to use the persona's own beds)`);
+  }
+  const { findProjectSound, soundFile, checkSoundWav } = require('./projectSounds.cjs');
+  const persona = getPersona();
+  const found = persona.ok ? findProjectSound(persona.json, bed) : null;
+  if (!found || found.kind !== 'bed') {
+    const b = persona.ok && persona.json.sounds && Array.isArray(persona.json.sounds.beds) ? persona.json.sounds.beds : [];
+    const names = b.map((e) => e && e.name).filter((n) => typeof n === 'string').join(', ');
+    throw new Error(`unknown bed: ${bed} (built-in styles: ${styles}; persona sounds.beds: ${names || 'none'})`);
+  }
+  const name = bed;
+  if (Array.isArray(found.entry.command)) return { name, command: [...found.entry.command] };
+  const file = soundFile(projectRoot, name);
+  if (!fs.existsSync(file)) {
+    throw new Error(`project bed '${name}' has no WAV at ${file} (save the persona again with its sound files)`);
+  }
+  const reason = checkSoundWav(fs.readFileSync(file), `project bed '${name}' (${file})`, 'bed');
+  if (reason) throw new Error(reason);
+  return { name, file };
+}
+
+/** A file bed looped end to end to n samples with bedSamples' edge fades. */
+function loopFileBed(file, dir, n) {
+  const s = decodeMono(file, dir, 'bed');
+  const out = new Float32Array(n);
+  if (s.length > 0) for (let i = 0; i < n; i++) out[i] = s[i % s.length];
+  const fade = Math.min(Math.round(1.0 * SR), Math.floor(n / 2));
+  for (let i = 0; i < fade; i++) { const g = i / fade; out[i] *= g; out[n - 1 - i] *= g; }
+  return out;
+}
+
+/** Render a command bed of n samples via the project's own command (no shell, cwd = projectRoot). */
+function renderCommandBed({ name, command }, { dir, n, seed, projectRoot }) {
+  const { wavFormatError } = require('./projectSounds.cjs');
+  const outWav = path.join(dir, `bed-${name}.wav`);
+  const lengthS = (n / SR).toFixed(3);
+  const subs = { '{name}': name, '{lengthS}': lengthS, '{seed}': String(seed), '{out}': outWav };
+  const argv = command.map((a) => {
+    let v = a;
+    for (const [k, val] of Object.entries(subs)) v = v.split(k).join(val);
+    return v;
+  });
+  const r = spawnSync(argv[0], argv.slice(1), {
+    cwd: projectRoot,
+    shell: false,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    timeout: BED_COMMAND_LIMITS.timeoutMs,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  const stderr = r.stderr ? r.stderr.toString('utf8').trim().slice(-BED_STDERR_TAIL) : '';
+  const withStderr = (msg) => (stderr ? `${msg}: ${stderr}` : msg);
+  const label = `project bed '${name}' command`;
+  if (r.error && r.error.code === 'ETIMEDOUT') throw new Error(withStderr(`${label} killed at its ${BED_COMMAND_LIMITS.timeoutMs / 1000} s limit`));
+  if (r.error) throw new Error(withStderr(`${label} failed to run: ${r.error.message}`));
+  if (r.status !== 0) {
+    const why = r.signal ? `killed by ${r.signal}` : `exit ${r.status}`;
+    throw new Error(withStderr(`${label} failed (${why})`));
+  }
+  if (!fs.existsSync(outWav)) throw new Error(withStderr(`${label} wrote no WAV to ${outWav}`));
+  const reason = wavFormatError(fs.readFileSync(outWav), `${label} output (${outWav})`);
+  if (reason) throw new Error(reason);
+  const s = decodeMono(outWav, dir, 'bed');
+  if (s.length < Math.round((n / SR - 0.05) * SR)) {
+    throw new Error(`${label} wrote ${(s.length / SR).toFixed(3)} s of audio; the mix needs ${lengthS} s`);
+  }
+  if (s.length >= n) return s.subarray(0, n);
+  const out = new Float32Array(n);
+  out.set(s);
+  return out;
+}
+
+/**
  * Mix narration + ducked music bed + SFX cues, then loudnorm to -14 LUFS / -1.5 dBTP.
  * cues: [{name, t}] (t in seconds; `at` also accepted). A name that is not a built-in
- * effect is read from the persona's sounds.sfx under projectRoot (absolute). Output
- * length is the longer of lengthS and the narration. Returns {lufs, truePeakDb, speechS}.
+ * effect is read from the persona's sounds.sfx under projectRoot (absolute).
+ * bed: absent -> the style's built-in bed; a STYLES key -> that built-in bed; any other
+ * name -> the persona's sounds.beds entry (a WAV looped to length, or rendered by its
+ * command). Output length is the longer of lengthS and the narration.
+ * Returns {lufs, truePeakDb, speechS}.
  */
-function mix({ narrationWav, cues = [], style, lengthS, out, seed = 1, projectRoot }) {
-  if (projectRoot !== undefined && projectRoot !== null && (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot))) {
+function mix({ narrationWav, cues = [], style, bed: bedName, lengthS, out, seed = 1, projectRoot }) {
+  if (hasRoot(projectRoot) && (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot))) {
     throw new Error('spec.projectRoot must be an absolute path');
   }
-  const cueFiles = resolveCueFiles(cues, projectRoot);
+  const getPersona = personaLoader(projectRoot);
+  const cueFiles = resolveCueFiles(cues, projectRoot, getPersona);
+  const bedSpec = resolveBed(bedName, style, projectRoot, getPersona);
   const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'dvk-sound-'));
   try {
     const narr = decodeMono(narrationWav, dir, 'narration');
     const n = Math.max(narr.length, Math.round(Number(lengthS) * SR));
-    const bed = bedSamples({ style, lengthS: n / SR, seed });
+    let bed;
+    if (bedSpec.file) bed = loopFileBed(bedSpec.file, dir, n);
+    else if (bedSpec.command) bed = renderCommandBed(bedSpec, { dir, n, seed, projectRoot });
+    else bed = bedSamples({ style: bedSpec.style, lengthS: n / SR, seed });
     // A single NaN in the buffer handed to ffmpeg makes libmp3lame assert (0-byte mp3).
     for (let i = 0; i < bed.length; i++) if (!Number.isFinite(bed[i])) bed[i] = 0;
     const projectSfx = new Map();
@@ -354,7 +456,7 @@ function mix({ narrationWav, cues = [], style, lengthS, out, seed = 1, projectRo
   }
 }
 
-module.exports = { buildMusicBed, buildSfx, mix, measure, parseEbur128, runFfmpeg, decodeWavF32, STYLES, SFX_NAMES, TARGET };
+module.exports = { buildMusicBed, buildSfx, mix, measure, parseEbur128, runFfmpeg, decodeWavF32, STYLES, SFX_NAMES, TARGET, BED_COMMAND_LIMITS };
 
 if (require.main === module) {
   try {

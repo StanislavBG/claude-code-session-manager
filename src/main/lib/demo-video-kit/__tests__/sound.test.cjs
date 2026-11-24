@@ -87,14 +87,14 @@ describe('demo-video-kit sound', () => {
     const { soundFile } = require('../projectSounds.cjs');
     const SR = 44100;
 
-    function sineWav(file, seconds, hz) {
+    function sineWav(file, seconds, hz, amp = 0.8) {
       const n = Math.round(seconds * SR);
       const buf = Buffer.alloc(44 + n * 2);
       buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8);
       buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
       buf.writeUInt32LE(SR, 24); buf.writeUInt32LE(SR * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
       buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
-      for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(0.8 * Math.sin(2 * Math.PI * hz * i / SR) * 32767), 44 + i * 2);
+      for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(amp * Math.sin(2 * Math.PI * hz * i / SR) * 32767), 44 + i * 2);
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, buf);
     }
@@ -184,5 +184,137 @@ describe('demo-video-kit sound', () => {
         expect(fs.existsSync(out)).toBe(false);
       } finally { cleanup(); }
     }, 120000);
+
+    describe('project beds', () => {
+      const STUB = `'use strict';
+const fs = require('fs');
+const path = require('path');
+const [name, lengthS, seed, out] = process.argv.slice(2);
+fs.appendFileSync(path.join(process.cwd(), 'calls.jsonl'), JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }) + '\\n');
+const mode = process.env.BED_STUB_MODE || 'ok';
+if (mode === 'fail') { process.stderr.write('boom'); process.exit(3); }
+if (mode === 'sleep') { setTimeout(() => {}, 60000); return; }
+if (mode === 'none') process.exit(0);
+if (mode === 'junk') { fs.writeFileSync(out, 'not a wav at all'); process.exit(0); }
+const sr = 44100;
+const secs = mode === 'short' ? 2 : Number(lengthS) + 0.5;
+const n = Math.round(secs * sr);
+const buf = Buffer.alloc(44 + n * 2);
+buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8);
+buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+buf.writeUInt32LE(sr, 24); buf.writeUInt32LE(sr * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(0.4 * Math.sin(2 * Math.PI * 330 * i / sr) * 32767), 44 + i * 2);
+fs.writeFileSync(out, buf);
+`;
+      const COMMAND = [process.execPath, 'bin/bed.cjs', '{name}', '{lengthS}', '{seed}', '{out}'];
+      const BED_PERSONA = { ...PERSONA, sounds: { beds: [{ name: 'hum' }, { name: 'loop', command: COMMAND }] } };
+      function bedProject(root, { hum = true, persona = BED_PERSONA } = {}) {
+        writePersona(root, persona, { wav: false });
+        if (hum) sineWav(soundFile(root, 'hum'), 1.0, 220, 0.5);
+        fs.mkdirSync(path.join(root, 'bin'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'bin', 'bed.cjs'), STUB);
+      }
+      const calls = (root) => fs.existsSync(path.join(root, 'calls.jsonl'))
+        ? fs.readFileSync(path.join(root, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+      function withMode(mode, fn) {
+        const prev = process.env.BED_STUB_MODE;
+        process.env.BED_STUB_MODE = mode;
+        try { return fn(); } finally { if (prev === undefined) delete process.env.BED_STUB_MODE; else process.env.BED_STUB_MODE = prev; }
+      }
+
+      it.skipIf(!hasFfmpeg)('a file bed is looped under narration and normalised', () => {
+        const { root, narr } = setup(8);
+        try {
+          bedProject(root);
+          const out = path.join(tmp, 'file.wav');
+          s.mix({ narrationWav: narr, bed: 'hum', lengthS: 8, out, projectRoot: root });
+          const m = s.measure(out);
+          expect(m.lufs).toBeGreaterThan(-15.5);
+          expect(m.lufs).toBeLessThan(-12.5);
+          expect(m.truePeakDb).toBeLessThanOrEqual(-1.0);
+          expect(calls(root)).toEqual([]);
+          // A file bed differs from the built-in bed it replaces.
+          const builtin = path.join(tmp, 'builtin.wav');
+          s.mix({ narrationWav: narr, style: 'Professional', lengthS: 8, out: builtin });
+          expect(fs.readFileSync(out).equals(fs.readFileSync(builtin))).toBe(false);
+        } finally { cleanup(); }
+      }, 120000);
+
+      it.skipIf(!hasFfmpeg)('a command bed is rendered by the project command with substituted placeholders', () => {
+        const { root, narr } = setup(8);
+        try {
+          bedProject(root);
+          const out = path.join(tmp, 'cmd.wav');
+          withMode('ok', () => s.mix({ narrationWav: narr, bed: 'loop', lengthS: 8, out, projectRoot: root }));
+          const m = s.measure(out);
+          expect(m.lufs).toBeGreaterThan(-15.5);
+          expect(m.lufs).toBeLessThan(-12.5);
+          expect(m.truePeakDb).toBeLessThanOrEqual(-1.0);
+          const c = calls(root);
+          expect(c).toHaveLength(1);
+          expect(c[0].cwd).toBe(fs.realpathSync(root));
+          expect(c[0].argv.slice(0, 3)).toEqual(['loop', '8.000', '1']);
+          expect(c[0].argv).toHaveLength(4);
+          expect(path.isAbsolute(c[0].argv[3])).toBe(true);
+          expect(c[0].argv[3]).toMatch(/\.wav$/);
+          expect(fs.existsSync(c[0].argv[3])).toBe(false); // temp dir cleaned up
+        } finally { cleanup(); }
+      }, 120000);
+
+      it.skipIf(!hasFfmpeg)("bed 'Fun' without style equals style 'Fun' without bed", () => {
+        const { narr } = setup(4);
+        try {
+          const a = path.join(tmp, 'a.wav');
+          const b = path.join(tmp, 'b.wav');
+          s.mix({ narrationWav: narr, bed: 'Fun', lengthS: 4, out: a });
+          s.mix({ narrationWav: narr, style: 'Fun', lengthS: 4, out: b });
+          expect(fs.readFileSync(a).equals(fs.readFileSync(b))).toBe(true);
+        } finally { cleanup(); }
+      }, 120000);
+
+      it.skipIf(!hasFfmpeg)('a spec without bed is byte-identical with and without projectRoot', () => {
+        const { root, narr } = setup(4);
+        try {
+          bedProject(root);
+          const a = path.join(tmp, 'a.wav');
+          const b = path.join(tmp, 'b.wav');
+          s.mix({ narrationWav: narr, style: 'Kinetic typography', lengthS: 4, out: a });
+          s.mix({ narrationWav: narr, style: 'Kinetic typography', lengthS: 4, out: b, projectRoot: root });
+          expect(fs.readFileSync(a).equals(fs.readFileSync(b))).toBe(true);
+          expect(calls(root)).toEqual([]);
+        } finally { cleanup(); }
+      }, 120000);
+
+      it.skipIf(!hasFfmpeg)('every bed failure throws its reason and writes no out file', () => {
+        const { root, narr } = setup(4);
+        try {
+          const out = path.join(tmp, 'out.wav');
+          const go = (bed, extra = { projectRoot: root }, mode = 'ok') => () => withMode(mode, () => s.mix({ narrationWav: narr, bed, lengthS: 4, out, ...extra }));
+          expect(go('hum', {})).toThrow(/^unknown bed: hum \(built-in styles: Professional, Fun, Animated whiteboard, Kinetic typography; pass projectRoot/);
+          expect(go('hum')).toThrow(/^unknown bed: hum .*persona sounds\.beds: none/);
+          bedProject(root, { hum: false });
+          expect(go('nope')).toThrow(/^unknown bed: nope .*persona sounds\.beds: hum, loop\)$/);
+          expect(go('hum')).toThrow(`project bed 'hum' has no WAV at ${soundFile(root, 'hum')}`);
+          fs.mkdirSync(path.dirname(soundFile(root, 'hum')), { recursive: true });
+          fs.writeFileSync(soundFile(root, 'hum'), 'not a wav');
+          expect(go('hum')).toThrow(/^project bed 'hum' .* is not a RIFF WAV/);
+          expect(go('loop', { projectRoot: root }, 'fail')).toThrow("project bed 'loop' command failed (exit 3): boom");
+          expect(go('loop', { projectRoot: root }, 'short')).toThrow("project bed 'loop' command wrote 2.000 s of audio; the mix needs 4.000 s");
+          expect(go('loop', { projectRoot: root }, 'junk')).toThrow(/^project bed 'loop' command output .* is not a RIFF WAV/);
+          expect(go('loop', { projectRoot: root }, 'none')).toThrow(/^project bed 'loop' command wrote no WAV to \/.*bed-loop\.wav$/);
+          const prev = s.BED_COMMAND_LIMITS.timeoutMs;
+          s.BED_COMMAND_LIMITS.timeoutMs = 1500;
+          try {
+            expect(go('loop', { projectRoot: root }, 'sleep')).toThrow("project bed 'loop' command killed at its 1.5 s limit");
+          } finally { s.BED_COMMAND_LIMITS.timeoutMs = prev; }
+          bedProject(root, { persona: { ...PERSONA, sounds: { beds: [{ name: 'loop', command: ['/no/such/program-dvk', '{lengthS}', '{out}'] }] } } });
+          expect(go('loop')).toThrow(/^project bed 'loop' command failed to run: .*ENOENT/);
+          fs.writeFileSync(path.join(characterDir(root), 'character.json'), '{bad');
+          expect(go('loop')).toThrow(/^project persona unusable: character\.json is not valid JSON/);
+          expect(fs.existsSync(out)).toBe(false);
+        } finally { cleanup(); }
+      }, 120000);
+    });
   });
 });

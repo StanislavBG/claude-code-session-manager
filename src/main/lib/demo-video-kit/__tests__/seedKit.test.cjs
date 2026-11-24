@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 38 (sound.cjs mixes persona sound effects)', () => {
-  expect(KIT_VERSION).toBe('38');
+test('KIT_VERSION is bumped to 39 (sound.cjs mixes persona music beds)', () => {
+  expect(KIT_VERSION).toBe('39');
 });
 
 test('the playbook path both personas name is where the kit installs it by default', () => {

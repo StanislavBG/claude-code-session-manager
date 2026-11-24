@@ -2,7 +2,8 @@
  * toolUseHumanMessageEvents.test.cjs — the job.tool_use emitter (scheduler job
  * stream-json log → createJobToolUseEmitter) and the human.message emitter
  * (chatRunner.run, the path chat_send_prompt also reaches through chat:run).
- * Covers the 200-char cap, secret redaction, byte offsets, once-per-prompt and
+ * Covers the 200-char cap, secret redaction, byte offsets, once-per-prompt, the
+ * origin rule (only origin "human"; never a boot-recovery re-send) and
  * a failing append that is logged, never thrown.
  *
  * Run: timeout 120 npx vitest run src/main/lib/epic/__tests__/toolUseHumanMessageEvents.test.cjs
@@ -166,6 +167,52 @@ test('chatRunner.run appends human.message once per human prompt; scheduler prom
     expect(ran).toEqual([prompt, 'auto', 'next']);
     await waitFor(() => err.mock.calls.some((c) => String(c[0]).includes('epic event append failed')));
     expect(err.mock.calls.some((c) => String(c[0]).includes('epic event append failed') && c[1] === 'human.message')).toBe(true);
+  } finally {
+    cr.__setExecutor(null);
+    cr.__resetQueueForTests();
+  }
+});
+
+test('human.message is logged only for origin "human": none for no origin, scheduler, or a boot-recovery re-send', async () => {
+  const cr = require('../../../chatRunner.cjs');
+  const { recoverInflightTurns, CONTINUE_PROMPT } = require('../../chatBootRecovery.cjs');
+  cr.__resetQueueForTests();
+  const ran = [];
+  cr.__setExecutor((job) => { ran.push(job.prompt); return Promise.resolve(); });
+  const appends = [];
+  const real = epicEventLog.appendEpicEvent;
+  vi.spyOn(epicEventLog, 'appendEpicEvent').mockImplementation((...args) => {
+    const p = real(...args);
+    appends.push(p);
+    return p;
+  });
+  const humanEvents = async () => { await Promise.all(appends); return events(['human.message']); };
+  try {
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'typed by a human', cwd, resume: false, origin: 'human' });
+    expect(await humanEvents()).toHaveLength(1);
+
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'no origin', cwd, resume: true });
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'auto', cwd, resume: true, origin: 'scheduler' });
+
+    // Boot recovery re-sends an interrupted human turn with that turn's origin.
+    const ended = [];
+    const ledger = {
+      list: async () => [{ sessionId: EPIC, tabId: EPIC, cwd, pid: 999999, origin: 'human' }],
+      end: async (id) => { ended.push(id); },
+      recoveredMap: async () => ({}),
+      markRecovered: async () => {},
+    };
+    const { results } = await recoverInflightTurns({
+      ledger, run: cr.run, pidAlive: () => false, sessionTurnState: async () => 'unfinished',
+      agentCliOf: () => null, log: () => {},
+    });
+    expect(results).toContainEqual({ sessionId: EPIC, outcome: 'rerun' });
+
+    await waitFor(() => ran.length === 4);
+    expect(ran).toEqual(['typed by a human', 'no origin', 'auto', CONTINUE_PROMPT]);
+    const evs = await humanEvents();
+    expect(evs).toHaveLength(1);
+    expect(evs[0].excerpt.startsWith('typed by a human')).toBe(true);
   } finally {
     cr.__setExecutor(null);
     cr.__resetQueueForTests();

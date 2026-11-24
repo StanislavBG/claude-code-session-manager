@@ -480,13 +480,17 @@ function recordAnswerIfOpen({ cwd, sessionId, prompt, origin }) {
 
 /**
  * Append human.message { chars, excerpt } for a human-sent prompt on an Epic
- * chat (sessionId = Epic id). Scheduler-originated and inbound-proposal
- * prompts are automation, not human messages. Fire-and-forget; a failure is
- * logged by appendChatEpicEvent, never thrown.
- * @param {{ cwd?: string, sessionId: string, prompt: string, origin?: string }} args
+ * chat (sessionId = Epic id). Fail-closed, the same rule as noteChatRunOrigin:
+ * only an explicitly declared origin === 'human' counts (the renderer's
+ * chat.ts send() resolves a composer submit to 'human'); absent, 'scheduler',
+ * 'external', 'inbound-proposal' and a boot-recovery re-send
+ * (chatBootRecovery.cjs stamps bootRecovery: true on its CONTINUE_PROMPT,
+ * which carries the interrupted turn's origin) are not human messages.
+ * Fire-and-forget; a failure is logged by appendChatEpicEvent, never thrown.
+ * @param {{ cwd?: string, sessionId: string, prompt: string, origin?: string, bootRecovery?: boolean }} args
  */
-function recordHumanMessage({ cwd, sessionId, prompt, origin }) {
-  if (origin === 'scheduler' || origin === 'inbound-proposal') return null;
+function recordHumanMessage({ cwd, sessionId, prompt, origin, bootRecovery }) {
+  if (origin !== 'human' || bootRecovery === true) return null;
   let summary;
   try { summary = humanMessageSummary(prompt); } catch { return null; }
   return appendChatEpicEvent(cwd, sessionId, { kind: 'human.message', source: 'chat', sessionId, ...summary });

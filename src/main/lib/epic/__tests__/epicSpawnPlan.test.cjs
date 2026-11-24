@@ -7,7 +7,7 @@
  */
 'use strict';
 
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -15,6 +15,7 @@ const { EventEmitter } = require('node:events');
 const { encodeCwd } = require('../../util/encodeCwd.cjs');
 const { planEpicSpawn, __resetForTests } = require('../epicSpawnPlan.cjs');
 const { __resetCacheForTests } = require('../epicTranscriptPath.cjs');
+const epicEventLog = require('../epicEventLog.cjs');
 
 const SID = '00ff31cb-56b6-421c-829c-012ef95b15e2';
 const PROJECT = '/projects/starry-night-ships';
@@ -26,7 +27,19 @@ beforeEach(() => {
   __resetCacheForTests();
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-home-'));
 });
-afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
+afterEach(() => {
+  vi.restoreAllMocks();
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// chatRunner's fire-and-forget Epic event appends would race the temp project's
+// rmSync (ENOTEMPTY under full-suite load): stub them so cleanup is deterministic.
+function stubEpicEventAppends() {
+  return vi.spyOn(epicEventLog, 'appendEpicEvent').mockImplementation(() => Promise.resolve(null));
+}
+async function waitUntil(fn, tries = 500) {
+  for (let i = 0; i < tries && !fn(); i++) await new Promise((r) => setTimeout(r, 10));
+}
 
 function transcriptUnder(dir) {
   const d = path.join(home, '.claude', 'projects', encodeCwd(dir));
@@ -133,13 +146,14 @@ test('chatRunner: dead-encoding transcript => zero CLI spawns, exactly one clear
     const realSpawn = cp.spawn;
     let spawns = 0;
     cp.spawn = () => { spawns++; const c = new EventEmitter(); c.stdout = new EventEmitter(); c.stderr = new EventEmitter(); c.pid = 1; c.kill = () => {}; return c; };
+    stubEpicEventAppends();
     const chatRunner = require('../../../chatRunner.cjs');
     chatRunner.__resetQueueForTests();
     const sent = [];
     chatRunner.attachWindow({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (channel, payload) => sent.push({ channel, payload }) } });
     try {
       for (let i = 0; i < 3; i++) chatRunner.run({ tabId: `t${i}`, sessionId: SID, prompt: 'hi', cwd: project, resume: true });
-      await new Promise((r) => setTimeout(r, 100));
+      await waitUntil(() => sent.filter((e) => e.channel === 'chat:run:error').length >= 3);
     } finally { cp.spawn = realSpawn; }
     const errs = sent.filter((e) => e.channel === 'chat:run:error');
     expect(spawns).toBe(0);
@@ -168,6 +182,7 @@ test('chatRunner: silent run refused by planEpicSpawn => onSilentError with the 
     const realSpawn = cp.spawn;
     let spawns = 0;
     cp.spawn = () => { spawns++; throw new Error('must not spawn'); };
+    stubEpicEventAppends();
     const chatRunner = require('../../../chatRunner.cjs');
     chatRunner.__resetQueueForTests();
     const sent = [];

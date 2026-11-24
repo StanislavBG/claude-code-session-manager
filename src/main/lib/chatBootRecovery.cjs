@@ -121,6 +121,8 @@ async function recoverInflightTurns(deps) {
     await ledger.end(sessionId);
     run({
       tabId, sessionId, cwd, prompt: CONTINUE_PROMPT, resume: true,
+      // Marks the re-send as automation: chatRunner.recordHumanMessage never logs it as human.message.
+      bootRecovery: true,
       ...(entry.promptId ? { promptId: entry.promptId } : {}),
       ...(entry.origin ? { origin: entry.origin } : {}),
       ...(entry.worktreeDirHint ? { worktreeDirHint: entry.worktreeDirHint } : {}),

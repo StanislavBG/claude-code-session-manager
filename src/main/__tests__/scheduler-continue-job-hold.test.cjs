@@ -22,11 +22,13 @@ const DAY = 24 * HOUR;
 const EPIC = 'epic-continue-hold-fixture';
 const SESSION = '22222222-3333-4444-8555-666666666666';
 const SLUG = '10-continue-hold';
+const MANUAL_SLUG = '11-continue-hold-manual';
 
 let tmpHome;
 let originalHome;
 let scheduler;
 let billing;
+let auditLog;
 let originalFetchUsage;
 let calls = [];
 
@@ -59,11 +61,19 @@ async function rowOf(slug) {
   return JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs.find((j) => j.slug === slug);
 }
 
-async function seed(config) {
+/** Every audit event of `kind` for `slug` — each test uses its own slug so counts never leak across tests. */
+function auditEvents(kind, slug) {
+  let text = '';
+  try { text = fs.readFileSync(auditLog.auditLogPath(), 'utf8'); } catch { return []; }
+  return text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((e) => e && e.kind === kind && e.slug === slug);
+}
+
+async function seed(config, slug = SLUG) {
   await scheduler.writeQueue({
     jobs: [{
-      slug: SLUG,
-      title: SLUG,
+      slug,
+      title: slug,
       cwd: cwdOf(),
       epicId: EPIC,
       claudeSessionId: 'origin-epic-session',
@@ -77,7 +87,7 @@ async function seed(config) {
     config,
     paused: null,
   });
-  const res = await scheduler.remote.interruptJob(SLUG, { cwd: cwdOf() });
+  const res = await scheduler.remote.interruptJob(slug, { cwd: cwdOf() });
   expect(res.ok).toBe(true);
 }
 
@@ -87,6 +97,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
   scheduler = require('../scheduler.cjs');
   billing = require('../usage.cjs');
+  auditLog = require('../lib/telemetry/auditLog.cjs');
   originalFetchUsage = billing.fetchUsage;
   if (!scheduler.PRDS_DIR.startsWith(tmpHome)) throw new Error('PRDS_DIR not under temp HOME');
   const projDir = path.join(tmpHome, '.claude', 'projects', 'fake-project-slug');
@@ -126,6 +137,9 @@ test('a 96% reading at threshold 90 refuses continue, keeps the row interrupted;
   expect(held.hold).toHaveProperty('resetsAt');
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toHaveLength(0);
+  const heldEvents = auditEvents('job_continue_held', SLUG);
+  expect(heldEvents).toHaveLength(1);
+  expect(heldEvents[0]).toMatchObject({ kind: 'job_continue_held', slug: SLUG, reason: 'utilization-held' });
 
   const row = await rowOf(SLUG);
   expect(row.status).toBe('pending');
@@ -139,17 +153,22 @@ test('a 96% reading at threshold 90 refuses continue, keeps the row interrupted;
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toHaveLength(1);
   expect(calls[0].resumeTarget).toMatchObject({ sessionId: SESSION, interrupt: true });
+  // The resuming call appends no job_continue_held event: still only the one refusal.
+  expect(auditEvents('job_continue_held', SLUG)).toHaveLength(1);
 });
 
 test("firePolicy 'manual' refuses continue the same way", async () => {
-  await seed({ utilizationThreshold: 90, firePolicy: 'manual' });
+  await seed({ utilizationThreshold: 90, firePolicy: 'manual' }, MANUAL_SLUG);
   await reading(10);
 
-  const held = await scheduler.remote.continueJob(SLUG, { cwd: cwdOf() });
+  const held = await scheduler.remote.continueJob(MANUAL_SLUG, { cwd: cwdOf() });
   expect(held.ok).toBe(false);
   expect(held.hold).toMatchObject({ reason: 'manual-fire-policy' });
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toHaveLength(0);
-  const row = await rowOf(SLUG);
+  const heldEvents = auditEvents('job_continue_held', MANUAL_SLUG);
+  expect(heldEvents).toHaveLength(1);
+  expect(heldEvents[0]).toMatchObject({ kind: 'job_continue_held', slug: MANUAL_SLUG, reason: 'manual-fire-policy' });
+  const row = await rowOf(MANUAL_SLUG);
   expect(row.interrupted).toMatchObject({ sessionId: SESSION });
 });

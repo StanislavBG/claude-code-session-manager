@@ -164,6 +164,32 @@ test('onEpicEventAppended calls every listener after the write; a throwing liste
   expect(seen).toHaveLength(1);
 });
 
+test('listeners get one shared deep-frozen copy; a mutating listener is logged and the caller record is untouched', async () => {
+  const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const views = [];
+  let nestedThrew = false;
+  log.onEpicEventAppended((_c, rec) => {
+    views.push(rec);
+    rec.kind = 'tampered';
+  });
+  log.onEpicEventAppended((_c, rec) => {
+    views.push(rec);
+    try { rec.nested.deep = 'x'; } catch (err) { nestedThrew = err instanceof TypeError; }
+  });
+  const rec = await log.appendEpicEvent(cwd, EPIC, { kind: 'epic.minted', nested: { deep: 'orig' } });
+  expect(rec.kind).toBe('epic.minted');
+  expect(rec.nested).toEqual({ deep: 'orig' });
+  expect(Object.isFrozen(rec)).toBe(false);
+  expect(views).toHaveLength(2);
+  expect(views[0]).toBe(views[1]);
+  expect(views[0]).not.toBe(rec);
+  expect(views[1].kind).toBe('epic.minted');
+  expect(views[1].nested.deep).toBe('orig');
+  expect(nestedThrew).toBe(true);
+  expect(Object.isFrozen(views[0]) && Object.isFrozen(views[0].nested)).toBe(true);
+  expect(errSpy).toHaveBeenCalledWith('[epicEventLog] listener failed', expect.stringMatching(/read only|read-only|kind/));
+});
+
 test('_resetForTests clears listeners', async () => {
   const fn = vi.fn();
   log.onEpicEventAppended(fn);

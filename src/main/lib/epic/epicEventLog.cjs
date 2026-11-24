@@ -66,13 +66,28 @@ const listeners = new Set();
 
 /**
  * onEpicEventAppended(fn) → unsubscribe. fn(cwd, record) runs after each
- * record is on disk; a throwing listener is logged and never fails the append.
+ * record is on disk with one deep-frozen copy shared by all listeners (never the
+ * caller's object); a throwing listener is logged and never fails the append.
  * @param {(cwd: string, record: Record<string, unknown>) => void} fn
  */
 function onEpicEventAppended(fn) {
   if (typeof fn !== 'function') throw new Error('epicEventLog: listener must be a function');
   listeners.add(fn);
   return () => listeners.delete(fn);
+}
+
+/**
+ * deepFreeze(value) → value, with every nested object/array frozen.
+ * @template T
+ * @param {T} value
+ * @returns {T}
+ */
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const v of Object.values(value)) deepFreeze(v);
+  }
+  return value;
 }
 
 function assertEpicId(epicId) {
@@ -178,9 +193,13 @@ function appendEpicEvent(cwd, epicId, event) {
     const record = { seq, time: new Date().toISOString(), epicId, kind: event.kind, ...capped };
     await fsp.appendFile(file, `${prefix}${JSON.stringify(record)}\n`, 'utf8');
     lastSeq.set(file, seq);
+    // Listeners share one deep-frozen copy: a mutating listener throws (strict
+    // mode, logged below) instead of changing the caller's record or what a
+    // later listener sees.
+    const view = listeners.size ? deepFreeze(structuredClone(record)) : null;
     for (const fn of [...listeners]) {
       try {
-        fn(cwd, record);
+        fn(cwd, /** @type {Record<string, unknown>} */ (view));
       } catch (err) {
         console.error('[epicEventLog] listener failed', err && err.message ? err.message : String(err));
       }

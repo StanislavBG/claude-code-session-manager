@@ -1508,7 +1508,9 @@ async function handleCallTool(request) {
             reason: args && typeof args.reason === 'string' ? args.reason : undefined,
           }
         : {};
-      const result = await adminRequest('POST', `/admin/scheduler/${name === 'scheduler_pause' ? 'pause' : 'resume'}`, body);
+      const result = name === 'scheduler_pause'
+        ? await adminRequest('POST', '/admin/scheduler/pause', body)
+        : await adminRequest('POST', '/admin/scheduler/resume', body);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_list_jobs') {

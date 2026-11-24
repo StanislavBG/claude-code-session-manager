@@ -1,6 +1,7 @@
 {
   "source-text": [
     "src/main/__tests__/loginShellPathBoot.test.cjs",
+    "src/main/__tests__/mcpAdminRouteContract.test.cjs",
     "src/main/__tests__/procname-sm-processes.test.cjs",
     "src/main/__tests__/scheduleJobTransitionsGrep.test.cjs",
     "src/main/__tests__/scheduler-killtree-adoption.test.cjs",

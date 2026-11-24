@@ -109,6 +109,10 @@ function heartbeatPath() { return assertNotLiveRoot(path.join(schedulerHome(), '
 function sessionSlotsConfigPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'session-slots-config.json'), 'sessionSlotsConfigPath'); }
 /** Machine-level per-project 'Scripts may run Tasks' switches, keyed by abs cwd (tasks/taskSwitch.cjs). */
 function taskSwitchesPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'task-switches.json'), 'taskSwitchesPath'); }
+/** Machine-level per-project 'Scripts may run Demo Video' switches, keyed by abs cwd (project-pages/videoScriptPress.cjs). */
+function videoScriptSwitchesPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'video-script-switches.json'), 'videoScriptSwitchesPath'); }
+/** Machine-level ledger of scripted Demo Video presses (entryId -> epicId, slug, externalRef) (project-pages/videoScriptPress.cjs). */
+function videoScriptRunsPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'video-script-runs.json'), 'videoScriptRunsPath'); }
 /** Machine-level (project cwd, externalRef) -> Epic id index (epic/externalRefIndex.cjs). */
 function externalRefIndexPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'external-refs.json'), 'externalRefIndexPath'); }
 /** Machine-level "Needs you" items posted by outside apps (feedback-remote/needsYouStore.cjs). */
@@ -205,6 +209,8 @@ module.exports = {
   heartbeatPath,
   sessionSlotsConfigPath,
   taskSwitchesPath,
+  videoScriptSwitchesPath,
+  videoScriptRunsPath,
   externalRefIndexPath,
   needsYouPath,
   adminTokenPath,

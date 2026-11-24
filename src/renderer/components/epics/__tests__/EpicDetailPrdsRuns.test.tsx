@@ -222,6 +222,45 @@ describe('EpicDetail PRDs/Runs tabs (PRD 828)', () => {
     expect(card!.textContent).not.toContain('draft')
   })
 
+  it('shows a cancelled PRD as the neutral cancelled pill next to a real failure', async () => {
+    installWindowApiMock([])
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+
+    ;(window.api.schedule.listPrds as any).mockResolvedValue([
+      { slug: '5-cancelled', title: 'Cancelled', cwd: '/tmp/proj', estimateMinutes: 30, mtimeMs: 1, parallelGroup: 1, sourcePromptId: session.id },
+      { slug: '6-broken', title: 'Broken', cwd: '/tmp/proj', estimateMinutes: 30, mtimeMs: 2, parallelGroup: 1, sourcePromptId: session.id },
+    ])
+    const { useScheduleState } = await import('../../../state/scheduleState')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const base = {
+      cwd: '/tmp/proj', parallelGroup: 1, estimateMinutes: 30, bodyPreview: '', runId: null,
+      startedAt: null, finishedAt: null, sourcePromptId: session.id,
+    }
+    useScheduleState.setState({
+      snapshot: {
+        jobs: [
+          { ...base, slug: '5-cancelled', title: 'Cancelled', status: 'failed', exitCode: null, error: 'cancelled', cancelled: true },
+          { ...base, slug: '6-broken', title: 'Broken', status: 'failed', exitCode: 1, error: 'boom' },
+        ],
+      } as any,
+      loaded: true,
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flush()
+    clickTab(el, 'PRDs')
+    await flush()
+
+    const cards = Array.from(el.querySelectorAll('[data-testid="epic-prd-card"]'))
+    const pillOf = (slug: string) =>
+      cards.find((c) => c.textContent?.includes(slug))?.querySelector('[role="status"]')?.textContent
+    expect(cards).toHaveLength(2)
+    expect(pillOf('5-cancelled')).toBe('cancelled')
+    expect(pillOf('6-broken')).toBe('failed')
+  })
+
   it('Runs tab filters schedule jobs by sourcePromptId and shows a job whose PRD file was archived', async () => {
     // No PRD file for '5-widget' — simulates an archived PRD file; the job
     // row alone must still surface it.

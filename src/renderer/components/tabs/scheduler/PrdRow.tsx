@@ -16,6 +16,8 @@ const STUCK = new Set(['failed', 'needs_review', 'quarantined'])
 
 /** Status dot: solid = settled/active, hollow ring = waiting its turn, faint fill = held/blocked. */
 function dotClass(row: PlanRow): string {
+  // A human cancel is a decision, not a failure — neutral faint dot, never bg-accent.
+  if (row.cancelled === true) return 'bg-fg-faint/40'
   switch (row.status) {
     case 'completed': case 'skipped': return 'bg-sage'
     case 'running': case 'investigating': return 'bg-accent'
@@ -30,6 +32,7 @@ function dotClass(row: PlanRow): string {
 }
 
 function tintClass(row: PlanRow): string {
+  if (row.cancelled === true) return ''
   switch (row.status) {
     case 'running': case 'investigating': return 'bg-butter/10'
     case 'failed': return 'bg-accent/10'
@@ -39,6 +42,7 @@ function tintClass(row: PlanRow): string {
 }
 
 function trailingClass(row: PlanRow): string {
+  if (row.cancelled === true) return 'text-fg-faint'
   switch (row.rowKind) {
     case 'running': case 'dep': case 'failed': return 'text-accent'
     case 'review': return 'text-butter font-semibold'

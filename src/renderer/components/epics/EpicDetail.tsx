@@ -405,9 +405,12 @@ function formatWhen(value: string | number): string {
 /** A PRD file with no matching queue.json job row reads 'draft'
  *  (epicPrds.status carries the raw ScheduleJobStatus otherwise) — map the
  *  one status word STATUS_TONE doesn't key on ('pending') to its Almanac
- *  display name ('queued') rather than forking a second tone table. */
-function prdPillStatus(status: EpicPrd['status']): PrdDisplayStatus {
-  return status === 'pending' ? 'queued' : (status as PrdDisplayStatus)
+ *  display name ('queued') rather than forking a second tone table. A
+ *  human-cancelled PRD (EpicPrd.cancelled, main's flag) reads 'cancelled',
+ *  never the 'failed' its raw status carries. */
+function prdPillStatus(prd: Pick<EpicPrd, 'status' | 'cancelled'>): PrdDisplayStatus {
+  if (prd.cancelled === true) return 'cancelled'
+  return prd.status === 'pending' ? 'queued' : (prd.status as PrdDisplayStatus)
 }
 
 /** Lazy, cached PRD line count — no field for this on EpicPrd/PrdListItem,
@@ -460,7 +463,7 @@ function PrdCard({ prd }: { prd: EpicPrd }) {
       <span className="min-w-0">
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-[12.5px] font-semibold text-fg">{prd.slug}</span>
-          <PrdStatusPill status={prdPillStatus(prd.status)} />
+          <PrdStatusPill status={prdPillStatus(prd)} />
           {prd.archived && (
             <span
               className="text-[11px] font-semibold text-fg-faint"

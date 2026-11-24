@@ -6,7 +6,9 @@
  * newest first, with a status filter (reloads through the store's loadItems). Detail: the
  * annotated screenshot (toggle to the raw one) loaded through window.api.siteFeedback.inboxImage,
  * a marks table, details, page URL + viewport, and collapsible console / network lists; status
- * can be set and the report removed after a confirm.
+ * can be set and the report removed after a confirm. "Open as Epic" is a human press through the
+ * New Epic mint path (createPromptSession — born proposed), built by lib/siteFeedbackIntake.ts with
+ * every visitor-supplied part fenced as data; it then links the Epic and sets in_progress.
  *
  * Every report field is visitor-supplied: it renders only as React text children — no
  * dangerouslySetInnerHTML, no auto-linking (the page URL is text, never an <a>).
@@ -16,6 +18,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { selectSiteFeedback, useSiteFeedback } from '../../../state/siteFeedback'
 import { toast } from '../../../state/toast'
+import { usePromptSessions } from '../../../state/promptSessions'
+import { buildSiteIntake } from '../../../lib/siteFeedbackIntake'
 import { formatAgo } from '../../../lib/formatTime'
 import type {
   SiteFeedbackImageKind,
@@ -191,6 +195,8 @@ function Detail({ cwd, detail }: { cwd: string; detail: SiteFeedbackItemDetail }
   const setStatus = useSiteFeedback((s) => s.setStatus)
   const removeItem = useSiteFeedback((s) => s.removeItem)
   const closeItem = useSiteFeedback((s) => s.closeItem)
+  const linkEpic = useSiteFeedback((s) => s.linkEpic)
+  const createPromptSession = usePromptSessions((s) => s.createPromptSession)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [busy, setBusy] = useState(false)
   const { meta, report } = detail
@@ -199,6 +205,21 @@ function Detail({ cwd, detail }: { cwd: string; detail: SiteFeedbackItemDetail }
     setBusy(true)
     try {
       toastFailure(await setStatus(cwd, meta.hostId, status))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const linked = meta.epicId != null
+  const onOpenAsEpic = async () => {
+    if (busy || linked) return
+    setBusy(true)
+    try {
+      const { goalText, openingPrompt, sections, tag } = await buildSiteIntake(detail, cwd)
+      const session = await createPromptSession(cwd, goalText, tag, undefined, 'architect', openingPrompt, sections)
+      const link = toastFailure(await linkEpic(cwd, meta.hostId, session.id))
+      if (link.ok) toastFailure(await setStatus(cwd, meta.hostId, 'in_progress'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -250,6 +271,16 @@ function Detail({ cwd, detail }: { cwd: string; detail: SiteFeedbackItemDetail }
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          data-testid="site-feedback-open-epic"
+          disabled={busy || linked}
+          title={linked ? 'An Epic is already linked to this report' : 'Create a proposed Epic from this report'}
+          onClick={() => void onOpenAsEpic()}
+          className="rounded border border-line px-2 py-0.5 text-[12px] hover:bg-bg-hover disabled:opacity-50"
+        >
+          Open as Epic
+        </button>
         {confirmRemove ? (
           <>
             <button

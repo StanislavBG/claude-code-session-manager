@@ -134,7 +134,7 @@ const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const { expandHome } = require('./lib/util/expandHome.cjs');
 const { hasDownstreamValidator } = require('./lib/prd/planValidator.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
-const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
+const { verifyRun, captureArtifactEvidence, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/scheduler/terminalRunOutcome.cjs');
 const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan, fixPlanRecordPath } = require('./lib/scheduler/fixPlanSlug.cjs');
 const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSinceRun.cjs');
@@ -8238,6 +8238,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // shape for the whole run). Named generically (not "worktree...") because
     // an in-place run salvages one too (PRD 1098).
     let salvagePatch = null;
+    // Artifact evidence for a declared artifact-only PRD, captured while the
+    // job worktree still exists (finalizeJobWorktree deletes it before
+    // verifyRun runs). Null for in-place runs and undeclared PRDs.
+    let artifactEvidence = null;
     let uncommittedSnapshot = null;
     // Which foreign-WIP shape applies to THIS run: an isolated worktree only
     // ever needs to disclose carriedPaths (its checkout starts clean apart
@@ -8274,6 +8278,18 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         // them to the main checkout before verify and before the checkout is
         // removed. Never throws (planRecordHarvest.cjs).
         harvestJobPlanRecords(job, worktree.dir, job.cwd || defaultCwd);
+        // Capture artifact evidence before the worktree is removed: a
+        // git-ignored artifact may live only here. Never breaks teardown.
+        try {
+          const evidencePrdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
+          artifactEvidence = captureArtifactEvidence({
+            prdPath: evidencePrdPath,
+            roots: [job.cwd || defaultCwd, worktree.dir],
+            startedAt: dispatchStartedAt,
+          });
+        } catch {
+          artifactEvidence = null;
+        }
         // Same point for the Artifacts store: declared artifactPaths + the
         // job's SM_ARTIFACTS_DIR staging folder. Never throws.
         await harvestJobArtifacts(job, worktree.dir, job.cwd || defaultCwd, { runId });
@@ -8531,7 +8547,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         priorLandedCommit,
         jobLandedCommitThisRun,
         exitCode: res.exitCode,
-        worktreeDir: worktree.ok ? worktree.dir : null,
+        artifactEvidence,
       }).catch((e) => ({
         verdict: 'verify_unavailable',
         reason: `verifier threw: ${e?.message ?? String(e)}`,

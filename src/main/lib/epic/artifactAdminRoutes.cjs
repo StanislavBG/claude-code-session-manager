@@ -143,6 +143,7 @@ function route(fn) {
  *   readActiveIndex?: (cwd: string) => { sessions: Record<string, any> },
  *   stagingBase?: () => string | null,
  *   tmpdir?: () => string,
+ *   postArtifactReadyNotice?: Function,
  * }} ArtifactRouteDeps
  */
 
@@ -158,6 +159,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
   const readIndex = (/** @type {string} */ cwd) => (deps.readActiveIndex || require('./epicMint.cjs').readActiveIndex)(cwd);
   const stagingBase = deps.stagingBase || defaultStagingBase;
   const tmpdir = deps.tmpdir || os.tmpdir;
+  const postNotice = deps.postArtifactReadyNotice || require('./artifactNotice.cjs').postArtifactReadyNotice;
 
   adminHttp.registerRoute('POST', '/admin/artifacts/publish', route(async (req) => {
     const b = await readJsonBody(req);
@@ -190,6 +192,8 @@ function registerAdminRoute(adminHttp, deps = {}) {
       allowedRoots,
     });
     if (!result || !result.ok) throw storeRefusal(result && result.error);
+    // One 'artifact-ready' notice per publish call, in the owning Epic's chat (never throws).
+    await postNotice({ cwd: projectRoot, epicId, entries: [{ storedPath: result.storedPath, entry: result.entry }] });
     const revealPath = path.relative(projectRoot, result.storedPath).split(path.sep).join('/');
     return { ok: true, storedPath: result.storedPath, revealPath, entry: result.entry };
   }));

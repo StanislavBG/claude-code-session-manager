@@ -68,6 +68,7 @@ const { writeNativeSession } = require('./lib/agent-cli/agentCliSessionStore.cjs
 // Module object (not destructured) so tests can stub the append.
 const epicEventLog = require('./lib/epic/epicEventLog.cjs');
 const artifactStore = require('./lib/epic/artifactStore.cjs');
+const { postArtifactReadyNotice } = require('./lib/epic/artifactNotice.cjs');
 
 // Caps on per-run stream buffers (a run can last hours).
 const STDERR_TAIL_MAX = 64 * 1024;
@@ -433,8 +434,12 @@ function ingestChatArtifacts({ cwd, sessionId, srcDir }) {
   } catch (err) {
     p = Promise.reject(err);
   }
-  return Promise.resolve(p).then((res) => {
+  return Promise.resolve(p).then(async (res) => {
     for (const s of res?.skipped || []) console.error('[chatRunner] artifact not ingested', s.path, s.reason);
+    // One 'artifact-ready' notice per ingest batch, only when something landed (never throws).
+    if (res && Array.isArray(res.published) && res.published.length > 0) {
+      await postArtifactReadyNotice({ cwd, epicId: sessionId, entries: res.published });
+    }
     return res;
   }).catch((err) => {
     console.error('[chatRunner] artifact ingest failed', sessionId, err?.message ?? err);

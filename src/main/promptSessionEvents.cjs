@@ -113,6 +113,11 @@ async function appendResponseEventWithReason(cwd, sourcePromptId, text, meta = {
         const { kind, id, title } = meta.buildOutput;
         event.buildOutput = { kind, id, title };
       }
+      // 'artifact-ready' notice rows (lib/epic/artifactNotice.cjs) — whitelisted keys only.
+      if (meta && Array.isArray(meta.artifacts)) {
+        event.artifacts = meta.artifacts.map((a) => ({ title: a.title, kind: a.kind, path: a.path, size: a.size }));
+        if (Number.isInteger(meta.moreCount) && meta.moreCount > 0) event.moreCount = meta.moreCount;
+      }
       // Cross-project reply provenance (crossProjectReply.cjs) — whitelisted
       // keys only, so a caller can't smuggle arbitrary fields onto the chain.
       if (meta && meta.reply && typeof meta.reply === 'object') {

@@ -124,6 +124,7 @@ const prdPaths = require('./scheduler/prdPaths.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('./promptSessionEvents.cjs');
+const { postArtifactReadyNotice } = require('./lib/epic/artifactNotice.cjs');
 const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv, buildPreflightHoldNotice, preflightHoldNoticeKey } = require('./lib/scheduler/reviewNotice.cjs');
 const { phaseOfJob } = require('./lib/phaseProjection.cjs');
 const epicValidationHook = require('./lib/epic/epicValidationHook.cjs');
@@ -471,6 +472,8 @@ async function harvestJobArtifacts(job, worktreeDir, projectRoot, { runId = job 
     const producer = { epicId, prdSlug: slug || null, sessionId: job.sessionId || null };
     const wtBase = path.resolve(worktreeDir);
     let published = 0;
+    /** every publish result of this harvest, for the one 'artifact-ready' notice */
+    const landed = [];
     const declared = Array.isArray(job.artifactPaths) ? job.artifactPaths : [];
     for (const p of declared) {
       if (typeof p !== 'string' || !p || p.includes('\0')) continue;
@@ -488,7 +491,7 @@ async function harvestJobArtifacts(job, worktreeDir, projectRoot, { runId = job 
       const res = await artifactStore.publishArtifact({
         projectRoot, epicId, srcPath: abs, producer, allowedRoots: [wtBase],
       });
-      if (res.ok) published += 1;
+      if (res.ok) { published += 1; landed.push({ storedPath: res.storedPath, entry: res.entry }); }
       else console.warn(`[scheduler] ${slug}: artifact not harvested: ${p} — ${res.error}`);
     }
     if (runId) {
@@ -499,11 +502,14 @@ async function harvestJobArtifacts(job, worktreeDir, projectRoot, { runId = job 
       if (stagingDir) {
         const { published: pub, skipped } = await artifactStore.ingestDir({ projectRoot, epicId, srcDir: stagingDir, producer });
         published += pub.length;
+        landed.push(...pub);
         for (const sk of skipped) console.warn(`[scheduler] ${slug}: staged artifact not harvested: ${sk.path} — ${sk.reason}`);
         try { fs.rmdirSync(stagingDir); } catch { /* not empty (skipped files) or already gone */ }
       }
     }
     if (published) console.log(`[scheduler] ${slug}: harvested ${published} artifact(s) into ${projectRoot}`);
+    // One 'artifact-ready' notice for everything this harvest published (never throws).
+    if (landed.length) await postArtifactReadyNotice({ cwd: projectRoot, epicId, entries: landed });
   } catch (e) {
     console.error(`[scheduler] ${slug}: artifact harvest failed`, e);
   }

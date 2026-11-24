@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { EventEmitter } = require('events');
+const { VIDEO_SETTLE_MS } = require('../frames.cjs');
 const { exportVideo, sizeForHtml, verifyProbe, runFfmpegDefault } = require('../export.cjs');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'export-'));
@@ -23,20 +24,40 @@ function fixture(aspect) {
   return { dir, htmlPath, audioPath, outDir: path.join(dir, 'out') };
 }
 
-function fakePlaywright({ seekThrowsAt } = {}) {
-  const calls = { viewport: null, seeks: [], shots: [], closed: false };
+
+// Fake DOM for awaitFrameSettled: the real in-page function runs against these <video> stubs.
+// seekVideos marks each stub seeking; settleAfterMs (null = never) clears it.
+function fakeVideoDom(videos, { settleAfterMs } = {}) {
+  const prev = { document: globalThis.document, raf: globalThis.requestAnimationFrame };
+  globalThis.document = { querySelectorAll: (sel) => (sel === 'video' ? videos : []) };
+  globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+  const seekVideos = () => {
+    for (const v of videos) {
+      v.seeking = true; v.readyState = 1;
+      if (settleAfterMs != null) setTimeout(() => { v.seeking = false; v.readyState = 4; }, settleAfterMs);
+    }
+  };
+  const settled = () => videos.every((v) => !v.seeking && v.readyState >= 2);
+  const restore = () => { globalThis.document = prev.document; globalThis.requestAnimationFrame = prev.raf; };
+  return { seekVideos, settled, restore };
+}
+
+function fakePlaywright({ seekThrowsAt, dom } = {}) {
+  const calls = { viewport: null, seeks: [], shots: [], closed: false, settleCalls: 0 };
   const page = {
     setDefaultTimeout() {},
     async goto() {},
     async screenshot(o) {
-      calls.shots.push({ t: calls.seeks[calls.seeks.length - 1], path: o && o.path });
+      calls.shots.push({ t: calls.seeks[calls.seeks.length - 1], path: o && o.path, settled: dom ? dom.settled() : true });
       if (o && o.path) fs.writeFileSync(o.path, PNG);
       return PNG;
     },
     async evaluate(fn, arg) {
+      if (fn.name === 'awaitFrameSettled') { calls.settleCalls++; expect(arg).toBe(VIDEO_SETTLE_MS); return dom ? fn(arg) : undefined; }
       if (String(fn).includes('d.seek')) {
         if (seekThrowsAt != null && arg === seekThrowsAt) throw new Error('seek boom');
         calls.seeks.push(arg);
+        if (dom) dom.seekVideos();
       }
       return undefined;
     },
@@ -178,6 +199,53 @@ describe('exportVideo (injected fakes)', () => {
     const r = await exportVideo({ ...f, audioPath: path.join(f.dir, 'nope.wav'), lengthS: 1, loadPlaywright: () => fakePlaywright().pw });
     expect(r.ok).toBe(false);
     expect(r.error).toContain('audioPath');
+  });
+});
+
+describe('exportVideo waits for embedded <video> seeks', () => {
+  it('a seeking video that settles: every frame and the poster are shot after it settled', async () => {
+    const f = fixture('9:16');
+    const dom = fakeVideoDom([{ seeking: false, readyState: 4 }], { settleAfterMs: 30 });
+    try {
+      const { pw, calls } = fakePlaywright({ dom });
+      const ff = fakeFfmpeg();
+      const r = await exportVideo({ ...f, lengthS: 1, fps: 4, loadPlaywright: () => pw, runFfmpeg: ff.runFfmpeg, runFfprobe: () => probeJson({ d: 1 }) });
+      expect(r.ok).toBe(true);
+      expect(ff.calls.frames).toBe(4);
+      expect(calls.settleCalls).toBe(5);
+      expect(calls.shots.map((s) => s.settled)).toEqual([true, true, true, true, true]);
+    } finally { dom.restore(); }
+  });
+  it('a video that never settles fails the export with an error naming t, no outputs left', async () => {
+    const f = fixture('9:16');
+    const dom = fakeVideoDom([{ seeking: false, readyState: 4 }], { settleAfterMs: null });
+    try {
+      const { pw, calls } = fakePlaywright({ dom });
+      const ff = fakeFfmpeg();
+      const started = Date.now();
+      const r = await exportVideo({ ...f, lengthS: 1, fps: 4, loadPlaywright: () => pw, runFfmpeg: ff.runFfmpeg, runFfprobe: () => probeJson({ d: 1 }) });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(VIDEO_SETTLE_MS - 50);
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/t=0 s/);
+      expect(r.error).toMatch(/still seeking/);
+      expect(r.check).toEqual({ id: 'export', ok: false, detail: r.error });
+      expect(calls.shots).toEqual([]);
+      expect(fs.existsSync(path.join(f.outDir, 'video.mp4'))).toBe(false);
+      expect(fs.existsSync(path.join(f.outDir, 'poster.png'))).toBe(false);
+    } finally { dom.restore(); }
+  }, 10000);
+  it('a document with no <video> returns at once', async () => {
+    const f = fixture('9:16');
+    const dom = fakeVideoDom([]);
+    try {
+      const { pw, calls } = fakePlaywright({ dom });
+      const ff = fakeFfmpeg();
+      const started = Date.now();
+      const r = await exportVideo({ ...f, lengthS: 1, fps: 4, loadPlaywright: () => pw, runFfmpeg: ff.runFfmpeg, runFfprobe: () => probeJson({ d: 1 }) });
+      expect(Date.now() - started).toBeLessThan(500);
+      expect(r.ok).toBe(true);
+      expect(calls.settleCalls).toBe(5);
+    } finally { dom.restore(); }
   });
 });
 

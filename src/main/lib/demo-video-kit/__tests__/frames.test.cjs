@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { sampleFrames, decodePng, encodePng, lumaStats, MAX_FRAMES, viewportForHtml } = require('../frames.cjs');
+const { sampleFrames, VIDEO_SETTLE_MS, decodePng, encodePng, lumaStats, MAX_FRAMES, viewportForHtml } = require('../frames.cjs');
 const { checkBlankFrames } = require('../checks.cjs');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'frames-'));
@@ -61,19 +61,38 @@ describe('sampleFrames', () => {
   }, 120000);
 });
 
+
+// Fake DOM for awaitFrameSettled: the real in-page function runs against these <video> stubs.
+// seekVideos marks each stub seeking; settleAfterMs (null = never) clears it.
+function fakeVideoDom(videos, { settleAfterMs } = {}) {
+  const prev = { document: globalThis.document, raf: globalThis.requestAnimationFrame };
+  globalThis.document = { querySelectorAll: (sel) => (sel === 'video' ? videos : []) };
+  globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+  const seekVideos = () => {
+    for (const v of videos) {
+      v.seeking = true; v.readyState = 1;
+      if (settleAfterMs != null) setTimeout(() => { v.seeking = false; v.readyState = 4; }, settleAfterMs);
+    }
+  };
+  const settled = () => videos.every((v) => !v.seeking && v.readyState >= 2);
+  const restore = () => { globalThis.document = prev.document; globalThis.requestAnimationFrame = prev.raf; };
+  return { seekVideos, settled, restore };
+}
+
 // Fake Playwright: answers each page.evaluate by the function it is handed.
-function fakePlaywright({ boxes, smDemo }) {
-  const calls = { viewport: null, seeks: [] };
+function fakePlaywright({ boxes, smDemo, dom }) {
+  const calls = { viewport: null, seeks: [], settleCalls: 0, shotsSettled: [] };
   const png = encodePng(4, 4, solid(4, 4, [200, 100, 50]));
   const page = {
     setDefaultTimeout() {},
     async goto() {},
-    async screenshot() { return png; },
+    async screenshot() { calls.shotsSettled.push(dom ? dom.settled() : true); return png; },
     async evaluate(fn, arg) {
       if (fn.name === 'collectTextBoxes') { expect(arg).toBe(60); return boxes; }
+      if (fn.name === 'awaitFrameSettled') { calls.settleCalls++; expect(arg).toBe(VIDEO_SETTLE_MS); return dom ? fn(arg) : undefined; }
       const src = String(fn);
       if (src.includes('d.beats')) return { beats: smDemo.beats ?? null, cuts: smDemo.cuts ?? null };
-      if (src.includes('d.seek')) calls.seeks.push(arg);
+      if (src.includes('d.seek')) { calls.seeks.push(arg); if (dom) dom.seekVideos(); }
       return undefined;
     },
   };
@@ -129,4 +148,47 @@ describe('sampleFrames textBoxes + beats/cuts (injected playwright)', () => {
     expect(r.beats).toEqual({ hook: 1 });
     expect(r.cuts).toEqual([1]);
   }, 120000);
+});
+
+describe('sampleFrames waits for embedded <video> seeks', () => {
+  const fixtureHtml = () => { const dir = tmp(); const html = path.join(dir, 'v.html'); fs.writeFileSync(html, '<p>x</p>'); return { dir, html }; };
+  it('bound is 2 s', () => { expect(VIDEO_SETTLE_MS).toBe(2000); });
+  it('a seeking video that settles: every screenshot is taken after it settled', async () => {
+    const { dir, html } = fixtureHtml();
+    const dom = fakeVideoDom([{ seeking: false, readyState: 4 }, { seeking: false, readyState: 4 }], { settleAfterMs: 40 });
+    try {
+      const { pw, calls } = fakePlaywright({ boxes: [], smDemo: {}, dom });
+      const r = await sampleFrames({ htmlPath: html, lengthS: 1, stepS: 0.5, outDir: dir, loadPlaywright: () => pw });
+      expect(r.error).toBeUndefined();
+      expect(r.frames).toHaveLength(3);
+      expect(calls.settleCalls).toBe(3);
+      expect(calls.shotsSettled).toEqual([true, true, true]);
+    } finally { dom.restore(); }
+  });
+  it('a video that never settles fails the sample with an error naming t', async () => {
+    const { dir, html } = fixtureHtml();
+    const dom = fakeVideoDom([{ seeking: false, readyState: 4 }], { settleAfterMs: null });
+    try {
+      const { pw, calls } = fakePlaywright({ boxes: [], smDemo: {}, dom });
+      const started = Date.now();
+      const r = await sampleFrames({ htmlPath: html, lengthS: 1, stepS: 0.5, outDir: dir, loadPlaywright: () => pw });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(VIDEO_SETTLE_MS - 50);
+      expect(r.frames).toBeUndefined();
+      expect(r.error).toMatch(/t=0 s/);
+      expect(r.error).toMatch(/still seeking/);
+      expect(calls.shotsSettled).toEqual([]);
+    } finally { dom.restore(); }
+  }, 10000);
+  it('a document with no <video> returns at once', async () => {
+    const { dir, html } = fixtureHtml();
+    const dom = fakeVideoDom([]);
+    try {
+      const { pw, calls } = fakePlaywright({ boxes: [], smDemo: {}, dom });
+      const started = Date.now();
+      const r = await sampleFrames({ htmlPath: html, lengthS: 1, stepS: 0.5, outDir: dir, loadPlaywright: () => pw });
+      expect(Date.now() - started).toBeLessThan(500);
+      expect(r.frames).toHaveLength(3);
+      expect(calls.settleCalls).toBe(3);
+    } finally { dom.restore(); }
+  });
 });

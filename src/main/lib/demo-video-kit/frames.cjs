@@ -168,6 +168,41 @@ function collectTextBoxes(maxText) {
   return out;
 }
 
+// Upper bound for embedded <video> elements to finish seeking after one smDemo.seek(t).
+const VIDEO_SETTLE_MS = 2000;
+
+// Runs in the page after smDemo.seek(t): wait until every <video> is not seeking and has
+// readyState >= 2 (HAVE_CURRENT_DATA), rejecting after timeoutMs, then two animation frames so
+// the settled pixels are painted. A document without <video> goes straight to the two frames.
+function awaitFrameSettled(timeoutMs) {
+  const vids = Array.from(document.querySelectorAll('video'));
+  const pending = () => vids.filter((v) => v.seeking || !(v.readyState >= 2));
+  const paint = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  if (!pending().length) return paint();
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = () => {
+      const left = pending();
+      if (!left.length) { resolve(); return; }
+      if (Date.now() - start >= timeoutMs) {
+        reject(new Error(`${left.length} of ${vids.length} <video> element(s) still seeking or not ready after ${timeoutMs} ms`));
+        return;
+      }
+      setTimeout(tick, 10);
+    };
+    tick();
+  }).then(paint);
+}
+
+/** Node side: settle the frame for time t, or throw an error naming t (never a stale frame). */
+async function settleFrame(page, t) {
+  try {
+    await page.evaluate(awaitFrameSettled, VIDEO_SETTLE_MS);
+  } catch (e) {
+    throw new Error(`frame at t=${t} s: embedded video did not finish seeking: ${(e && e.message) || e}`);
+  }
+}
+
 const round4 = (v) => Math.round(v * 10000) / 10000;
 function normalizeBoxes(list) {
   return (Array.isArray(list) ? list : []).map((b) => ({
@@ -216,7 +251,7 @@ async function sampleFrames({ htmlPath, lengthS, stepS = 0.5, outDir, loadPlaywr
     for (let i = 0; i < count; i++) {
       const t = Math.round(i * step * 1000) / 1000;
       await page.evaluate((s) => { const d = window.smDemo; if (d && typeof d.seek === 'function') d.seek(s); }, t);
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      try { await settleFrame(page, t); } catch (e) { return { error: e.message }; }
       const textBoxes = normalizeBoxes(await page.evaluate(collectTextBoxes, MAX_BOX_TEXT));
       const img = decodePng(await page.screenshot({ type: 'png' }));
       const { mean, stdDev } = lumaStats(img);
@@ -232,4 +267,4 @@ async function sampleFrames({ htmlPath, lengthS, stepS = 0.5, outDir, loadPlaywr
   return { frames, beats, cuts, viewport, contactSheet };
 }
 
-module.exports = { MAX_FRAMES, VIEWPORT_9_16, sampleFrames, viewportForHtml, collectTextBoxes, decodePng, encodePng, lumaStats, buildContactSheet };
+module.exports = { MAX_FRAMES, VIDEO_SETTLE_MS, awaitFrameSettled, settleFrame, VIEWPORT_9_16, sampleFrames, viewportForHtml, collectTextBoxes, decodePng, encodePng, lumaStats, buildContactSheet };

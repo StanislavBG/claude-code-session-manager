@@ -10,6 +10,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { pathToFileURL } = require('url');
 const { loadPlaywright: defaultLoader } = require('./playwrightLoader.cjs');
+const { settleFrame } = require('./frames.cjs');
 
 const FFMPEG = process.env.SM_FFMPEG || 'ffmpeg';
 const FFPROBE = process.env.SM_FFPROBE || 'ffprobe';
@@ -165,7 +166,7 @@ async function exportVideo({ htmlPath, lengthS, audioPath, outDir, fps = 30, pos
         if (!d || typeof d.seek !== 'function') throw new Error('window.smDemo.seek is missing');
         d.seek(s);
       }, t);
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      await settleFrame(page, t);
     };
     async function* frames() {
       for (let i = 0; i < frameCount; i++) {

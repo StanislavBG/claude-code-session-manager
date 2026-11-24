@@ -194,3 +194,26 @@ describe('script entry point', () => {
     }
   });
 });
+
+describe('plugin hooks.json wiring', () => {
+  const HOOKS_JSON = path.resolve(__dirname, '../../../plugins/session-manager-dev/hooks/hooks.json');
+  const PLUGIN_ROOT = path.resolve(__dirname, '../../../plugins/session-manager-dev');
+
+  test('registers exactly one Stop command hook pointing at an existing script', () => {
+    const cfg = JSON.parse(fs.readFileSync(HOOKS_JSON, 'utf8'));
+    expect(Object.keys(cfg.hooks)).toEqual(['Stop']);
+    const stop = cfg.hooks.Stop;
+    expect(Array.isArray(stop)).toBe(true);
+    const hooks = stop.flatMap((g) => g.hooks);
+    expect(hooks).toHaveLength(1);
+    const [h] = hooks;
+    expect(h.type).toBe('command');
+    expect(h.timeout).toBe(10);
+    expect(h.command).toBe('node "${CLAUDE_PLUGIN_ROOT}/hooks/residue-check.cjs"');
+    const m = /\$\{CLAUDE_PLUGIN_ROOT\}\/([^"]+)/.exec(h.command);
+    expect(m).not.toBeNull();
+    const script = path.join(PLUGIN_ROOT, m[1]);
+    expect(script).toBe(SCRIPT);
+    expect(fs.statSync(script).isFile()).toBe(true);
+  });
+});

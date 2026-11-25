@@ -188,6 +188,8 @@ const { transitionJob, emitJobEvent, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = r
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduler/scheduleJobSchema.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
+const heldSchedulerTurns = require('./lib/scheduler/heldSchedulerTurns.cjs');
+const autoStartedSession = require('./lib/feedback-remote/autoStartedSession.cjs');
 const preflightCheck = require('./lib/scheduler/preflightCheck.cjs');
 const needsYouStore = require('./lib/feedback-remote/needsYouStore.cjs');
 const { withTimeout } = require('./lib/util/withTimeout.cjs');
@@ -1431,6 +1433,11 @@ function heartbeatTick(deps = {}) {
         // this log can't otherwise tell a 5h hold from a weekly one.
         utilizationWindow: cachedBindingWindowName,
         utilizationHold,
+        // Scheduler chat turns the usage hold is keeping (heldSchedulerTurns.cjs).
+        heldSchedulerTurns: (() => {
+          const sum = heldSchedulerTurns.summary();
+          return { count: sum.count || 0, tabs: sum.tabs || 0 };
+        })(),
         consecutiveFailures,
         // Why a memory-held tick held (PRD 4019): the new job's reservation, the
         // shared spike buffer and the running jobs' growth term. null = not gated.
@@ -1455,6 +1462,11 @@ function heartbeatTick(deps = {}) {
     entry = { ts: Date.now(), pid: process.pid, build: heartbeatBuild(), degraded: true, errors };
   }
   appendHeartbeat(entry);
+  // Deliver held scheduler turns once the hold has cleared (no-op while held).
+  guard('held-scheduler-turns-drain', () => {
+    const run = deps.drainHeldSchedulerTurns ?? drainHeldSchedulerTurns;
+    Promise.resolve(run()).catch(() => {});
+  });
   return entry;
 }
 
@@ -1578,9 +1590,15 @@ function normalizeConfig(cfg) {
   return cfg;
 }
 
+// Last config object a queue read produced — the same object tickBody hands
+// currentAutoDispatchHold (state.config). The held-turns store's hold provider
+// reads it synchronously; undefined before the first read (DEFAULT_CONFIG applies).
+let lastSeenConfig;
+
 function readQueueSync() {
   const s = queueStore.readMergedSync();
   s.config = normalizeConfig({ ...DEFAULT_CONFIG, ...(s.config || {}) });
+  lastSeenConfig = s.config;
   return flagUnreadable(s);
 }
 
@@ -1590,6 +1608,7 @@ function readQueueSync() {
 async function readQueue() {
   const s = await queueStore.readMerged();
   s.config = normalizeConfig({ ...DEFAULT_CONFIG, ...(s.config || {}) });
+  lastSeenConfig = s.config;
   return flagUnreadable(s);
 }
 
@@ -3060,6 +3079,40 @@ function drainDeferredInvestigation() {
     return;
   }
 }
+
+/**
+ * drainHeldSchedulerTurns(deps?) → Promise<Array<{ tabId, delivered, dropped }>>
+ *
+ * Deliver the scheduler chat turns the usage hold kept (heldSchedulerTurns.cjs)
+ * once no hold is in force — each tab's held messages as one turn. An
+ * auto-start follow-up is dropped when its session no longer needs a plan.
+ * Every tab the drain touched is audited. Single-flight lives in the store.
+ * Never rejects. Deps are injectable for tests.
+ */
+async function drainHeldSchedulerTurns(deps = {}) {
+  const hold = deps.hold ?? (() => currentAutoDispatchHold(lastSeenConfig));
+  const send = deps.send ?? enqueueExternalPrompt;
+  const needsPlan = deps.needsPlan ?? autoStartedSession.autoStartNeedsPlan;
+  const audit = deps.audit ?? appendAuditEvent;
+  try {
+    if (hold()) return [];
+    if (heldSchedulerTurns.summary().count <= 0) return [];
+    const isStillNeeded = (entry) => (entry && entry.kind === 'auto-start-follow-up'
+      ? needsPlan(entry.cwd, entry.sessionId)
+      : true);
+    const results = await heldSchedulerTurns.drain({ send, isStillNeeded });
+    for (const r of results || []) {
+      try {
+        audit('scheduler_turns_delivered', { tabId: r.tabId, delivered: r.delivered, dropped: r.dropped });
+      } catch { /* audit must not break the drain */ }
+    }
+    return results || [];
+  } catch (e) {
+    console.error('[scheduler] drainHeldSchedulerTurns error', e?.message ?? e);
+    return [];
+  }
+}
+
 let cancelToken = { cancelled: false };
 // Last memory-gate observation; included in snapshot for renderer visibility.
 let lastMemGate = null;
@@ -4113,7 +4166,7 @@ function defaultScheduleSettle({ cwd, epicId }) {
     },
     readGateMs: readValidatorGateMs,
     jobBudget: { factor: budget.JOB_BUDGET_FACTOR, ceilingMs: budget.JOB_BUDGET_CEILING_MS },
-    sendPrompt: (tabId, prompt) => enqueueExternalPrompt(tabId, prompt, { origin: 'scheduler' }),
+    sendPrompt: (tabId, prompt, extra) => enqueueExternalPrompt(tabId, prompt, { ...(extra || {}), origin: 'scheduler' }),
     appendResponseEvent: appendResponseEventIfKnown,
   };
   epicValidationHook.scheduleEpicSettle({ cwd, epicId }, (args) => epicValidationHook.runEpicSettle(args, deps));
@@ -4524,7 +4577,7 @@ async function notifyOriginatingTab(job, {
       return;
     }
 
-    sendPrompt(targetTabId, message, { origin: 'scheduler' });
+    sendPrompt(targetTabId, message, { origin: 'scheduler', heldKind: 'job-notice' });
   } catch (e) {
     console.error('[scheduler] notifyOriginatingTab error', job?.slug, e);
   }
@@ -13486,6 +13539,9 @@ function _setPeriodicReverifyEnabledForTests(enabled) {
 
 async function init() {
   ensureDirs();
+  // Held scheduler turns (heldSchedulerTurns.cjs) consult the same auto-dispatch
+  // hold tickBody applies — registered before boot reconcile can finish a job.
+  heldSchedulerTurns.setHoldProvider(() => currentAutoDispatchHold(lastSeenConfig));
   // Boot phase — reconciliation, migrations, self-heal, first reset probe.
   // Guarded as a unit: everything below installs the timers that ARE the
   // running scheduler (poll loop, heartbeat, supervisor). A throw in here
@@ -13681,6 +13737,10 @@ async function init() {
     });
 
     await rescheduleTimer();
+
+    // Once after boot reconciliation: deliver any turns held across a restart
+    // whose hold has since cleared (never rejects).
+    drainHeldSchedulerTurns();
   } catch (e) {
     console.error('[scheduler] boot phase failed — starting timers anyway:', e?.message);
     try {
@@ -14917,6 +14977,7 @@ module.exports = {
   applyOrphanOutcome,
   registerAdminRoutes,
   notifyOriginatingTab,
+  drainHeldSchedulerTurns,
   flushDueReviewNotices,
   isNotifiableTerminalStatus,
   armSettleAfterValidatorBudgetKill,

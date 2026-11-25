@@ -17,6 +17,11 @@ const path = require('node:path');
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+// A weekly reset a full week ahead keeps the pro-rated cap at the saved base
+// (proRatedThreshold: f >= 1 -> base). The extra hour keeps f >= 1 after the
+// milliseconds between building the fixture and reading it (and the 61 s
+// half_open advance below); exactly 7 days would pro-rate to 90.0000x.
+const WEEK_AHEAD = 7 * DAY + HOUR;
 
 let tmpHome;
 let originalHome;
@@ -107,11 +112,18 @@ test('readMachineConfigSync returns the saved config once _mutateForTests writes
 
 test('weekly_all 92% at threshold 90 holds; 80% does not', async () => {
   await setConfig('when-available', 90);
-  await goodReading(weekly(92));
+  await goodReading(weekly(92, WEEK_AHEAD));
   const hold = scheduler.currentUsageHold();
   expect(hold).toMatchObject({ reason: 'utilization-held', window: 'weekly_all', percent: 92, threshold: 90 });
   expect(typeof hold.resetsAt).toBe('string');
   await goodReading(weekly(80));
+  expect(scheduler.currentUsageHold()).toBeNull();
+});
+
+test('weekly_all 92% resetting 41 h ahead at threshold 90 gives no hold (pro-rated cap 100)', async () => {
+  await setConfig('when-available', 90);
+  await goodReading(weekly(92, 41 * HOUR));
+  expect(scheduler.usageHoldThreshold()).toBe(90);
   expect(scheduler.currentUsageHold()).toBeNull();
 });
 
@@ -125,7 +137,7 @@ test('a saved threshold of 95 with 92% gives no hold', async () => {
 
 test('an open circuit after a good 92% reading still holds; so does a failed half_open probe', async () => {
   await setConfig('when-available', 90);
-  await goodReading(weekly(92));
+  await goodReading(weekly(92, WEEK_AHEAD));
   openCircuit();
   billing.fetchUsage = async () => { throw new Error('fetch must not run while the circuit is open'); };
   await scheduler.pollLoop();

@@ -23,6 +23,19 @@
  * Success: 200 { ok, entryId, epicId, slug, stage }, the run recorded with
  * videoScriptPress.recordScriptRun and one 'admin_video_script_run' audit
  * event. A launch failure, or a result without entryId, is 503.
+ *
+ *   GET /admin/project-home/videos/status?cwd=&id=
+ *
+ * One Demo Video run's outcome by entry id, read-only. id must match
+ * STATUS_ID_RE before any fs call; paths are built only under the resolved
+ * project's session-manager-operations/project-pages/videos/<id>/. State, in
+ * order: outcome.json -> 'season-complete' (reason = its text); index.html +
+ * meta.json -> 'saved' (files {index, meta, mp4?, poster?}, absolute, only
+ * those that exist); review/material.json -> 'awaiting_review'; else the job
+ * row (macroJobStatus.jobStatusesBySlug, slug from the videoScriptPress
+ * ledger) -> 'queued' | 'running' | 'failed' (reason = its one-line reason;
+ * a completed row with nothing saved is 'failed'). An id with neither a
+ * ledger run nor an entry folder is 404 { ok:false, error:'not found' }.
  * Registered by adminRouteRegistry.cjs.
  */
 'use strict';
@@ -31,7 +44,11 @@ const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { normalizeExternalRef } = require('../epic/externalRef.cjs');
 const { parseScriptPress, pressLines } = require('./videoPressLines.cjs');
 
+const fs = require('node:fs');
+const path = require('node:path');
 const ROUTE_PATH = '/admin/project-home/videos/run';
+const STATUS_ROUTE_PATH = '/admin/project-home/videos/status';
+const STATUS_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_RUN_BODY_BYTES = 64 * 1024;
 const MACRO_ID = 'builtin-demo-video';
 const ACTIVE = new Set(['pending', 'held', 'running']);
@@ -58,7 +75,8 @@ function launchError(result) {
  * @param {{ startExternalNewSession?: (p: object) => Promise<any>, isTabBusy?: (id: string) => boolean,
  *   listJobRows?: () => Promise<any[]>, resolveCwd?: (c: unknown) => any, videoScriptPress?: any,
  *   listVoices?: (cwd: string) => { voices: Array<{ id: string }> }, builtinMacros?: any[],
- *   appendAuditEvent?: Function, withExternalRefLock?: Function, now?: () => number }} [deps]
+ *   appendAuditEvent?: Function, withExternalRefLock?: Function, now?: () => number,
+ *   readHistoryTail?: (cwd: string) => Promise<string> }} [deps]
  */
 function registerAdminRoute(adminHttp, deps = {}) {
   const resolveCwd = deps.resolveCwd
@@ -223,6 +241,111 @@ function registerAdminRoute(adminHttp, deps = {}) {
     if (externalRef !== undefined) await withLock({ cwd, externalRef }, press);
     else await press();
   });
+
+  adminHttp.registerRoute('GET', STATUS_ROUTE_PATH, async (/** @type {any} */ _req, /** @type {any} */ res, /** @type {any} */ query) => {
+    const q = query instanceof URLSearchParams ? query : new URLSearchParams();
+    const id = q.get('id') || '';
+    if (!STATUS_ID_RE.test(id)) {
+      sendJson(res, 400, { ok: false, error: 'id must match /^[a-z0-9][a-z0-9-]{0,63}$/' });
+      return;
+    }
+    const resolved = resolveCwd(q.get('cwd'));
+    if (!resolved || !resolved.ok) {
+      sendJson(res, resolved?.status || 400, { ok: false, error: oneLine(resolved?.error || 'cwd rejected') });
+      return;
+    }
+    const cwd = resolved.cwd;
+    let status;
+    try {
+      status = await readRunStatus(cwd, id, {
+        findScriptRun: (/** @type {string} */ c, /** @type {any} */ qq) => store().findScriptRun(c, qq),
+        listJobRows,
+        readHistoryTail: deps.readHistoryTail,
+      });
+    } catch (e) {
+      sendJson(res, 503, { ok: false, error: oneLine(`could not read the run: ${e instanceof Error ? e.message : String(e)}`) });
+      return;
+    }
+    if (!status) {
+      sendJson(res, 404, { ok: false, error: 'not found' });
+      return;
+    }
+    sendJson(res, 200, { ok: true, ...status });
+  });
 }
 
-module.exports = { registerAdminRoute, ROUTE_PATH, MAX_RUN_BODY_BYTES };
+/** @param {string} p */
+function isFile(p) {
+  try { return fs.statSync(p).isFile(); } catch { return false; }
+}
+
+/** @param {string} p */
+function isDir(p) {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+/** outcome.json's text, or null when absent/invalid. @param {string} file @param {string} id */
+function outcomeText(file, id) {
+  let rec;
+  try { rec = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return null;
+  if (rec.id !== undefined && rec.id !== id) return null;
+  if (rec.outcome !== 'season-complete' || typeof rec.text !== 'string' || !rec.text.trim()) return null;
+  return oneLine(rec.text.trim());
+}
+
+/**
+ * One run's status, or null when the id has no ledger run and no entry folder.
+ * Read-only. `id` must already match STATUS_ID_RE.
+ * @param {string} cwd
+ * @param {string} id
+ * @param {{ findScriptRun: (cwd: string, q: object) => any, listJobRows: () => Promise<any[]>,
+ *   readHistoryTail?: (cwd: string) => Promise<string> }} io
+ */
+async function readRunStatus(cwd, id, io) {
+  if (!STATUS_ID_RE.test(id)) throw new Error('bad entry id');
+  const { opsPath } = require('../opsOwnership.cjs');
+  const dir = opsPath(cwd, 'project-pages', 'videos', id);
+  const run = io.findScriptRun(cwd, { entryId: id });
+  const hasDir = isDir(dir);
+  if (!run && !hasDir) return null;
+  const slug = run && typeof run.slug === 'string' && run.slug ? run.slug : null;
+  const base = { entryId: id, epicId: (run && run.epicId) || null, slug };
+
+  const outcome = path.join(dir, 'outcome.json');
+  if (isFile(outcome)) {
+    const text = outcomeText(outcome, id);
+    if (text) return { ...base, state: 'season-complete', reason: text, files: null };
+  }
+
+  const index = path.join(dir, 'index.html');
+  const meta = path.join(dir, 'meta.json');
+  if (isFile(index) && isFile(meta)) {
+    /** @type {Record<string, string>} */
+    const files = { index, meta };
+    const mp4 = path.join(dir, 'video.mp4');
+    const poster = path.join(dir, 'poster.png');
+    if (isFile(mp4)) files.mp4 = mp4;
+    if (isFile(poster)) files.poster = poster;
+    return { ...base, state: 'saved', reason: null, files };
+  }
+
+  if (isFile(path.join(dir, 'review', 'material.json'))) {
+    return { ...base, state: 'awaiting_review', reason: null, files: null };
+  }
+
+  if (!slug) return { ...base, state: 'queued', reason: 'no job row for this entry (not a scripted run)', files: null };
+  const { jobStatusesBySlug } = require('../persona-macro/macroJobStatus.cjs');
+  const byslug = await jobStatusesBySlug({ cwd, slugs: [slug] }, {
+    loadJobs: io.listJobRows,
+    ...(io.readHistoryTail ? { readHistoryTail: io.readHistoryTail } : {}),
+  });
+  const row = byslug[slug];
+  if (!row) return { ...base, state: 'queued', reason: null, files: null };
+  if (row.state === 'running') return { ...base, state: 'running', reason: null, files: null };
+  if (row.state === 'failed') return { ...base, state: 'failed', reason: row.reason || `Ended as ${row.status}`, files: null };
+  if (row.state === 'done') return { ...base, state: 'failed', reason: 'The job completed without saving the video', files: null };
+  return { ...base, state: 'queued', reason: null, files: null };
+}
+
+module.exports = { registerAdminRoute, readRunStatus, ROUTE_PATH, STATUS_ROUTE_PATH, STATUS_ID_RE, MAX_RUN_BODY_BYTES };

@@ -266,3 +266,160 @@ describe(ROUTE, () => {
     expect(videoScriptPress.findScriptRun(cwd, { externalRef: 'ref-f' })).toBeNull();
   });
 });
+
+describe('GET /admin/project-home/videos/status', () => {
+  const STATUS = 'GET /admin/project-home/videos/status';
+  let statusHandler;
+
+  function registerStatus() {
+    const handlers = new Map();
+    registerAdminRoute({ registerRoute: (m, p, h) => handlers.set(`${m} ${p}`, h) }, {
+      resolveCwd: (c) => (c === cwd ? { ok: true, cwd } : { ok: false, status: 400, error: 'cwd rejected' }),
+      listJobRows: async () => rows,
+      readHistoryTail: async () => '',
+    });
+    statusHandler = handlers.get(STATUS);
+  }
+
+  async function status(id, c = cwd) {
+    const res = fakeRes();
+    const q = new URLSearchParams();
+    if (c !== undefined) q.set('cwd', c);
+    if (id !== undefined) q.set('id', id);
+    await statusHandler(fakeReq(''), res, q);
+    return res;
+  }
+
+  const entryDir = (id) => path.join(cwd, 'session-manager-operations', 'project-pages', 'videos', id);
+  function put(id, rel, content = '{}') {
+    const f = path.join(entryDir(id), rel);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, content);
+    return f;
+  }
+  function ledger(id, slug) {
+    videoScriptPress.recordScriptRun(cwd, { entryId: id, epicId: `epic-${id}`, slug, kind: 'Project demo', at: new Date().toISOString() });
+  }
+
+  beforeEach(() => {
+    fs.mkdirSync(path.join(cwd, 'session-manager-operations'), { recursive: true });
+    registerStatus();
+  });
+
+  test('is registered by adminRouteRegistry.registerAppAdminRoutes', () => {
+    const routes = [];
+    registerAppAdminRoutes({ registerRoute: (m, p) => routes.push(`${m} ${p}`) });
+    expect(routes).toContain(STATUS);
+  });
+
+  test.each([['../etc'], ['UPPER'], [''], ['-lead'], ['a'.repeat(65)], ['a/b']])('bad id %j: 400, no fs read', async (id) => {
+    const spy = vi.spyOn(fs, 'statSync');
+    const res = await status(id);
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  test('bad cwd: 400', async () => {
+    const res = await status('vid-1', '/nope');
+    expect(res.status).toBe(400);
+  });
+
+  test('unknown id: 404 not found', async () => {
+    const res = await status('vid-nope');
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ ok: false, error: 'not found' });
+  });
+
+  test('season-complete: reason is the outcome text', async () => {
+    ledger('vid-s', 'slug-s');
+    put('vid-s', 'outcome.json', JSON.stringify({ id: 'vid-s', outcome: 'season-complete', text: 'All episodes are done.', at: new Date().toISOString() }));
+    put('vid-s', 'index.html', '<html>');
+    put('vid-s', 'meta.json');
+    const res = await status('vid-s');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, entryId: 'vid-s', epicId: 'epic-vid-s', slug: 'slug-s', state: 'season-complete', reason: 'All episodes are done.' });
+  });
+
+  test('saved: files lists only existing files, absolute paths', async () => {
+    ledger('vid-a', 'slug-a');
+    const index = put('vid-a', 'index.html', '<html>');
+    const meta = put('vid-a', 'meta.json');
+    const mp4 = put('vid-a', 'video.mp4', 'x');
+    put('vid-a', 'review/material.json');
+    const res = await status('vid-a');
+    expect(res.body.state).toBe('saved');
+    expect(res.body.reason).toBeNull();
+    expect(res.body.files).toEqual({ index, meta, mp4 });
+    expect(path.isAbsolute(res.body.files.index)).toBe(true);
+  });
+
+  test('saved with poster', async () => {
+    ledger('vid-p', 'slug-p');
+    put('vid-p', 'index.html');
+    put('vid-p', 'meta.json');
+    const poster = put('vid-p', 'poster.png', 'x');
+    const res = await status('vid-p');
+    expect(res.body.files.poster).toBe(poster);
+    expect(res.body.files.mp4).toBeUndefined();
+  });
+
+  test('awaiting_review: review material, no final save', async () => {
+    ledger('vid-r', 'slug-r');
+    put('vid-r', 'review/material.json');
+    put('vid-r', 'index.html');
+    const res = await status('vid-r');
+    expect(res.body.state).toBe('awaiting_review');
+  });
+
+  test('queued: ledger run with a pending row', async () => {
+    ledger('vid-q', 'slug-q');
+    rows = [{ cwd, slug: 'slug-q', status: 'pending', macroId: 'builtin-demo-video' }];
+    const res = await status('vid-q');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ state: 'queued', slug: 'slug-q', reason: null, files: null });
+  });
+
+  test('queued: ledger run, no row yet', async () => {
+    ledger('vid-q2', 'slug-q2');
+    const res = await status('vid-q2');
+    expect(res.body.state).toBe('queued');
+  });
+
+  test('running: running row', async () => {
+    ledger('vid-u', 'slug-u');
+    rows = [{ cwd, slug: 'slug-u', status: 'running' }];
+    expect((await status('vid-u')).body.state).toBe('running');
+  });
+
+  test("failed: the row's one-line reason", async () => {
+    ledger('vid-f', 'slug-f');
+    rows = [{ cwd, slug: 'slug-f', status: 'failed', error: 'render crashed\nstack line' }];
+    const res = await status('vid-f');
+    expect(res.body.state).toBe('failed');
+    expect(res.body.reason).toBe('render crashed');
+  });
+
+  test('failed: a completed row with nothing saved', async () => {
+    ledger('vid-d', 'slug-d');
+    rows = [{ cwd, slug: 'slug-d', status: 'completed' }];
+    const res = await status('vid-d');
+    expect(res.body.state).toBe('failed');
+    expect(res.body.reason).toMatch(/without saving/);
+  });
+
+  test('human press (no ledger run): answers from the folder with slug null', async () => {
+    put('vid-h', 'index.html');
+    put('vid-h', 'meta.json');
+    const res = await status('vid-h');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ slug: null, epicId: null, state: 'saved' });
+  });
+
+  test('is read-only: no file written', async () => {
+    ledger('vid-w', 'slug-w');
+    const spies = ['writeFileSync', 'mkdirSync', 'renameSync'].map((k) => vi.spyOn(fs, k));
+    await status('vid-w');
+    for (const s of spies) expect(s).not.toHaveBeenCalled();
+  });
+});

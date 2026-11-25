@@ -58,6 +58,26 @@ test('findTrackedRuntimeState excludes README.md and authored namespaces', async
   ]);
 });
 
+test("findTrackedRuntimeState leaves a project's own feedback/ alone", async () => {
+  const other = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rsu-fb-')));
+  const go = (...a) => execFileSync('git', a, { cwd: other, encoding: 'utf8' }).trim();
+  try {
+    go('init', '-q', '-b', 'main');
+    go('config', 'user.email', 't@example.com');
+    go('config', 'user.name', 't');
+    go('config', 'commit.gpgsign', 'false');
+    for (const rel of [`${OPS}/feedback/item.md`, `${OPS}/scheduler/x.json`]) {
+      fs.mkdirSync(path.dirname(path.join(other, rel)), { recursive: true });
+      fs.writeFileSync(path.join(other, rel), 'x');
+    }
+    go('add', '-A');
+    go('commit', '-qm', 'init');
+    expect(await findTrackedRuntimeState(other)).toEqual([`${OPS}/scheduler/x.json`]);
+  } finally {
+    fs.rmSync(other, { recursive: true, force: true });
+  }
+});
+
 test('refuses in a linked worktree', async () => {
   const wt = path.join(os.tmpdir(), `rsu-wt-${Date.now()}`);
   g('worktree', 'add', '-q', '-b', 'side', wt);

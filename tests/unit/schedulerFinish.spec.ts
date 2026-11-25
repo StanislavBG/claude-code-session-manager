@@ -167,6 +167,7 @@ describe('buildFinishProtocol: force-add ban, runtime folders, fix-plan PASS', (
       for (const ns of RUNTIME_NAMESPACES) {
         expect(commit).toContain(`session-manager-operations/${ns}/`)
       }
+      expect(commit).not.toContain('session-manager-operations/feedback/')
       expect(commit).toMatch(/even when the PRD names it/)
     })
 

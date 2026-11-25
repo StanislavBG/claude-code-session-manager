@@ -112,16 +112,49 @@ const OWNERS = Object.freeze({
 });
 
 /**
- * Machine-local RUNTIME namespaces: regenerable/ephemeral state that must never
- * be committed. Mirrors this repo's root .gitignore. Everything else in OWNERS
- * (reviews, architecture, project-brief, project-pages, ...) is authored.
- * `feedback` has no OWNERS entry (nothing writes it through the gate) but is
- * runtime state all the same, so it lives only in this set.
+ * namespace -> its git class, one entry per namespace Session Manager defines.
+ *  - 'runtime': machine-local state, never committed. Each dir self-ignores
+ *    with its own `*` .gitignore (ensureRuntimeIgnores).
+ *  - 'tracked': the project's own authored output (Project Home pages and
+ *    videos, the Brief, docs), committed like docs. Session Manager never
+ *    writes an ignore file there; a project that wants it out of git adds its
+ *    own rule.
+ * A folder not listed here (feedback/, retired 2026-08-02, or any folder a
+ * project made itself) belongs to the project: a project's feedback/ is its
+ * own folder, and Session Manager never writes, ignores, bans from commits or
+ * untracks it.
  */
-const RUNTIME_NAMESPACES = Object.freeze([
-  'scheduler', 'prompt-sessions', 'feedback', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
-  'plan-records', 'events', 'agents', 'webhooks', 'feedback-inbox', 'artifacts',
-]);
+const GIT_CLASS = Object.freeze({
+  scheduler: 'runtime',
+  'prompt-sessions': 'runtime',
+  logs: 'runtime',
+  'ui-prefs': 'runtime',
+  'memory-clusters': 'runtime',
+  tasks: 'runtime',
+  'plan-records': 'runtime',
+  events: 'runtime',
+  agents: 'runtime',
+  webhooks: 'runtime',
+  'feedback-inbox': 'runtime',
+  artifacts: 'runtime',
+  'project-brief': 'tracked',
+  'project-pages': 'tracked',
+  architecture: 'tracked',
+  'design-mocks': 'tracked',
+  HUMAN_LEARN: 'tracked',
+  manual: 'tracked',
+  reviews: 'tracked',
+});
+
+/**
+ * Machine-local RUNTIME namespaces, derived from GIT_CLASS. Every consumer
+ * (self-ignore sweep, worktree carry, finish-protocol commit ban, health,
+ * runtime-state untrack) reads this list. This repo's root .gitignore lists
+ * each one too (plus its own retired feedback/ folder, which is not runtime).
+ */
+const RUNTIME_NAMESPACES = Object.freeze(
+  Object.keys(GIT_CLASS).filter((ns) => GIT_CLASS[ns] === 'runtime'),
+);
 
 /** Writer id for the per-namespace self-ignore file. */
 const RUNTIME_IGNORE_WRITER = 'runtime-ignore';
@@ -133,9 +166,10 @@ const RUNTIME_IGNORE_WRITER = 'runtime-ignore';
  * code review, not discovered later in a race.
  */
 const DELEGATIONS_BASE = {
-  // Each runtime namespace carries its own `.gitignore` (content `*`) so the
-  // project's root .gitignore needs no edit. Only that one file, only
-  // ensureRuntimeIgnores writes it.
+  // Each runtime namespace (GIT_CLASS 'runtime', all owned) carries its own
+  // `.gitignore` (content `*`) so the project's root .gitignore needs no edit.
+  // Only that one file, only ensureRuntimeIgnores writes it. Tracked and
+  // project-owned folders get no delegation.
   ...Object.fromEntries(RUNTIME_NAMESPACES.map((ns) => [ns, []])),
   'prompt-sessions': Object.freeze([
     Object.freeze({
@@ -211,9 +245,8 @@ function checkOpsWrite(absPath, writer) {
 
   const owner = OWNERS[namespace];
   if (!owner) {
-    // An owner-less namespace (e.g. feedback/) accepts only its declared
-    // DELEGATIONS entries — the runtime self-ignore among them.
-    if (writer && isDelegated(namespace, relative, writer)) return { ok: true, error: null };
+    // Fail closed: an owner-less folder (a project's own feedback/, say) is
+    // the project's, never Session Manager's — no writer, no delegation.
     return {
       ok: false,
       error:
@@ -446,6 +479,7 @@ function ensureRuntimeIgnores(projectRoot) {
 }
 
 module.exports = {
+  GIT_CLASS,
   RUNTIME_NAMESPACES,
   RUNTIME_IGNORE_WRITER,
   ensureRuntimeIgnore,

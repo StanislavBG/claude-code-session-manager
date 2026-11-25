@@ -49,6 +49,7 @@ session-manager-operations/scheduler/*
 !session-manager-operations/scheduler/README.md
 session-manager-operations/prompt-sessions/*
 !session-manager-operations/prompt-sessions/README.md
+# Retired 2026-08-02, not a runtime namespace: keeps this repo's leftover folder ignored.
 session-manager-operations/feedback/
 session-manager-operations/logs/*
 !session-manager-operations/logs/README.md

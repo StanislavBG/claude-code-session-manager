@@ -170,18 +170,37 @@ test("artifacts/ is owned by 'artifacts' (artifactStore.cjs) and is a self-ignor
 });
 
 // The root .gitignore mirrors RUNTIME_NAMESPACES: each namespace's contents are
-// ignored with its README kept tracked (feedback/ is retired: whole dir ignored).
+// ignored with its README kept tracked.
 test('root .gitignore mirrors every runtime namespace', () => {
   const { RUNTIME_NAMESPACES } = require('../opsOwnership.cjs');
   const lines = fs.readFileSync(path.join(__dirname, '../../../../.gitignore'), 'utf8')
     .split('\n').map((l) => l.trim());
   for (const ns of RUNTIME_NAMESPACES) {
-    if (ns === 'feedback') {
-      assert.ok(lines.includes('session-manager-operations/feedback/'), ns);
-      continue;
-    }
     assert.ok(lines.includes(`session-manager-operations/${ns}/*`), `${ns}/* missing`);
     assert.ok(lines.includes(`!session-manager-operations/${ns}/README.md`), `${ns} README unignore missing`);
+  }
+});
+
+test("root .gitignore keeps this repo's retired feedback/ folder ignored", () => {
+  const lines = fs.readFileSync(path.join(__dirname, '../../../../.gitignore'), 'utf8')
+    .split('\n').map((l) => l.trim());
+  assert.ok(lines.includes('session-manager-operations/feedback/'));
+});
+
+test('GIT_CLASS classifies every owned namespace; feedback/ belongs to the project', () => {
+  const { GIT_CLASS, DELEGATIONS, RUNTIME_NAMESPACES } = require('../opsOwnership.cjs');
+  for (const ns of RUNTIME_NAMESPACES) assert.ok(OWNERS[ns], `${ns} has no OWNERS entry`);
+  for (const ns of Object.keys(OWNERS)) assert.ok(GIT_CLASS[ns], `${ns} has no GIT_CLASS entry`);
+  for (const [ns, cls] of Object.entries(GIT_CLASS)) {
+    assert.ok(cls === 'runtime' || cls === 'tracked', `${ns}: ${cls}`);
+  }
+  assert.ok(Object.isFrozen(GIT_CLASS));
+  assert.deepEqual([...RUNTIME_NAMESPACES], [
+    'scheduler', 'prompt-sessions', 'logs', 'ui-prefs', 'memory-clusters', 'tasks',
+    'plan-records', 'events', 'agents', 'webhooks', 'feedback-inbox', 'artifacts',
+  ]);
+  for (const table of [GIT_CLASS, OWNERS, DELEGATIONS]) {
+    assert.equal(Object.prototype.hasOwnProperty.call(table, 'feedback'), false);
   }
 });
 

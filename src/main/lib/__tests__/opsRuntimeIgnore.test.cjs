@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const {
-  ensureRuntimeIgnores, ensureRuntimeIgnoreForPath, RUNTIME_NAMESPACES, checkOpsWrite,
+  ensureRuntimeIgnore, ensureRuntimeIgnores, ensureRuntimeIgnoreForPath, RUNTIME_NAMESPACES, checkOpsWrite,
 } = require('../opsOwnership.cjs');
 
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' });
@@ -35,24 +35,45 @@ describe('ensureRuntimeIgnores', () => {
     expect(ensureRuntimeIgnores(root)).toEqual([]);
   });
 
-  it('writes every namespace self-ignore, feedback/ included', () => {
+  it('writes exactly the 12 runtime self-ignores, never feedback/ or project-pages/', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opsign-all-'));
     git(root, 'init', '-q');
     const ops = path.join(root, 'session-manager-operations');
-    for (const ns of RUNTIME_NAMESPACES) {
+    for (const ns of [...RUNTIME_NAMESPACES, 'feedback', 'project-pages']) {
       fs.mkdirSync(path.join(ops, ns), { recursive: true });
       fs.writeFileSync(path.join(ops, ns, 'f.txt'), 'x');
     }
-    expect(RUNTIME_NAMESPACES.length).toBe(13);
+    expect(RUNTIME_NAMESPACES.length).toBe(12);
     const written = ensureRuntimeIgnores(root);
-    expect(written.length).toBe(13);
+    expect(written.length).toBe(12);
     for (const ns of RUNTIME_NAMESPACES) {
       expect(fs.readFileSync(path.join(ops, ns, '.gitignore'), 'utf8')).toBe('*\n');
     }
-    expect(git(root, 'status', '--porcelain', '-uall')).toBe('');
-    for (const ns of ['feedback', 'events', 'artifacts']) {
+    expect(fs.existsSync(path.join(ops, 'feedback', '.gitignore'))).toBe(false);
+    expect(fs.existsSync(path.join(ops, 'project-pages', '.gitignore'))).toBe(false);
+    const st = git(root, 'status', '--porcelain', '-uall').split('\n').filter(Boolean).sort();
+    expect(st).toEqual([
+      '?? session-manager-operations/feedback/f.txt',
+      '?? session-manager-operations/project-pages/f.txt',
+    ]);
+    for (const ns of ['events', 'artifacts']) {
       git(root, 'check-ignore', '-q', `session-manager-operations/${ns}/f.txt`);
     }
+    for (const ns of ['feedback', 'project-pages']) {
+      expect(() => git(root, 'check-ignore', '-q', `session-manager-operations/${ns}/f.txt`)).toThrow();
+    }
+  });
+
+  it('a project feedback/ is never self-ignored; non-runtime namespaces throw', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opsign-fb-'));
+    const ops = path.join(root, 'session-manager-operations');
+    expect(ensureRuntimeIgnoreForPath(path.join(ops, 'feedback', 'item.md'))).toBeNull();
+    expect(fs.existsSync(path.join(ops, 'feedback'))).toBe(false);
+    fs.mkdirSync(path.join(ops, 'feedback'), { recursive: true });
+    fs.mkdirSync(path.join(ops, 'project-pages'), { recursive: true });
+    expect(() => ensureRuntimeIgnore(root, 'feedback')).toThrow(/not a runtime namespace/);
+    expect(() => ensureRuntimeIgnore(root, 'project-pages')).toThrow(/not a runtime namespace/);
+    expect(fs.existsSync(path.join(ops, 'feedback', '.gitignore'))).toBe(false);
   });
 
   it('isolates a failing namespace and names it in one error', () => {
@@ -84,12 +105,10 @@ describe('ensureRuntimeIgnores', () => {
     expect(fs.existsSync(path.join(ops, 'logs'))).toBe(false);
   });
 
-  it('owner-less feedback/ accepts only its declared delegation', () => {
+  it('owner-less feedback/ refuses every write, its .gitignore included', () => {
     const P = '/r/session-manager-operations/feedback';
-    expect(checkOpsWrite(`${P}/.gitignore`, 'runtime-ignore').ok).toBe(true);
-    expect(checkOpsWrite(`${P}/.gitignore`, 'scheduler').ok).toBe(false);
-    expect(checkOpsWrite(`${P}/.gitignore`, undefined).ok).toBe(false);
     for (const w of ['runtime-ignore', 'scheduler', undefined]) {
+      expect(checkOpsWrite(`${P}/.gitignore`, w).ok).toBe(false);
       expect(checkOpsWrite(`${P}/notes.md`, w).ok).toBe(false);
     }
   });

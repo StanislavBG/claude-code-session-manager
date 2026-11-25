@@ -202,6 +202,7 @@ test('every variant states the no-change fix plan makes no commit and closes on 
 test('every variant bans every runtime namespace path and force-adds', () => {
   for (const prompt of promptVariants()) {
     for (const ns of RUNTIME_NAMESPACES) assert.ok(prompt.includes(`session-manager-operations/${ns}/`), ns);
+    assert.ok(!prompt.includes('session-manager-operations/feedback/'), 'retired feedback/ must not be banned');
     assert.ok(prompt.includes(RECORD_BAN_MARKER));
     assert.match(prompt, /git add -f/);
     assert.match(prompt, /git add --force/);

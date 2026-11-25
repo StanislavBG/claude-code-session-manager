@@ -146,6 +146,10 @@ three failure modes have different fixes:
    needs another PRD's output.
 9. **Write plain, checkable criteria.** Each names a file, a symbol and the result; one names
    the test file and tests. Commands go in `gate`. No open-ended "grep X and update" lines.
+   A check against a running local service is an `http` criterion `{ kind: 'http', spec: { url, status?, contains? } }` (loopback only), run by the scheduler outside the sandbox,
+   because a job's Bash cannot reach host loopback; the URL host is 127.0.0.1 or localhost, whichever the server listens on ([::1] only for an IPv6 listener), never the machine hostname, which criteria refuse.
+   Write a structural expectation (for example every item has a non-empty field) in the criterion statement; the validator judges it from the stored response body.
+   What http cannot express (auth, POST, UI) the architect checks at PLAN SETTLED from the Epic.
 10. **Show the plan once**: the plan goal line, the stage view (for example `Stage 1: A ∥ B →
     Stage 2: C → validate`), and a table (#, PRD, files, gate, dependsOn) — not PRD
     drafts. Queue at once when the Epic is `feature`, `bug` or `art` and scope is clear; otherwise ask

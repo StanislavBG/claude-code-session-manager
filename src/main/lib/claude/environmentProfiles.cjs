@@ -116,7 +116,7 @@ const BUILTIN_ENVIRONMENTS = deepFreeze({
     osSandboxRequired: true,
     permissionMode: 'acceptEdits',
     writeRoots: [...JOB_WRITE_ROOTS],
-    network: { mode: 'allowlist', hosts: ['registry.npmjs.org'] },
+    network: { mode: 'allowlist', hosts: ['registry.npmjs.org', 'api.github.com'] },
     secretDenyPaths: [...SANDBOX_SECRET_PATHS],
     webFetch: false,
     webSearch: false,

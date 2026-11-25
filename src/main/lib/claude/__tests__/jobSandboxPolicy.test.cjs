@@ -17,7 +17,7 @@ const { BUILTIN_ENVIRONMENTS } = require('../environmentProfiles.cjs');
 // The sandbox settings validator and dev-lead had under the retired SANDBOX_PROFILES.
 const LEGACY = Object.freeze({
   validator: { permissionMode: 'default', network: [] },
-  'dev-lead': { permissionMode: 'acceptEdits', network: ['registry.npmjs.org'] },
+  'dev-lead': { permissionMode: 'acceptEdits', network: ['registry.npmjs.org', 'api.github.com'] },
 });
 /** @param {string|undefined} agentType */
 function envFor(agentType) {

@@ -611,7 +611,11 @@ Both `os-sandbox` profiles share the same write roots (`sandbox.filesystem.allow
 | Profile | `--permission-mode` | Bash network allowlist (`strictAllowlist: true`) |
 | --- | --- | --- |
 | `validator` | `default` | none (empty list) |
-| `dev-lead` | `acceptEdits` | `registry.npmjs.org` |
+| `dev-lead` | `acceptEdits` | `registry.npmjs.org`, `api.github.com` |
+
+`dev-lead` is the builtin `headless-default` environment. `api.github.com` is allowed so release
+live checks can read public GitHub releases; jobs hold no credentials, so this is unauthenticated
+read-only access, like the `registry.npmjs.org` entry that serves `npm view`.
 
 A `tool-rules` job has no write or network restriction beyond the secret deny rules.
 
@@ -628,7 +632,7 @@ line (`WebFetch`/`WebSearch` = web; a release persona = npm registry; else none)
 | `competitive-analyst` | `tool-rules` | web |
 | `competitive-researcher` | `tool-rules` | web |
 | `demo-video-builder` | `tool-rules` | none |
-| `dev-lead` | `os-sandbox` when available | npm registry (already live) |
+| `dev-lead` | `os-sandbox` when available | npm registry + api.github.com (already live) |
 | `project-home-builder` | `tool-rules` | none |
 | `validator` | `os-sandbox` when available | none (already live) |
 

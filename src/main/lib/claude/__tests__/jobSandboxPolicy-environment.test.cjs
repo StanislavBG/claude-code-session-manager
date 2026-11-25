@@ -72,7 +72,7 @@ describe('validator and dev-lead argv is unchanged', () => {
   it('dev-lead → headless-default, byte-identical argv', () => {
     expect(jobEnvironmentName({ agentType: 'dev-lead' })).toBe('headless-default');
     const r = buildJobSandboxSettings({ ...BASE, agentType: 'dev-lead', environment: builtin('headless-default'), deps: OK });
-    expect(r.argv).toEqual(legacyOsSandboxArgv('acceptEdits', ['registry.npmjs.org']));
+    expect(r.argv).toEqual(legacyOsSandboxArgv('acceptEdits', ['registry.npmjs.org', 'api.github.com']));
   });
 
   it('other personas without a declared environment stay on tool rules', () => {
@@ -215,7 +215,7 @@ describe('report-mode would-block records', () => {
     it('environmentHookEnv carries the profile web rules and the mode', () => {
       const e = policy.environmentHookEnv({ environment: builtin('headless-default'), mode: 'enforce', agentType: 'dev-lead' });
       expect(JSON.parse(e.SM_JOB_ENVIRONMENT)).toEqual({
-        id: 'headless-default', webFetch: false, webSearch: false, network: { mode: 'allowlist', hosts: ['registry.npmjs.org'] },
+        id: 'headless-default', webFetch: false, webSearch: false, network: { mode: 'allowlist', hosts: ['registry.npmjs.org', 'api.github.com'] },
       });
       expect(e.SM_JOB_ENVIRONMENT_MODE).toBe('enforce');
       expect(e.SM_JOB_PERSONA).toBe('dev-lead');

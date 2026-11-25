@@ -18,7 +18,7 @@ const { SANDBOX_SECRET_PATHS } = require('../jobSandboxPolicy.cjs');
 // The sandbox settings validator and dev-lead had under the retired SANDBOX_PROFILES.
 const SANDBOX_PROFILES = Object.freeze({
   validator: { permissionMode: 'default', network: [] },
-  'dev-lead': { permissionMode: 'acceptEdits', network: ['registry.npmjs.org'] },
+  'dev-lead': { permissionMode: 'acceptEdits', network: ['registry.npmjs.org', 'api.github.com'] },
 });
 const { validatePersonaFrontmatter } = require('../../persona-macro/personaFrontmatterSchema.cjs');
 const { MANAGED_PERSONA_KEYS } = require('../../../agentLibrary.cjs');
@@ -76,11 +76,17 @@ describe('built-in profiles', () => {
   it('headless-default reproduces the dev-lead SANDBOX_PROFILE (OS sandbox + allow-list)', () => {
     const { profile } = env.loadEnvironment({ cwd, name: 'headless-default' });
     expect(profile.osSandboxRequired).toBe(true);
-    expect(profile.network).toEqual({ mode: 'allowlist', hosts: ['registry.npmjs.org'] });
+    expect(profile.network).toEqual({ mode: 'allowlist', hosts: ['registry.npmjs.org', 'api.github.com'] });
     expect(env.toSandboxProfile(profile)).toEqual({ ...SANDBOX_PROFILES['dev-lead'], network: [...SANDBOX_PROFILES['dev-lead'].network] });
     expect(profile.secretDenyPaths).toEqual([...SANDBOX_SECRET_PATHS]);
     expect(profile.webFetch).toBe(false);
     expect(profile.webSearch).toBe(false);
+  });
+
+  it('headless-default allowlists api.github.com and stays in allowlist mode', () => {
+    const { profile } = env.loadEnvironment({ cwd, name: 'headless-default' });
+    expect(profile.network.mode).toBe('allowlist');
+    expect(profile.network.hosts).toContain('api.github.com');
   });
 
   it('validator-readonly reproduces the validator SANDBOX_PROFILE', () => {

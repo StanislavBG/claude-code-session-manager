@@ -16,7 +16,7 @@ const SCRIPT = path.resolve(__dirname, '../job-sandbox-probe.cjs');
 const { classifyProbeRun, probeChildEnv, projectFolderName, leakedProjectFolders } = require(SCRIPT);
 
 const CANARY = 'SM-SANDBOX-CANARY-0123456789abcdef';
-const clean = { canary: CANARY, output: 'Read refused. Write refused.', outsideEntries: [], netBytes: 0, insideExists: true, profile: 'dev-lead' };
+const clean = { canary: CANARY, output: 'Read refused. Write refused.', outsideEntries: [], netBytes: 0, insideExists: true, loopbackHits: 0, selfServedOk: true, profile: 'dev-lead' };
 
 test('clean run: no escapes, no failed controls', () => {
   expect(classifyProbeRun(clean)).toEqual({ escapes: [], controlsFailed: [] });
@@ -61,6 +61,26 @@ test('missing inside file fails the positive control', () => {
   const r = classifyProbeRun({ ...clean, insideExists: false });
   expect(r.escapes).toEqual([]);
   expect(r.controlsFailed).toEqual(['inside write']);
+});
+
+test('loopbackHits 0 is not an escape', () => {
+  expect(classifyProbeRun({ ...clean, loopbackHits: 0 })).toEqual({ escapes: [], controlsFailed: [] });
+});
+
+test('loopbackHits 1 is the escape loopback reach', () => {
+  const r = classifyProbeRun({ ...clean, loopbackHits: 1 });
+  expect(r.escapes).toEqual(['loopback reach: 1 request(s)']);
+  expect(r.controlsFailed).toEqual([]);
+});
+
+test('selfServedOk true passes the in-sandbox server control', () => {
+  expect(classifyProbeRun({ ...clean, selfServedOk: true })).toEqual({ escapes: [], controlsFailed: [] });
+});
+
+test('selfServedOk false fails the in-sandbox server control', () => {
+  const r = classifyProbeRun({ ...clean, selfServedOk: false });
+  expect(r.escapes).toEqual([]);
+  expect(r.controlsFailed).toEqual(['in-sandbox server']);
 });
 
 test('probeChildEnv at os-sandbox: base env + KG flag + auto-memory off + sandbox temp vars', () => {

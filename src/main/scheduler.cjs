@@ -2922,8 +2922,12 @@ function utilizationReading() {
   };
 }
 
-/** Fetches latest usage from billing API. Throws on any error — callers handle it. */
-async function refreshNextReset() {
+/**
+ * Fetches latest usage from billing API and returns its binding window as one
+ * paired reading ({ window, resetsAt }). Throws on any error — callers handle it.
+ * @returns {Promise<{ window: string | null, resetsAt: string | null }>}
+ */
+async function refreshBindingReading() {
   const r = await billing.fetchUsage();
   if (r.kind !== 'ok') throw new Error(`usage fetch failed (${r.kind}): ${r.message ?? ''}`);
   const window = bindingWindow(r.data?.usage);
@@ -2937,7 +2941,12 @@ async function refreshNextReset() {
   cachedBindingWindowName = window.name;
   cachedUtilizationKnown = true;
   lastGoodUsagePayload = r.data?.usage ?? lastGoodUsagePayload;
-  return cachedNextReset;
+  return { window: window.name ?? null, resetsAt: cachedNextReset };
+}
+
+/** Fetches latest usage from billing API. Throws on any error — callers handle it. */
+async function refreshNextReset() {
+  return (await refreshBindingReading()).resetsAt;
 }
 
 /**
@@ -2977,14 +2986,19 @@ function resolveRateLimitPauseReset(logPath, billingResetIso, nowMs = Date.now()
  * with: the same pro-rated threshold the auto-dispatch hold uses
  * (utilizationHold.proRatedThreshold) for THAT window and its reset, so a
  * weekly window in its last days is not read as over a flat cap the hold
- * itself has already raised. Non-numeric base passes through unchanged.
+ * itself has already raised. Window name and reset come from the SAME
+ * reading (the caller's refreshed billing reading) — pairing a cached name
+ * with a fresh reset pro-rates against the wrong window length. The cached
+ * pair is used only when no reading is passed. Non-numeric base passes
+ * through unchanged.
  * @param {unknown} base
- * @param {string | null | undefined} resetIso
+ * @param {{ window?: string | null, resetsAt?: string | null } | null | undefined} reading
  * @param {number} nowMs
  */
-function bindingWindowPauseThreshold(base, resetIso, nowMs) {
+function bindingWindowPauseThreshold(base, reading, nowMs) {
   if (typeof base !== 'number' || !Number.isFinite(base)) return base;
-  return autoDispatchHold.proRatedThreshold({ base, window: cachedBindingWindowName, resetsAt: resetIso ?? cachedNextReset, now: nowMs });
+  const pair = reading ?? { window: cachedBindingWindowName, resetsAt: cachedNextReset };
+  return autoDispatchHold.proRatedThreshold({ base, window: pair.window ?? null, resetsAt: pair.resetsAt ?? null, now: nowMs });
 }
 
 /**
@@ -3019,8 +3033,19 @@ function logBillingResetRejected(billingResetIso, billingUtilization, threshold)
  * itself still rejects that cached value if it has since gone stale).
  */
 async function billingResetForPause() {
-  if (billing.usageCircuit.state() === 'open') return cachedNextReset;
-  return refreshNextReset().catch(() => cachedNextReset);
+  return (await billingReadingForPause()).resetsAt;
+}
+
+/**
+ * billingResetForPause's reading with its binding window name kept beside the
+ * reset ({ window, resetsAt }), so both come from one reading — the refreshed
+ * one, or the cached pair when the circuit is open or the refresh fails.
+ * @returns {Promise<{ window: string | null, resetsAt: string | null }>}
+ */
+async function billingReadingForPause() {
+  const cached = () => ({ window: cachedBindingWindowName ?? null, resetsAt: cachedNextReset });
+  if (billing.usageCircuit.state() === 'open') return cached();
+  return refreshBindingReading().catch(cached);
 }
 
 // ---------- health / poll state ----------
@@ -8685,9 +8710,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       // poller's own reads).
       billing.usageCircuit.recordFailure('executor_429');
       const logPath = path.join(runDir, `${job.slug}.log`);
-      const billingResetIso = await billingResetForPause();
+      const billingReading = await billingReadingForPause();
+      const billingResetIso = billingReading.resetsAt;
       const pauseState = await readQueue().catch(() => null);
-      const pauseThreshold = bindingWindowPauseThreshold(pauseState?.config?.utilizationThreshold, billingResetIso, Date.now());
+      const pauseThreshold = bindingWindowPauseThreshold(pauseState?.config?.utilizationThreshold, billingReading, Date.now());
       const resetIso = resolveRateLimitPauseReset(logPath, billingResetIso, Date.now(), { billingUtilization: cachedUtilization, threshold: pauseThreshold });
       if (resetIso == null) logBillingResetRejected(billingResetIso, cachedUtilization, pauseThreshold);
       const observedAt = dispatchStartedAtMs;
@@ -11241,8 +11267,9 @@ async function reapDeadRunningJobs() {
       // observed 429 as a live one, and must open the same shared circuit.
       billing.usageCircuit.recordFailure('executor_429');
       const triggering = dead.find((d) => d.outcome === 'rate_limited');
-      const billingResetIso = await billingResetForPause();
-      const pauseThreshold = bindingWindowPauseThreshold(state.config?.utilizationThreshold, billingResetIso, Date.now());
+      const billingReading = await billingReadingForPause();
+      const billingResetIso = billingReading.resetsAt;
+      const pauseThreshold = bindingWindowPauseThreshold(state.config?.utilizationThreshold, billingReading, Date.now());
       const resetIso = resolveRateLimitPauseReset(triggering.logPath, billingResetIso, Date.now(), { billingUtilization: cachedUtilization, threshold: pauseThreshold });
       if (resetIso == null) logBillingResetRejected(billingResetIso, cachedUtilization, pauseThreshold);
       const triggeringRow = triggering ? state.jobs.find((x) => x.slug === triggering.slug) : null;
@@ -15259,11 +15286,13 @@ module.exports = {
   pickRunDir,
   resolveRateLimitPauseReset,
   billingResetForPause,
+  billingReadingForPause,
   computeEffectiveResumeAt,
   computeResumeDelay,
   FOREIGN_WIP_BLOCK_STREAK_LIMIT,
   validateForeignWipBlockClaim,
   requeueForeignWipBlockedJobs,
+  __test: { bindingWindowPauseThreshold },
 };
 
 // Lazy path getters: resolved from SM_SCHEDULER_HOME at each read, never frozen

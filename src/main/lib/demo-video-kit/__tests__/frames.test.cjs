@@ -5,16 +5,12 @@ const os = require('os');
 const path = require('path');
 const { sampleFrames, VIDEO_SETTLE_MS, decodePng, encodePng, lumaStats, MAX_FRAMES, viewportForHtml } = require('../frames.cjs');
 const { checkBlankFrames } = require('../checks.cjs');
+const { usePlaywrightCache, havePlaywright } = require('./playwrightTestEnv.cjs');
+
+usePlaywrightCache();
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'frames-'));
 const solid = (w, h, rgb) => { const b = Buffer.alloc(w * h * 3); for (let i = 0; i < w * h; i++) rgb.forEach((v, k) => { b[i * 3 + k] = v; }); return b; };
-
-function havePlaywright() {
-  for (const n of ['playwright', 'playwright-core']) {
-    try { require.resolve(n, { paths: [process.cwd()] }); return true; } catch { /* next */ }
-  }
-  return false;
-}
 
 describe('png decoder + luma', () => {
   it('round-trips an RGB PNG', () => {

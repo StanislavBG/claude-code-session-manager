@@ -7,26 +7,9 @@ const { spawnSync } = require('child_process');
 const { checkStandalone, BLOG_VIDEO_CSP } = require('../standalone.cjs');
 const { injectCsp } = require('../../feedback-remote/projectHomeAdminRoutes.cjs');
 const { injectPlayerBridge } = require('../../project-pages/playerBridge.cjs');
+const { usePlaywrightCache, havePlaywright } = require('./playwrightTestEnv.cjs');
 
-// The vitest sandbox points HOME at a temp dir, which hides the browser cache Playwright keys off
-// HOME. Point Playwright at the real user's cache (passwd home, not $HOME) so the real-browser
-// cases run; they still skip cleanly when Playwright or its Chromium binary is absent.
-if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
-  try {
-    const real = path.join(os.userInfo().homedir, '.cache', 'ms-playwright');
-    if (fs.existsSync(real)) process.env.PLAYWRIGHT_BROWSERS_PATH = real;
-  } catch { /* no passwd entry */ }
-}
-
-function havePlaywright() {
-  for (const n of ['playwright', 'playwright-core']) {
-    try {
-      const pw = require(require.resolve(n, { paths: [process.cwd()] }));
-      return fs.existsSync(pw.chromium.executablePath());
-    } catch { /* next */ }
-  }
-  return false;
-}
+usePlaywrightCache();
 
 const dirs = [];
 afterAll(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });

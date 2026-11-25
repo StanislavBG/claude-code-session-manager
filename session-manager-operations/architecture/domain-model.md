@@ -136,6 +136,15 @@ under the ops root's `tasks/` folder (the owner signed off on 2026-11-22).
   consent, and an agent that wants work done queues it with `/develop` from the Epic it is in. Example systemd unit line (`$$` is systemd's
   literal `$`; jq builds the JSON body so no nested quotes need escaping; replace MACRO_ID):
   `ExecStart=/usr/bin/sh -c 'f=$$HOME/.claude/session-manager/admin-api.json; CWD=/path/to/project ID=MACRO_ID jq -nc {cwd:env.CWD}+{id:env.ID} | curl -sf --max-time 60 --oauth2-bearer $$(jq -r .token $$f) -H content-type:application/json -d @- http://127.0.0.1:$$(jq -r .port $$f)/admin/macros/run'`
+  **The built-in Demo Video is the one built-in a script may press**, and its script-start consent is the
+  per-project **'Scripts may run Demo Video'** switch (`videoScriptPress.cjs`) — the counterpart of a macro's 'Can
+  be started by a script' tick, since a built-in has no editor to tick. Only two writers set it: a human click in
+  Project Home ▸ Video, or an agent quoting the human verbatim (`video_script_switch_set`, checked against the
+  human prompt ledger); a script, job or Task never can. Every scripted press
+  (`POST /admin/project-home/videos/run`) mints through the existing press path (`chat:external-new-session`,
+  the same single mint authority), so it is never a third Epic creator, and Review first still stops at the human
+  review. Routes, answers, idempotency and status:
+  [project-pages README](../project-pages/README.md#scripted-demo-video-press).
 - **A Project Home tool is app-level, not per project.** A macro with `surface: 'project-home'` (Project Home ▸
   Tools, plus the Pages / Videos library built-ins) is part of Session Manager and shown in every project
   (`projects: ['*']`); only what it generates — pages, videos, the matrix, the Epics it opens — is per project.

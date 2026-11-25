@@ -310,6 +310,79 @@ and the original `Review: approved by the owner at <at>` (the `at` in `decision.
 the failed job's old slug (best effort).
 Why only a human approves: [domain-model.md](../architecture/domain-model.md).
 
+### Scripted Demo Video press
+
+A project's own script (a cron job, a blog build) may press the built-in Demo Video
+(`builtin-demo-video`) for that project — only while the project's **'Scripts may run Demo
+Video'** switch is on. Why a human switch: [domain-model.md](../architecture/domain-model.md)
+(macro section).
+
+**The switch** (`lib/project-pages/videoScriptPress.cjs`, machine-level
+`video-script-switches.json` beside `task-switches.json`, keyed by absolute cwd, off by default)
+has exactly two writers, each recorded in `by`:
+
+- a human click in Project Home ▸ Video's collapsed **Scripts** disclosure
+  (`ScriptPressSwitch.tsx` → `videos:script-switch-set`) — `by.via: 'ui'`;
+- an agent quoting the human: `video_script_switch_set` →
+  `POST /admin/project-home/videos/script-switch` (`videoScriptSwitchRoute.cjs`), only on a
+  verbatim quote from a prompt the human typed in the calling session (`humanPromptLedger`)
+  that names the switch and, for another project, that project; a prompt older than the
+  switch's last change is 409 `request_older_than_switch` — `by.via: 'agent'`.
+
+Scripts, scheduled jobs and Tasks cannot set it: their prompts are never in the ledger.
+
+**The run** — `POST /admin/project-home/videos/run` (`videoScriptRunRoute.cjs`, bearer token
+and port from `~/.claude/session-manager/admin-api.json`, body ≤ 64 KiB):
+
+| Field | Meaning |
+| --- | --- |
+| `cwd` | the project (required) |
+| `kind` | Project demo, Blog post, Feature, TikTok or Marketing (or its slug; required) |
+| `target` | post path/URL, feature name, brief path or landing URL; required for Blog post and Feature |
+| `length`, `style`, `character`, `focus` | the composer's choices (defaults 30, Auto, on, none) |
+| `voiceId` | a voice in the project's voice library |
+| `reviewFirst` | `true` runs the review stage first (default `false`) |
+| `externalRef` | the caller's own id for this press (letters, digits, `. _ : / @ -`, ≤ 200) |
+
+Answers, checked in this order (a refusal launches nothing):
+
+| Status | Body | When |
+| --- | --- | --- |
+| 400 | `{ ok:false, error }` | bad body or cwd |
+| 403 | `scripts_not_allowed` + `reason` | the switch is off for that project |
+| 400 | `{ ok:false, error }` | a bad press choice, an unknown `voiceId`, a bad `externalRef` |
+| 200 | `{ ok, existing:true, entryId, epicId, slug, alreadyRunning }` | a run with the same cwd + `externalRef` exists |
+| 409 | `already_building` (+ `activeSlug`) | a Demo Video job for the cwd is pending, held or running |
+| 503 | `{ ok:false, error }` | no app window answered, the queue could not be read, or no entry id came back |
+| 200 | `{ ok, entryId, epicId, slug, stage }` | the press started |
+
+The press goes through the same renderer press path as a human press (`chat:external-new-session`
+→ `launchSession`), so it mints one Epic through the existing mint authority with the human
+press's persona, checks and review stage. Each run is recorded in the machine-level ledger
+`video-script-runs.json` (its only writer is this route, ≤ 200 runs per project) and audited as
+`admin_video_script_run`.
+
+**Idempotency.** With `externalRef`, a repeat call with the same cwd + ref answers the first run
+(`existing: true`) instead of pressing again; concurrent identical calls share one launch
+(`withExternalRefLock`). Without it, only the 409 stops a second press.
+
+**Status** — `GET /admin/project-home/videos/status?cwd=&id=<entryId>` (read-only; `id` must match
+`^[a-z0-9][a-z0-9-]{0,63}$`). `state`, first match wins:
+
+| State | From |
+| --- | --- |
+| `season-complete` | `videos/<id>/outcome.json` (`reason` = its text) |
+| `saved` | `index.html` + `meta.json` (`files.index`/`meta`/`mp4?`/`poster?`, absolute, only those that exist) |
+| `awaiting_review` | `review/material.json` |
+| `queued` / `running` / `failed` | the job row for the ledger's slug (`reason` = its one line; a completed job with nothing saved is `failed`) |
+
+An id with neither a ledger run nor an entry folder is 404.
+
+**Review first stops at the human.** With `reviewFirst: true` the run ends at `awaiting_review`;
+only a human click in Project Home ▸ Video approves it or asks for changes
+([Review step](#review-step-videosidreview)) — no route, script or agent approves, so a scripted
+press never reaches `saved` without the human when Review first is on.
+
 ### Write tools and routes
 
 All in `projectHomeAdminRoutes.cjs`, writer `project-home`; each rewrite of an existing id

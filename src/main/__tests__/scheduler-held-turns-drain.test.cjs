@@ -105,11 +105,11 @@ test('heartbeat line carries heldSchedulerTurns { count, tabs }', () => {
   const q = () => ({ jobs: [], unreadable: true, paused: null });
   const noDrain = vi.fn(async () => []);
   scheduler.heartbeatTick({ readQueueSync: q, drainHeldSchedulerTurns: noDrain });
-  expect(lastLine().heldSchedulerTurns).toEqual({ count: 0, tabs: 0 });
+  expect(lastLine().heldSchedulerTurns).toEqual({ count: 0, tabs: [] });
   heldSchedulerTurns.defer({ tabId: 'a', prompt: 'p1', kind: 'job-notice' });
   heldSchedulerTurns.defer({ tabId: 'a', prompt: 'p2', kind: 'job-notice' });
   heldSchedulerTurns.defer({ tabId: 'b', prompt: 'p3', kind: 'job-notice' });
   scheduler.heartbeatTick({ readQueueSync: q, drainHeldSchedulerTurns: noDrain });
-  expect(lastLine().heldSchedulerTurns).toEqual({ count: 3, tabs: 2 });
+  expect(lastLine().heldSchedulerTurns).toEqual({ count: 3, tabs: ['a', 'b'] });
   expect(noDrain).toHaveBeenCalledTimes(2);
 });

@@ -68,7 +68,28 @@ describe('defer', () => {
     assert.equal(first.holdReason, 'usage');
     assert.equal(first.holdDetail, HOLD.detail);
     assert.ok(!Number.isNaN(Date.parse(first.heldAt)));
-    assert.deepEqual(m.summary(), { count: 3, tabs: 2 });
+    assert.deepEqual(m.summary(), { count: 3, tabs: ['t1', 't2'] });
+  });
+});
+
+describe('summary', () => {
+  it('lists unique tab ids oldest-held first, at most 20', () => {
+    const m = freshModule();
+    const entries = [
+      { id: 'e1', tabId: 'late', prompt: 'p', kind: 'job-notice', heldAt: '2026-11-24T12:00:00Z' },
+      { id: 'e2', tabId: 'early', prompt: 'p', kind: 'job-notice', heldAt: '2026-11-24T10:00:00Z' },
+      { id: 'e3', tabId: 'late', prompt: 'q', kind: 'job-notice', heldAt: '2026-11-24T09:00:00Z' },
+    ];
+    for (let i = 0; i < 25; i += 1) {
+      entries.push({ id: `x${i}`, tabId: `tab${i}`, prompt: 'p', kind: 'job-notice', heldAt: `2026-11-25T${String(i).padStart(2, '0')}:00:00Z` });
+    }
+    fs.writeFileSync(storeFile(), JSON.stringify({ version: 1, entries }));
+    const sum = m.summary();
+    assert.equal(sum.count, 28);
+    assert.ok(Array.isArray(sum.tabs));
+    assert.equal(sum.tabs.length, 20);
+    assert.deepEqual(sum.tabs.slice(0, 3), ['late', 'early', 'tab0']);
+    assert.equal(sum.tabs[19], 'tab17');
   });
 });
 
@@ -78,16 +99,16 @@ describe('restart', () => {
     m1.defer({ tabId: 't1', prompt: 'p1', kind: 'job-notice', hold: HOLD });
     const m2 = freshModule();
     assert.notEqual(m1, m2);
-    assert.deepEqual(m2.summary(), { count: 1, tabs: 1 });
+    assert.deepEqual(m2.summary(), { count: 1, tabs: ['t1'] });
   });
 
   it('a corrupt or missing file reads as empty', async () => {
     const m = freshModule();
-    assert.deepEqual(m.summary(), { count: 0, tabs: 0 });
+    assert.deepEqual(m.summary(), { count: 0, tabs: [] });
     fs.writeFileSync(storeFile(), '{not json');
-    assert.deepEqual(m.summary(), { count: 0, tabs: 0 });
+    assert.deepEqual(m.summary(), { count: 0, tabs: [] });
     fs.writeFileSync(storeFile(), JSON.stringify({ version: 1, entries: 'nope' }));
-    assert.deepEqual(m.summary(), { count: 0, tabs: 0 });
+    assert.deepEqual(m.summary(), { count: 0, tabs: [] });
     assert.deepEqual(await m.drain({ send: async () => ({ disposition: 'queued' }) }), []);
   });
 });
@@ -122,7 +143,7 @@ describe('buildCoalescedPrompt / drain', () => {
     assert.ok(i1 > 0 && i2 > i1 && i3 > i2, prompt);
     assert.deepEqual(extra, { origin: 'scheduler', heldBatch: true, sessionId: 's1', cwd: '/p' });
     assert.deepEqual(res, [{ tabId: 't1', delivered: 3, dropped: 0 }]);
-    assert.deepEqual(m.summary(), { count: 0, tabs: 0 });
+    assert.deepEqual(m.summary(), { count: 0, tabs: [] });
   });
 
   it('one entry still gets the header', () => {
@@ -138,7 +159,7 @@ describe('buildCoalescedPrompt / drain', () => {
       m.defer({ tabId: 't1', prompt: 'p1', kind: 'job-notice', hold: HOLD });
       const res = await m.drain({ send: async () => ({ disposition }) });
       assert.deepEqual(res, [{ tabId: 't1', delivered: 0, dropped: 0 }]);
-      assert.deepEqual(m.summary(), { count: 1, tabs: 1 });
+      assert.deepEqual(m.summary(), { count: 1, tabs: ['t1'] });
     });
   }
 
@@ -158,14 +179,14 @@ describe('buildCoalescedPrompt / drain', () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].split('The usage hold kept').length - 1, 1);
     assert.ok(calls[0].includes('--- 3 of 3 ---\nc'));
-    assert.deepEqual(m.summary(), { count: 0, tabs: 0 });
+    assert.deepEqual(m.summary(), { count: 0, tabs: [] });
   });
 
   it('keeps entries when send throws', async () => {
     const m = freshModule();
     m.defer({ tabId: 't1', prompt: 'p1', kind: 'job-notice', hold: HOLD });
     await m.drain({ send: async () => { throw new Error('x'); } });
-    assert.deepEqual(m.summary(), { count: 1, tabs: 1 });
+    assert.deepEqual(m.summary(), { count: 1, tabs: ['t1'] });
   });
 
   it('isStillNeeded=false drops without sending', async () => {
@@ -184,7 +205,7 @@ describe('buildCoalescedPrompt / drain', () => {
     const byTab = Object.fromEntries(res.map((r) => [r.tabId, r]));
     assert.deepEqual(byTab.t1, { tabId: 't1', delivered: 1, dropped: 1 });
     assert.deepEqual(byTab.t2, { tabId: 't2', delivered: 0, dropped: 1 });
-    assert.deepEqual(m.summary(), { count: 0, tabs: 0 });
+    assert.deepEqual(m.summary(), { count: 0, tabs: [] });
   });
 
   it('keeps entries deferred during a drain, and is single-flight', async () => {

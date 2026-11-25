@@ -96,9 +96,13 @@ function defer({ tabId, prompt, kind, sessionId, cwd, hold } = /** @type {any} *
   return entry;
 }
 
+const SUMMARY_TAB_LIMIT = 20;
+
+/** { count, tabs }: tabs = unique tab ids, oldest-held first, at most SUMMARY_TAB_LIMIT. */
 function summary() {
   const entries = readEntries();
-  return { count: entries.length, tabs: new Set(entries.map((e) => e.tabId)).size };
+  const tabs = [...new Set([...entries].sort(byHeldAt).map((e) => e.tabId))].slice(0, SUMMARY_TAB_LIMIT);
+  return { count: entries.length, tabs };
 }
 
 function byHeldAt(a, b) {

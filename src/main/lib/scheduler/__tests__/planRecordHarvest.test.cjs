@@ -115,3 +115,73 @@ describe('harvestPlanRecords', () => {
     assert.match(res.skipped[0].reason, /copy failed: boom/);
   });
 });
+
+describe('harvestPlanRecords declaredPaths', () => {
+  const FOREIGN = 'parent-epic-f93dac99';
+  const rel = (folder, name) => `${OPS_ROOT_DIR}/plan-records/${folder}/${name}`;
+
+  it('(a) copies a declared record from a foreign epic folder', () => {
+    writeSrc('validate.md', '# V\n', FOREIGN);
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'validate.md')] });
+    assert.deepEqual(res.skipped, []);
+    assert.deepEqual(res.copied, [path.join(destDir(FOREIGN), 'validate.md')]);
+    assert.equal(fs.readFileSync(path.join(destDir(FOREIGN), 'validate.md'), 'utf8'), '# V\n');
+  });
+
+  it('(b) skips malformed or escaping declared paths and writes nothing', () => {
+    writeSrc('x.md', 'x', FOREIGN);
+    fs.mkdirSync(path.join(srcDir(FOREIGN), 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(srcDir(FOREIGN), 'sub', 'y.md'), 'y');
+    const bad = [
+      `${OPS_ROOT_DIR}/plan-records/../plan-records/${FOREIGN}/x.md`,
+      `${OPS_ROOT_DIR}/plan-records/${FOREIGN}/../${FOREIGN}/x.md`,
+      rel('Bad_Folder', 'x.md'),
+      rel(FOREIGN, 'x.txt'),
+      rel(FOREIGN, 'sub/y.md'),
+      `${OPS_ROOT_DIR}/plan-records/${FOREIGN}/x.md\0`,
+      'src/main/x.md',
+      42,
+    ];
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: bad });
+    assert.deepEqual(res.copied, []);
+    assert.equal(res.skipped.length, bad.length);
+    for (const sk of res.skipped) assert.ok(sk.reason && typeof sk.reason === 'string');
+    assert.equal(fs.existsSync(path.join(projectRoot, OPS_ROOT_DIR)), false);
+  });
+
+  it('(c) reports a declared but missing record', () => {
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'gone.md')] });
+    assert.deepEqual(res.copied, []);
+    assert.equal(res.skipped.length, 1);
+    assert.equal(res.skipped[0].reason, 'declared plan record not found in worktree');
+  });
+
+  it('(d) copies a record in the own folder that is also declared exactly once', () => {
+    writeSrc('plan.md', 'p');
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(EPIC, 'plan.md'), `./${rel(EPIC, 'plan.md')}`] });
+    assert.deepEqual(res.skipped, []);
+    assert.deepEqual(res.copied, [path.join(destDir(), 'plan.md')]);
+  });
+
+  it('(e) skips a symlinked declared record', () => {
+    const outside = path.join(tmp, 'secret.md');
+    fs.writeFileSync(outside, 'secret');
+    fs.mkdirSync(srcDir(FOREIGN), { recursive: true });
+    fs.symlinkSync(outside, path.join(srcDir(FOREIGN), 'link.md'));
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'link.md')] });
+    assert.deepEqual(res.copied, []);
+    assert.equal(res.skipped[0].reason, 'symlink');
+    assert.equal(fs.existsSync(path.join(destDir(FOREIGN), 'link.md')), false);
+  });
+  it('(f) skips a declared record whose epic folder is a symlink', () => {
+    const outsideDir = path.join(tmp, 'outside-folder');
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, 'leak.md'), 'leak');
+    fs.mkdirSync(path.dirname(srcDir(FOREIGN)), { recursive: true });
+    fs.symlinkSync(outsideDir, srcDir(FOREIGN));
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'leak.md')] });
+    assert.deepEqual(res.copied, []);
+    assert.equal(res.skipped[0].reason, 'declared epic folder is not a directory');
+    assert.equal(fs.existsSync(path.join(destDir(FOREIGN), 'leak.md')), false);
+  });
+});

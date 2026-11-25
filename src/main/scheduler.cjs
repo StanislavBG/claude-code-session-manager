@@ -427,14 +427,38 @@ const FINISH_ARTIFACT_ONLY_COMMIT_LINE = `
    This job is artifact-only: its output is git-excluded, so there is nothing to stage. Skip the commit and go to the next step.`;
 
 /**
- * harvestJobPlanRecords(job, worktreeDir, projectRoot) — copy this run's
- * plan records from its worktree into the main checkout. Logs, never throws.
+ * jobDeclaredArtifactPaths(job) → Promise<string[]> — the job PRD's
+ * frontmatter artifactPaths (live PRD, else its archived copy). [] on any
+ * read/parse error; never throws.
  */
-function harvestJobPlanRecords(job, worktreeDir, projectRoot) {
+async function jobDeclaredArtifactPaths(job) {
+  try {
+    const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
+    if (!prdPath) return [];
+    const fm = parsePrdFile(fs.readFileSync(prdPath, 'utf8')).frontmatter;
+    if (!fm || !Array.isArray(fm.artifactPaths)) return [];
+    // Only plan-records entries are this harvest's; every other declared
+    // artifact belongs to harvestJobArtifacts and must not log a refusal here.
+    return fm.artifactPaths.filter((p) => typeof p === 'string'
+      && path.posix.normalize(p.replace(/\\/g, '/')).startsWith(ARTIFACT_PLAN_RECORDS_PREFIX));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * harvestJobPlanRecords(job, worktreeDir, projectRoot) — copy this run's
+ * plan records from its worktree into the main checkout: the job's own
+ * plan-records/<epicId>/ folder plus every plan record its PRD declares in
+ * frontmatter artifactPaths (which may sit in another Epic's folder).
+ * Logs, never throws.
+ */
+async function harvestJobPlanRecords(job, worktreeDir, projectRoot) {
   try {
     const epicId = job.epicId || job.sourcePromptId;
     if (!epicId || !worktreeDir || !projectRoot || path.resolve(worktreeDir) === path.resolve(projectRoot)) return;
-    const { copied, skipped } = harvestPlanRecords({ worktreeDir, projectRoot, epicId });
+    const declaredPaths = await jobDeclaredArtifactPaths(job);
+    const { copied, skipped } = harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths });
     if (copied.length) console.log(`[scheduler] ${job.slug}: harvested ${copied.length} plan record(s) into ${projectRoot}`);
     for (const sk of skipped) console.warn(`[scheduler] ${job.slug}: plan record not harvested: ${sk.path} — ${sk.reason}`);
   } catch (e) {
@@ -8437,7 +8461,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         // Plan records are written in the worktree and never committed; copy
         // them to the main checkout before verify and before the checkout is
         // removed. Never throws (planRecordHarvest.cjs).
-        harvestJobPlanRecords(job, worktree.dir, job.cwd || defaultCwd);
+        await harvestJobPlanRecords(job, worktree.dir, job.cwd || defaultCwd);
         // Capture artifact evidence before the worktree is removed: a
         // git-ignored artifact may live only here. Never breaks teardown.
         try {

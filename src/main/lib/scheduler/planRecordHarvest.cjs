@@ -24,16 +24,86 @@ function errMsg(e) {
   return e && e.message ? e.message : String(e);
 }
 
+const DECLARED_PREFIX = `${OPS_ROOT_DIR}/${NAMESPACE}/`;
+
 /**
- * harvestPlanRecords({ worktreeDir, projectRoot, epicId, fsImpl })
- *   → { copied: string[], skipped: { path, reason }[] }
- * `copied` holds destination absolute paths.
+ * parseDeclaredPath(p) → { folder, name } | { reason }
+ * A declared record must be exactly
+ * `session-manager-operations/plan-records/<epic-folder>/<name>.md` (posix,
+ * repo-relative), with no `..` segment and no NUL byte.
  */
-function harvestPlanRecords({ worktreeDir, projectRoot, epicId, fsImpl = fs } = {}) {
+function parseDeclaredPath(p) {
+  if (typeof p !== 'string' || !p) return { reason: 'declared path is not a string' };
+  if (p.includes('\0')) return { reason: 'declared path contains a NUL byte' };
+  const posix = p.replace(/\\/g, '/');
+  if (posix.split('/').includes('..')) return { reason: 'declared path contains ..' };
+  if (path.posix.isAbsolute(posix)) return { reason: 'declared path is absolute' };
+  const norm = path.posix.normalize(posix);
+  if (!norm.startsWith(DECLARED_PREFIX)) return { reason: 'declared path is not under plan-records/' };
+  const parts = norm.slice(DECLARED_PREFIX.length).split('/');
+  if (parts.length !== 2) return { reason: 'declared path must be plan-records/<epic-folder>/<name>.md' };
+  const [folder, name] = parts;
+  if (!EPIC_ID_RE.test(folder)) return { reason: 'declared epic folder not allowed' };
+  if (!NAME_RE.test(name)) return { reason: 'name not allowed' };
+  return { folder, name };
+}
+
+/**
+ * harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths, fsImpl })
+ *   → { copied: string[], skipped: { path, reason }[] }
+ * Copies every record in the job's own `plan-records/<epicId>/` folder, plus
+ * each well-formed `declaredPaths` entry (the PRD's frontmatter
+ * artifactPaths), whose folder may be a different Epic's. `copied` holds
+ * destination absolute paths.
+ */
+function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = [], fsImpl = fs } = {}) {
   /** @type {string[]} */
   const copied = [];
   /** @type {{ path: string, reason: string }[]} */
   const skipped = [];
+  /** @type {Set<string>} source paths already handled */
+  const seen = new Set();
+
+  /**
+   * Copy one record `src` to `plan-records/<folder>/<name>` in the main
+   * checkout with every safety check. Returns false when `missingReason` is
+   * set and the source does not exist (reported with that reason).
+   * @param {string} src @param {string} folder @param {string} name
+   * @param {string} [missingReason]
+   */
+  function copyOne(src, folder, name, missingReason) {
+    seen.add(src);
+    try {
+      if (!NAME_RE.test(name)) { skipped.push({ path: src, reason: 'name not allowed' }); return; }
+      let st;
+      try {
+        st = fsImpl.lstatSync(src);
+      } catch (e) {
+        if (missingReason && e && e.code === 'ENOENT') { skipped.push({ path: src, reason: missingReason }); return; }
+        throw e;
+      }
+      if (st.isSymbolicLink()) { skipped.push({ path: src, reason: 'symlink' }); return; }
+      if (st.isDirectory()) { skipped.push({ path: src, reason: 'directory' }); return; }
+      if (!st.isFile()) { skipped.push({ path: src, reason: 'not a regular file' }); return; }
+      if (st.size > MAX_BYTES) { skipped.push({ path: src, reason: `oversize (${st.size} > ${MAX_BYTES} bytes)` }); return; }
+
+      const destDir = path.resolve(opsPath(projectRoot, NAMESPACE, folder));
+      const dest = path.resolve(opsPath(projectRoot, NAMESPACE, folder, name));
+      if (path.dirname(dest) !== destDir) { skipped.push({ path: src, reason: 'destination escapes plan-records folder' }); return; }
+      if (dest === src) return;
+      const verdict = checkOpsWrite(dest, WRITER);
+      if (!verdict.ok) { skipped.push({ path: src, reason: `write refused: ${verdict.error}` }); return; }
+      assertOpsWrite(dest, WRITER);
+
+      const text = fsImpl.readFileSync(src, 'utf8');
+      if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) { skipped.push({ path: src, reason: 'oversize after read' }); return; }
+      writeTextAtomicSync(dest, text);
+      copied.push(dest);
+    } catch (e) {
+      skipped.push({ path: src, reason: `copy failed: ${errMsg(e)}` });
+    }
+  }
+
   try {
     if (typeof epicId !== 'string' || !EPIC_ID_RE.test(epicId)) {
       skipped.push({ path: String(epicId), reason: 'unsafe epicId' });
@@ -45,59 +115,57 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, fsImpl = fs } = 
       return { copied, skipped };
     }
     if (path.resolve(worktreeDir) === path.resolve(projectRoot)) return { copied, skipped };
+    const wtRoot = path.resolve(worktreeDir);
 
-    const srcDir = path.join(path.resolve(worktreeDir), OPS_ROOT_DIR, NAMESPACE, epicId);
-    let destDir;
-    try {
-      destDir = path.resolve(opsPath(projectRoot, NAMESPACE, epicId));
-    } catch (e) {
-      skipped.push({ path: srcDir, reason: `destination refused: ${errMsg(e)}` });
-      return { copied, skipped };
-    }
-    if (destDir === srcDir) return { copied, skipped };
-
-    let srcStat;
-    try {
-      srcStat = fsImpl.lstatSync(srcDir);
-    } catch {
-      return { copied, skipped }; // no records written by this job
-    }
-    if (!srcStat.isDirectory()) {
-      skipped.push({ path: srcDir, reason: 'source is not a directory' });
-      return { copied, skipped };
-    }
-
-    let names;
-    try {
-      names = fsImpl.readdirSync(srcDir).map(String).sort();
-    } catch (e) {
-      skipped.push({ path: srcDir, reason: `cannot list source: ${errMsg(e)}` });
-      return { copied, skipped };
-    }
-
-    for (const name of names) {
-      const src = path.join(srcDir, name);
+    // Pass 1: everything in the job's own plan-records/<epicId>/ folder.
+    folderPass: {
+      const srcDir = path.join(wtRoot, OPS_ROOT_DIR, NAMESPACE, epicId);
+      let destDir;
       try {
-        if (!NAME_RE.test(name)) { skipped.push({ path: src, reason: 'name not allowed' }); continue; }
-        const st = fsImpl.lstatSync(src);
-        if (st.isSymbolicLink()) { skipped.push({ path: src, reason: 'symlink' }); continue; }
-        if (st.isDirectory()) { skipped.push({ path: src, reason: 'directory' }); continue; }
-        if (!st.isFile()) { skipped.push({ path: src, reason: 'not a regular file' }); continue; }
-        if (st.size > MAX_BYTES) { skipped.push({ path: src, reason: `oversize (${st.size} > ${MAX_BYTES} bytes)` }); continue; }
-
-        const dest = path.resolve(opsPath(projectRoot, NAMESPACE, epicId, name));
-        if (path.dirname(dest) !== destDir) { skipped.push({ path: src, reason: 'destination escapes plan-records folder' }); continue; }
-        const verdict = checkOpsWrite(dest, WRITER);
-        if (!verdict.ok) { skipped.push({ path: src, reason: `write refused: ${verdict.error}` }); continue; }
-        assertOpsWrite(dest, WRITER);
-
-        const text = fsImpl.readFileSync(src, 'utf8');
-        if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) { skipped.push({ path: src, reason: 'oversize after read' }); continue; }
-        writeTextAtomicSync(dest, text);
-        copied.push(dest);
+        destDir = path.resolve(opsPath(projectRoot, NAMESPACE, epicId));
       } catch (e) {
-        skipped.push({ path: src, reason: `copy failed: ${errMsg(e)}` });
+        skipped.push({ path: srcDir, reason: `destination refused: ${errMsg(e)}` });
+        break folderPass;
       }
+      if (destDir === srcDir) break folderPass;
+      let srcStat;
+      try {
+        srcStat = fsImpl.lstatSync(srcDir);
+      } catch {
+        break folderPass; // no records written by this job in its own folder
+      }
+      if (!srcStat.isDirectory()) {
+        skipped.push({ path: srcDir, reason: 'source is not a directory' });
+        break folderPass;
+      }
+      let names;
+      try {
+        names = fsImpl.readdirSync(srcDir).map(String).sort();
+      } catch (e) {
+        skipped.push({ path: srcDir, reason: `cannot list source: ${errMsg(e)}` });
+        break folderPass;
+      }
+      for (const name of names) copyOne(path.join(srcDir, name), epicId, name);
+    }
+
+    // Pass 2: records the PRD declared in frontmatter artifactPaths.
+    const declared = Array.isArray(declaredPaths) ? declaredPaths : [];
+    for (const p of declared) {
+      const parsed = parseDeclaredPath(p);
+      if (!('folder' in parsed)) { skipped.push({ path: String(p), reason: parsed.reason }); continue; }
+      const src = path.join(wtRoot, OPS_ROOT_DIR, NAMESPACE, parsed.folder, parsed.name);
+      if (seen.has(src)) continue;
+      // Pass 1 refuses a symlinked/non-directory own folder; hold every
+      // declared folder to the same rule so a declaration cannot bypass it.
+      const folderDir = path.dirname(src);
+      let folderStat = null;
+      try { folderStat = fsImpl.lstatSync(folderDir); } catch { /* missing: copyOne reports */ }
+      if (folderStat && (folderStat.isSymbolicLink() || !folderStat.isDirectory())) {
+        seen.add(src);
+        skipped.push({ path: src, reason: 'declared epic folder is not a directory' });
+        continue;
+      }
+      copyOne(src, parsed.folder, parsed.name, 'declared plan record not found in worktree');
     }
   } catch (e) {
     skipped.push({ path: String(worktreeDir), reason: `harvest failed: ${errMsg(e)}` });

@@ -223,6 +223,61 @@ test('writeRcaReport: an unsafe epicId is skipped and the lookup continues with 
   expect(fs.readFileSync(res.path, 'utf8')).toContain('found despite bad epicId');
 });
 
+// ─── PRD lookup precedence: same slug in two places ──────────────────────────
+
+function writeFlatPrd(cwd, slug, acBody) {
+  const dir = path.join(cwd, 'session-manager-operations', 'scheduler', 'prds');
+  fs.mkdirSync(dir, { recursive: true });
+  const body = ['---', `title: ${slug}`, '---', '', '# Goal', '', 'Do it.', '', '# Acceptance criteria', '', acBody, '', '# Out of scope', '', '- N/A'].join('\n');
+  fs.writeFileSync(path.join(dir, `${slug}.md`), body);
+}
+
+test('writeRcaReport: the Epic prds/ copy wins over a flat-dir copy of the same slug', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writeEpicPrd(cwd, 'epic-abc', 'prds', 'testslug', '- [ ] ac-1: EPIC-COPY criterion');
+  writeFlatPrd(cwd, 'testslug', '- [ ] ac-1: FLAT-COPY criterion');
+
+  const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd, epicId: 'epic-abc' }), runDir, verdict: 'transcript_errors' });
+
+  const body = fs.readFileSync(res.path, 'utf8');
+  expect(body).toContain('EPIC-COPY');
+  expect(body).not.toContain('FLAT-COPY');
+});
+
+test('writeRcaReport: the Epic live prds/ copy wins over its prds-archived/ twin', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writeEpicPrd(cwd, 'epic-abc', 'prds', 'testslug', '- [ ] ac-1: EPIC-COPY criterion');
+  writeEpicPrd(cwd, 'epic-abc', 'prds-archived', 'testslug', '- [ ] ac-1: ARCHIVED-COPY criterion');
+
+  const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd, epicId: 'epic-abc' }), runDir, verdict: 'transcript_errors' });
+
+  const body = fs.readFileSync(res.path, 'utf8');
+  expect(body).toContain('EPIC-COPY');
+  expect(body).not.toContain('ARCHIVED-COPY');
+});
+
+test('writeRcaReport: the job\'s own Epic prds/ copy wins over another Epic\'s copy of the same slug', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  // Several sibling Epics on both sides of the job's own id, so readdir order
+  // alone cannot make the own-Epic copy win.
+  for (const other of ['aaa-epic', 'mmm-epic', 'zzz-epic']) {
+    writeEpicPrd(cwd, other, 'prds', 'testslug', '- [ ] ac-1: OTHER-EPIC-COPY criterion');
+  }
+  writeEpicPrd(cwd, 'own-epic', 'prds', 'testslug', '- [ ] ac-1: OWN-EPIC-COPY criterion');
+
+  const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd, epicId: 'own-epic' }), runDir, verdict: 'transcript_errors' });
+
+  const body = fs.readFileSync(res.path, 'utf8');
+  expect(body).toContain('OWN-EPIC-COPY');
+  expect(body).not.toContain('OTHER-EPIC-COPY');
+});
+
 // ─── skip paths ──────────────────────────────────────────────────────────────
 
 test('writeRcaReport: rejects a slug containing path-traversal segments', async () => {

@@ -188,6 +188,84 @@ describe('webRemote:service-pair-start', () => {
     await setup()
     expect(() => call('webRemote:service-pair-start', { name: 'x' })).toThrow()
   })
+
+  describe('projectRoot (project_create)', () => {
+    const PC_SCOPE = ['macro_list', 'project_create']
+    const STR_IN_HOME = () => path.join(os.homedir(), 'projects-root')
+
+    it('passes projectRoot through to the pending pairing when project_create is in scope', async () => {
+      await setup()
+      const root = STR_IN_HOME()
+      await fsp.mkdir(root, { recursive: true })
+      stubRelay('POST', '/api/sm-relay/client-otp', 200, { code: 'AB12CD34' })
+      const r = await call('webRemote:service-pair-start', { ...START, scope: PC_SCOPE, projectRoot: root })
+      expect(r.ok).toBe(true)
+      const pending = store.listPending()
+      expect(pending).toHaveLength(1)
+      expect(pending[0].projectRoot).toBe(root)
+      stubRelay('GET', '/api/sm-relay/clients', 200, { clients: [] })
+      const list = await call('webRemote:services-list')
+      expect(list.pending[0].projectRoot).toBe(root)
+    })
+
+    it.each([
+      ['missing', undefined],
+      ['relative', 'projects-root'],
+      ['not a directory', 'FILE'],
+      ['nonexistent', 'NOPE'],
+      ['outside the home folder', 'OUTSIDE'],
+      ['the home folder parent via ..', 'DOTDOT'],
+    ])('refuses projectRoot %s with the tool, before any relay call', async (_label, kind) => {
+      await setup()
+      let root = kind
+      if (kind === 'FILE') {
+        root = path.join(os.homedir(), 'a-file.txt')
+        await fsp.writeFile(root, 'x')
+      } else if (kind === 'NOPE') {
+        root = path.join(os.homedir(), 'does-not-exist')
+      } else if (kind === 'OUTSIDE') {
+        root = os.tmpdir() === os.homedir() ? '/' : path.dirname(os.homedir())
+      } else if (kind === 'DOTDOT') {
+        root = path.join(os.homedir(), '..')
+      }
+      stubRelay('POST', '/api/sm-relay/client-otp', 200, { code: 'AB12CD34' })
+      const arg = { ...START, scope: PC_SCOPE }
+      if (root !== undefined) arg.projectRoot = root
+      expect(await call('webRemote:service-pair-start', arg))
+        .toEqual({ ok: false, error: 'projectRoot must be an existing folder in your home folder' })
+      expect(relayCalls).toHaveLength(0)
+      expect(store.listPending()).toEqual([])
+    })
+
+    it('drops projectRoot when project_create is not in scope', async () => {
+      await setup()
+      stubRelay('POST', '/api/sm-relay/client-otp', 200, { code: 'AB12CD34' })
+      const r = await call('webRemote:service-pair-start', { ...START, projectRoot: '/not/even/real' })
+      expect(r.ok).toBe(true)
+      expect(store.listPending()[0].projectRoot).toBeNull()
+      stubRelay('GET', '/api/sm-relay/clients', 200, { clients: [] })
+      const list = await call('webRemote:services-list')
+      expect(list.pending[0].projectRoot).toBeNull()
+    })
+
+    it('services-list rows carry projectRoot null when absent', async () => {
+      await setup()
+      await pairedService()
+      stubRelay('GET', '/api/sm-relay/clients', 200, { clients: [] })
+      const list = await call('webRemote:services-list')
+      expect(list.services[0].projectRoot).toBeNull()
+    })
+
+    it('the strict schema accepts projectRoot and bounds its length', () => {
+      const { schemas } = require('../ipcSchemas.cjs')
+      const s = schemas.webRemoteServicePairStart
+      expect(s.safeParse({ ...START, projectRoot: '/home/x/p' }).success).toBe(true)
+      expect(s.safeParse(START).success).toBe(true)
+      expect(s.safeParse({ ...START, projectRoot: '' }).success).toBe(false)
+      expect(s.safeParse({ ...START, projectRoot: 'a'.repeat(4097) }).success).toBe(false)
+      expect(s.safeParse({ ...START, extra: 1 }).success).toBe(false)
+    })
+  })
 })
 
 describe('webRemote:service-confirm-sas', () => {

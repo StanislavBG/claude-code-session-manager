@@ -1518,6 +1518,7 @@ const webRemoteServicePairStart = z.object({
   name: z.string().min(1).max(64).regex(/^[^\r\n]+$/),
   homeCwd: z.string().min(1).max(4096),
   scope: z.array(z.string().min(1).max(64)).min(1).max(16),
+  projectRoot: z.string().min(1).max(4096).optional(),
 }).strict();
 const webRemoteServiceConfirmSas = z.object({
   pairingId: z.string().regex(WEB_REMOTE_UUID_RE),

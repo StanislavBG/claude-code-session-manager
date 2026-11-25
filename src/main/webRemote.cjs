@@ -1352,7 +1352,21 @@ async function pairedDevice() {
 function redactService(s) {
   if (!s) return s;
   const { pubKey: _omit, ...rest } = s;
-  return rest;
+  return { ...rest, projectRoot: typeof rest.projectRoot === 'string' ? rest.projectRoot : null };
+}
+
+const PROJECT_ROOT_ERROR = 'projectRoot must be an existing folder in your home folder';
+
+/** True when p is an absolute path to an existing directory inside the home folder. */
+function isProjectRootOk(p) {
+  if (typeof p !== 'string' || p.length === 0 || p.includes('\0') || !path.isAbsolute(p)) return false;
+  const rel = path.relative(os.homedir(), path.resolve(p));
+  if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return false;
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function logRelayFailure(op, r) {
@@ -1362,7 +1376,7 @@ function logRelayFailure(op, r) {
   });
 }
 
-async function servicePairStart({ name, homeCwd, scope }) {
+async function servicePairStart({ name, homeCwd, scope, projectRoot }) {
   const device = await pairedDevice();
   if (!device) return { ok: false, error: 'no_paired_device' };
   const { SERVICE_TOOL_NAMES } = require('./lib/feedback-remote/servicePairings.cjs');
@@ -1370,6 +1384,8 @@ async function servicePairStart({ name, homeCwd, scope }) {
   if (!path.isAbsolute(homeCwd)) return { ok: false, error: 'homeCwd must be an absolute path' };
   const unknown = scope.find((t) => !SERVICE_TOOL_NAMES.includes(t));
   if (unknown) return { ok: false, error: `scope names an unknown tool: ${unknown}` };
+  const wantsProjectCreate = scope.includes('project_create');
+  if (wantsProjectCreate && !isProjectRootOk(projectRoot)) return { ok: false, error: PROJECT_ROOT_ERROR };
 
   const r = await relayRequest('POST', `${RELAY_API_BASE}/client-otp`, { body: {}, token: device.deviceToken });
   if (!isOk(r)) {
@@ -1381,7 +1397,9 @@ async function servicePairStart({ name, homeCwd, scope }) {
   const codeExpiresAt = Date.now() + CLIENT_OTP_TTL_MS;
   let pairingId;
   try {
-    ({ pairingId } = await getServiceStore().createPending({ name, homeCwd, scope }));
+    ({ pairingId } = await getServiceStore().createPending({
+      name, homeCwd, scope, projectRoot: wantsProjectCreate ? projectRoot : undefined,
+    }));
   } catch (e) {
     return { ok: false, error: e?.message || 'pending pairing failed' };
   }
@@ -1392,7 +1410,7 @@ async function servicePairStart({ name, homeCwd, scope }) {
 async function servicesList() {
   const store = getServiceStore();
   const services = store.list().map(redactService);
-  const pending = store.listPending();
+  const pending = store.listPending().map(redactService);
   const known = new Set(services.map((s) => s.relayClientId).filter(Boolean));
   const device = await pairedDevice();
   if (!device) return { ok: true, services, pending, relayOrphans: [], relayError: 'no_paired_device' };

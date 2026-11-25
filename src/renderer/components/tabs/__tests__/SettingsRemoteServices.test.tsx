@@ -16,11 +16,11 @@ let clipboard: ReturnType<typeof vi.fn>
 
 const service = {
   serviceId: 'svc-1', name: 'Kiln', homeCwd: '/home/u/Self', scope: [...SERVICE_TOOLS],
-  relayClientId: 'rc-1', pairedAt: 1_700_000_000_000, lastSeenAt: 1_700_000_000_000,
+  projectRoot: null, relayClientId: 'rc-1', pairedAt: 1_700_000_000_000, lastSeenAt: 1_700_000_000_000,
 }
 const pendingEntry = {
   pairingId: 'pair-1', name: 'Kiln', homeCwd: '/home/u/Self', scope: [...SERVICE_TOOLS],
-  createdAt: Date.now(), expiresAt: Date.now() + 300_000,
+  projectRoot: null, createdAt: Date.now(), expiresAt: Date.now() + 300_000,
 }
 
 async function flush() {

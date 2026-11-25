@@ -2930,7 +2930,8 @@ export type WebRemoteServiceTool =
   | 'macro_list'
   | 'macro_run'
   | 'epic_get'
-  | 'events_read';
+  | 'events_read'
+  | 'project_create';
 
 /** A paired service as the renderer sees it (its pinned key is never returned). */
 export interface WebRemoteService {
@@ -2938,6 +2939,8 @@ export interface WebRemoteService {
   name: string;
   homeCwd: string;
   scope: WebRemoteServiceTool[];
+  /** Owner-approved projects folder project_create creates into; null without that tool. */
+  projectRoot: string | null;
   relayClientId: string | null;
   pairedAt: number;
   lastSeenAt: number;
@@ -2948,6 +2951,7 @@ export interface WebRemotePendingService {
   name: string;
   homeCwd: string;
   scope: WebRemoteServiceTool[];
+  projectRoot: string | null;
   createdAt: number;
   expiresAt: number;
 }
@@ -2973,6 +2977,8 @@ export interface WebRemoteServicePairStartInput {
   name: string;
   homeCwd: string;
   scope: WebRemoteServiceTool[];
+  /** Required (an existing folder in the home folder) when scope includes project_create. */
+  projectRoot?: string;
 }
 
 export type WebRemoteServicePairStartResult =

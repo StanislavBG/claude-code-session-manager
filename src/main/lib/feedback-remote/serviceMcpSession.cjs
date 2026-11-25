@@ -25,16 +25,23 @@
  *   in another project; events_read keeps epic_state_changed rows only for a
  *   ledger (cwd, epicId) and epic_cross_project_reply rows only for a ledger
  *   (fromCwd, fromEpicId).
+ * - project_create is pinned to the pairing's owner-approved projects folder:
+ *   no service.projectRoot -> refused (403, 'refused:projectRoot'); a given
+ *   parentDir that does not path.resolve() to projectRoot -> refused (403,
+ *   'refused:parentDir'); otherwise the route gets parentDir = projectRoot and
+ *   fromCwd = service.homeCwd (a caller's fromCwd is overwritten).
  *
  * response is null for a notification (no id). audit is null for anything but
  * tools/call, else { tool, result } (result: 'ok' | 'error:<status>' |
- * 'refused:scope' | 'refused:fromCwd' | 'refused:ledger' | 'error:invalid-params'
+ * 'refused:scope' | 'refused:fromCwd' | 'refused:ledger' |
+ * 'refused:projectRoot' | 'refused:parentDir' | 'error:invalid-params'
  * | 'error:invoke').
  *
  * No Electron, no I/O of its own.
  */
 'use strict';
 
+const path = require('node:path');
 const { SERVICE_TOOLS, EVENTS_READ_KINDS } = require('./serviceMcpTools.cjs');
 const { SUPPORTED_PROTOCOL_VERSIONS } = require('../mcpStdioServer.cjs');
 
@@ -158,6 +165,27 @@ async function runTool(tool, args, { service, invoke, store }) {
         const events = answer.json.events.filter((row) => EVENTS_READ_KINDS.includes(row?.kind) && ownsEvent(row));
         return { answer: { status: answer.status, json: { ...answer.json, events } }, result: 'ok' };
       }
+      return { answer, result: isOk(answer) ? 'ok' : `error:${answer.status}` };
+    }
+    case 'project_create': {
+      const projectRoot = typeof service.projectRoot === 'string' && service.projectRoot !== '' ? service.projectRoot : null;
+      if (projectRoot === null) {
+        return {
+          answer: { status: 403, json: { ok: false, error: 'this pairing has no approved projects folder; re-pair to grant project_create' } },
+          result: 'refused:projectRoot',
+        };
+      }
+      const given = args.parentDir;
+      if (given !== undefined && given !== null && given !== ''
+        && (typeof given !== 'string' || given.includes('\0') || path.resolve(given) !== projectRoot)) {
+        return {
+          answer: { status: 403, json: { ok: false, error: 'parentDir must be the projects folder approved at pairing', projectRoot } },
+          result: 'refused:parentDir',
+        };
+      }
+      const req = tool.toRequest({ ...args, parentDir: projectRoot });
+      req.body = { ...req.body, parentDir: projectRoot, fromCwd: service.homeCwd };
+      const answer = await callInvoke(invoke, req);
       return { answer, result: isOk(answer) ? 'ok' : `error:${answer.status}` };
     }
     default: {

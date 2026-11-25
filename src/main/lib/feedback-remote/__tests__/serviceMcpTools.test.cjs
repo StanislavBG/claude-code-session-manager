@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  SERVICE_TOOLS, SERVICE_ONLY_TOOL_NAMES, EVENTS_READ_KINDS,
+  SERVICE_TOOLS, SERVICE_ONLY_TOOL_NAMES, EVENTS_READ_KINDS, PROJECT_CREATE_INPUT_SCHEMA,
 } = require('../serviceMcpTools.cjs');
 const { SERVICE_TOOL_NAMES } = require('../servicePairings.cjs');
 const { MCP_TOOL_CATALOG, composeDescription } = require('../../mcpToolCatalog.cjs');
@@ -119,13 +119,37 @@ test('shared tools reuse the stdio server\'s exact inputSchema objects and catal
 });
 
 test('service-only tools are absent from the stdio server and the catalog', () => {
-  expect([...SERVICE_ONLY_TOOL_NAMES]).toEqual(['macro_run', 'events_read']);
+  expect([...SERVICE_ONLY_TOOL_NAMES]).toEqual(['macro_run', 'events_read', 'project_create']);
   const { TOOLS } = requireServer();
   const localNames = TOOLS.map((t) => t.name);
   for (const name of SERVICE_ONLY_TOOL_NAMES) {
     expect(localNames).not.toContain(name);
     expect(MCP_TOOL_CATALOG.find((e) => e.name === name)).toBeUndefined();
   }
+});
+
+test('project_create: inline description, schema shape, POST /admin/projects/create', () => {
+  const tool = byName('project_create');
+  expect(tool.inputSchema).toBe(PROJECT_CREATE_INPUT_SCHEMA);
+  expect(tool.description).toMatch(/projects folder the owner approved/);
+  expect(MCP_TOOL_CATALOG.find((e) => e.name === 'project_create')).toBeUndefined();
+  const s = PROJECT_CREATE_INPUT_SCHEMA;
+  expect(s.type).toBe('object');
+  expect(s.required).toEqual(['name', 'externalRef']);
+  expect(Object.keys(s.properties).sort()).toEqual(['externalRef', 'github', 'name', 'parentDir']);
+  expect(s.properties.github.type).toBe('object');
+  expect(s.properties.github.properties.private.type).toBe('boolean');
+  expect(s.properties.github.properties.owner.type).toBe('string');
+  expect(s.properties.parentDir.type).toBe('string');
+  expect(s).not.toHaveProperty('oneOf');
+  expect(s).not.toHaveProperty('anyOf');
+  expect(tool.toRequest({ name: 'foo', externalRef: 'k-1' })).toEqual({
+    method: 'POST', path: '/admin/projects/create', body: { name: 'foo', externalRef: 'k-1' },
+  });
+  expect(tool.toRequest({ name: 'foo', externalRef: 'k-1', github: { private: true }, parentDir: '/p', junk: 1 })).toEqual({
+    method: 'POST', path: '/admin/projects/create',
+    body: { name: 'foo', externalRef: 'k-1', github: { private: true }, parentDir: '/p' },
+  });
 });
 
 test('feedback_list_projects toRequest matches the stdio handler', async () => {

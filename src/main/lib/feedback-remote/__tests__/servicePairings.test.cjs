@@ -39,9 +39,9 @@ const SITE = '/home/u/Projects/site';
 const OTHER = '/home/u/Projects/other';
 const GOOD = { name: 'Kiln Service', homeCwd: '/home/u/Projects/Kiln', scope: ['feedback_open_session', 'epic_get'] };
 
-test('SERVICE_TOOL_NAMES is exactly the six service tools', () => {
+test('SERVICE_TOOL_NAMES is exactly the seven service tools', () => {
   expect(SERVICE_TOOL_NAMES).toEqual([
-    'feedback_list_projects', 'feedback_open_session', 'macro_list', 'macro_run', 'epic_get', 'events_read',
+    'feedback_list_projects', 'feedback_open_session', 'macro_list', 'macro_run', 'epic_get', 'events_read', 'project_create',
   ]);
   expect(Object.isFrozen(SERVICE_TOOL_NAMES)).toBe(true);
 });
@@ -66,6 +66,7 @@ test('confirmPending with relayClientId creates the service and consumes the pen
     name: GOOD.name,
     homeCwd: GOOD.homeCwd,
     scope: GOOD.scope,
+    projectRoot: null,
     pubKey: PUBKEY,
     relayClientId: RELAY_ID,
     pairedAt: clock,
@@ -105,6 +106,39 @@ test('createPending refuses bad scope, name and homeCwd', async () => {
   await expect(store.createPending({ ...GOOD, homeCwd: 'relative/path' })).rejects.toThrow(/homeCwd/);
   expect(store.listPending()).toEqual([]);
   await expect(store.createPending({ ...GOOD, name: 'x'.repeat(64) })).resolves.toBeTruthy();
+});
+
+test('createPending requires an absolute projectRoot when scope grants project_create', async () => {
+  const withTool = { ...GOOD, scope: ['feedback_open_session', 'project_create'] };
+  await expect(store.createPending(withTool)).rejects.toThrow(/projectRoot/);
+  await expect(store.createPending({ ...withTool, projectRoot: '' })).rejects.toThrow(/projectRoot/);
+  await expect(store.createPending({ ...withTool, projectRoot: 'rel/Projects' })).rejects.toThrow(/projectRoot/);
+  await expect(store.createPending({ ...withTool, projectRoot: '/home/u/Pro\0jects' })).rejects.toThrow(/projectRoot/);
+  expect(store.listPending()).toEqual([]);
+  const p = await store.createPending({ ...withTool, projectRoot: '/home/u/Projects/../Projects/' });
+  expect(store.listPending()[0].projectRoot).toBe('/home/u/Projects');
+  const svc = await store.confirmPending(p.pairingId, PUBKEY, { relayClientId: null });
+  expect(svc.projectRoot).toBe('/home/u/Projects');
+  expect(store.findByPubKey(PUBKEY).projectRoot).toBe('/home/u/Projects');
+  const again = createServicePairings({ filePath, now: () => clock });
+  expect(again.list()[0].projectRoot).toBe('/home/u/Projects');
+});
+
+test('projectRoot is stored as null when scope lacks project_create', async () => {
+  await store.createPending({ ...GOOD, projectRoot: '/home/u/Projects' });
+  expect(store.listPending()[0].projectRoot).toBeNull();
+});
+
+test('a stored record without projectRoot loads as null', async () => {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify({
+    version: 1,
+    pending: [{ pairingId: 'p1', name: 'Old', homeCwd: '/h', scope: ['epic_get'], createdAt: clock, expiresAt: clock + 1000 }],
+    services: [{ serviceId: 's1', name: 'Old', homeCwd: '/h', scope: ['epic_get'], pubKey: 'k', relayClientId: null, pairedAt: 1, lastSeenAt: 1 }],
+  }));
+  const old = createServicePairings({ filePath, now: () => clock });
+  expect(old.list()[0].projectRoot).toBeNull();
+  expect(old.listPending()[0].projectRoot).toBeNull();
 });
 
 test('revoke removes the service and its ledger', async () => {

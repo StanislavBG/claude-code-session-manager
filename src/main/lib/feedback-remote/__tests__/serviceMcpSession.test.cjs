@@ -19,8 +19,10 @@ const { SERVICE_TOOL_NAMES } = require('../servicePairings.cjs');
 
 const HOME = '/home/me/Projects/kiln';
 
-function makeService(scope = [...SERVICE_TOOL_NAMES]) {
-  return { serviceId: 'svc-1', name: 'Kiln Service', homeCwd: HOME, scope };
+const PROJECTS = '/home/me/Projects';
+
+function makeService(scope = [...SERVICE_TOOL_NAMES], projectRoot = PROJECTS) {
+  return { serviceId: 'svc-1', name: 'Kiln Service', homeCwd: HOME, scope, projectRoot };
 }
 
 /** opened: [[cwd, epicId], ...] — the ledger is keyed by project + id. */
@@ -50,8 +52,8 @@ function parsed(response) {
   return JSON.parse(response.result.content[0].text);
 }
 
-async function run(msg, { scope, opened, handler } = {}) {
-  const service = makeService(scope);
+async function run(msg, { scope, opened, handler, projectRoot } = {}) {
+  const service = makeService(scope, projectRoot === undefined ? PROJECTS : projectRoot);
   const store = makeStore(opened);
   const { invoke, calls } = makeInvoke(handler);
   const out = await handleServiceMcp(msg, { service, invoke, store });
@@ -331,4 +333,52 @@ test('an invoke that throws answers a JSON-RPC error with an error:invoke audit'
 test('lib-layout lists serviceMcpSession under feedback-remote', () => {
   const layout = JSON.parse(fs.readFileSync(path.join(__dirname, '../../../../../scripts/lib-layout.json'), 'utf8'));
   expect(layout.serviceMcpSession).toBe('feedback-remote');
+});
+
+// ── project_create ─────────────────────────────────────────────────────────
+
+test('project_create pins parentDir to projectRoot and fromCwd to homeCwd', async () => {
+  const handler = () => ({ status: 200, json: { ok: true, status: 'created', cwd: `${PROJECTS}/foo` } });
+  const { response, audit, calls } = await run(call('project_create', { name: 'foo', externalRef: 'k-1', fromCwd: '/elsewhere' }), { handler });
+  expect(audit).toEqual({ tool: 'project_create', result: 'ok' });
+  expect(calls).toHaveLength(1);
+  expect(calls[0].method).toBe('POST');
+  expect(calls[0].path).toBe('/admin/projects/create');
+  expect(calls[0].body).toEqual({ name: 'foo', externalRef: 'k-1', parentDir: PROJECTS, fromCwd: HOME });
+  expect(parsed(response).ok).toBe(true);
+});
+
+test('project_create accepts a parentDir that resolves to projectRoot', async () => {
+  const { audit, calls } = await run(call('project_create', { name: 'foo', externalRef: 'k-1', parentDir: `${PROJECTS}/x/../` }));
+  expect(audit.result).toBe('ok');
+  expect(calls[0].body.parentDir).toBe(PROJECTS);
+});
+
+test('project_create refuses a different parentDir without invoking', async () => {
+  const { response, audit, calls } = await run(call('project_create', { name: 'foo', externalRef: 'k-1', parentDir: '/tmp' }));
+  expect(audit).toEqual({ tool: 'project_create', result: 'refused:parentDir' });
+  expect(calls).toHaveLength(0);
+  expect(response.result.isError).toBe(true);
+  const body = parsed(response);
+  expect(body.ok).toBe(false);
+  expect(typeof body.error).toBe('string');
+  expect(body.projectRoot).toBe(PROJECTS);
+});
+
+test('project_create refuses when the pairing has no projectRoot', async () => {
+  const { response, audit, calls } = await run(call('project_create', { name: 'foo', externalRef: 'k-1' }), { projectRoot: null });
+  expect(audit).toEqual({ tool: 'project_create', result: 'refused:projectRoot' });
+  expect(calls).toHaveLength(0);
+  expect(response.result.isError).toBe(true);
+  expect(parsed(response).ok).toBe(false);
+});
+
+test('project_create outside scope answers -32001 and tools/list hides it', async () => {
+  const scope = SERVICE_TOOL_NAMES.filter((n) => n !== 'project_create');
+  const { response, audit, calls } = await run(call('project_create', { name: 'foo', externalRef: 'k-1' }), { scope });
+  expect(response.error.code).toBe(-32001);
+  expect(audit).toEqual({ tool: 'project_create', result: 'refused:scope' });
+  expect(calls).toHaveLength(0);
+  const listed = await run({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, { scope });
+  expect(listed.response.result.tools.map((t) => t.name)).not.toContain('project_create');
 });

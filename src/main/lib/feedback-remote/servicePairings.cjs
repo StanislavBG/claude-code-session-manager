@@ -7,13 +7,16 @@
  * File (default ~/.claude/session-manager/remote-services.json, mode 0600):
  *   { version: 1, pending: [...], services: [...] }
  *
- * - pending: { pairingId, name, homeCwd, scope, createdAt, expiresAt } — a
+ * - pending: { pairingId, name, homeCwd, scope, projectRoot, createdAt, expiresAt } — a
  *   pairing the owner started; lives 10 minutes (the relay code itself lasts 5).
- * - services: { serviceId, name, homeCwd, scope, pubKey, relayClientId,
+ * - services: { serviceId, name, homeCwd, scope, projectRoot, pubKey, relayClientId,
  *   pairedAt, lastSeenAt, opened: [{ cwd, epicId, externalRef?, at }] } — a
  *   confirmed service with its pinned P-256 public key and the ledger of Epics
  *   it opened (newest 1000), each keyed by project + id: an Epic id matches
  *   only in the project the service opened it in.
+ * - projectRoot: the owner-approved projects folder project_create creates
+ *   into — required when scope grants project_create, null otherwise (and for
+ *   a record saved before the field existed).
  *
  * State is read once from disk (missing/corrupt = empty) and kept in memory;
  * every mutation is written atomically, serialized through one queue. Reads
@@ -40,6 +43,7 @@ const SERVICE_TOOL_NAMES = Object.freeze([
   'macro_run',
   'epic_get',
   'events_read',
+  'project_create',
 ]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -60,6 +64,15 @@ function validateHomeCwd(homeCwd) {
     throw new Error('homeCwd must be an absolute path');
   }
   return homeCwd;
+}
+
+/** Required (absolute, no NUL, resolved) when the scope grants project_create; null otherwise. */
+function validateProjectRoot(projectRoot, scope) {
+  if (!scope.includes('project_create')) return null;
+  if (typeof projectRoot !== 'string' || projectRoot.length === 0 || !path.isAbsolute(projectRoot) || projectRoot.includes('\0')) {
+    throw new Error('projectRoot must be an absolute path when scope includes project_create');
+  }
+  return path.resolve(projectRoot);
 }
 
 function validateScope(scope) {
@@ -113,6 +126,7 @@ function publicService(s) {
     name: s.name,
     homeCwd: s.homeCwd,
     scope: [...s.scope],
+    projectRoot: typeof s.projectRoot === 'string' ? s.projectRoot : null,
     pubKey: s.pubKey,
     relayClientId: s.relayClientId,
     pairedAt: s.pairedAt,
@@ -121,17 +135,33 @@ function publicService(s) {
 }
 
 function publicPending(p) {
-  return { pairingId: p.pairingId, name: p.name, homeCwd: p.homeCwd, scope: [...p.scope], createdAt: p.createdAt, expiresAt: p.expiresAt };
+  return {
+    pairingId: p.pairingId,
+    name: p.name,
+    homeCwd: p.homeCwd,
+    scope: [...p.scope],
+    projectRoot: typeof p.projectRoot === 'string' ? p.projectRoot : null,
+    createdAt: p.createdAt,
+    expiresAt: p.expiresAt,
+  };
 }
 
 function normalizeLoaded(raw) {
   const empty = { version: STORE_VERSION, pending: [], services: [] };
   if (!raw || typeof raw !== 'object') return empty;
-  const pending = Array.isArray(raw.pending) ? raw.pending.filter((p) => p && typeof p.pairingId === 'string') : [];
+  const rootOf = (x) => (typeof x.projectRoot === 'string' && x.projectRoot !== '' ? x.projectRoot : null);
+  const pending = Array.isArray(raw.pending)
+    ? raw.pending.filter((p) => p && typeof p.pairingId === 'string').map((p) => ({ ...p, projectRoot: rootOf(p) }))
+    : [];
   const services = Array.isArray(raw.services)
     ? raw.services
       .filter((s) => s && typeof s.serviceId === 'string' && typeof s.pubKey === 'string')
-      .map((s) => ({ ...s, scope: Array.isArray(s.scope) ? s.scope : [], opened: Array.isArray(s.opened) ? s.opened : [] }))
+      .map((s) => ({
+        ...s,
+        scope: Array.isArray(s.scope) ? s.scope : [],
+        projectRoot: rootOf(s),
+        opened: Array.isArray(s.opened) ? s.opened : [],
+      }))
     : [];
   return { version: STORE_VERSION, pending, services };
 }
@@ -173,15 +203,17 @@ function createServicePairings({ filePath, now } = {}) {
   }
 
   return {
-    createPending({ name, homeCwd, scope } = /** @type {any} */ ({})) {
+    createPending({ name, homeCwd, scope, projectRoot } = /** @type {any} */ ({})) {
       let entry;
       try {
         const t = clock();
+        const grants = validateScope(scope);
         entry = {
           pairingId: crypto.randomUUID(),
           name: validateName(name),
           homeCwd: validateHomeCwd(homeCwd),
-          scope: validateScope(scope),
+          scope: grants,
+          projectRoot: validateProjectRoot(projectRoot, grants),
           createdAt: t,
           expiresAt: t + PENDING_TTL_MS,
         };
@@ -226,6 +258,7 @@ function createServicePairings({ filePath, now } = {}) {
           name: p.name,
           homeCwd: p.homeCwd,
           scope: [...p.scope],
+          projectRoot: typeof p.projectRoot === 'string' ? p.projectRoot : null,
           pubKey: key,
           relayClientId: relayId,
           pairedAt: t,

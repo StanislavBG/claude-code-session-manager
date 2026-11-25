@@ -10,13 +10,14 @@
  *   macro_run({ cwd, id, inputs?, effort?, externalRef? }) -> POST /admin/macros/run
  *   epic_get({ cwd, id | externalRef, receipt? }) -> GET /admin/epic?cwd=&id=|externalRef=&receipt=1
  *   events_read({ after?, kinds?, limit? }) -> GET  /admin/events?after=&kinds=&limit=
+ *   project_create({ name, externalRef, github?, parentDir? }) -> POST /admin/projects/create
  *
  * The four tools the stdio server (scripts/scheduler-mcp-server.cjs) also
  * serves share their inputSchema OBJECTS with it — that server imports them
  * from here, so a service and a local agent see the same names and schemas.
  * Their descriptions come from mcpToolCatalog.cjs via composeDescription.
  *
- * macro_run and events_read are SERVICE-ONLY in v1: they are not catalog
+ * macro_run, events_read and project_create are SERVICE-ONLY in v1: they are not catalog
  * entries (the external-contract fingerprint stays put) and the stdio server
  * never registers them — a local agent keeps no Epic-starting tool
  * (SINGLE-CREATOR law). No inputSchema uses a top-level oneOf/anyOf (the
@@ -166,6 +167,30 @@ const EVENTS_READ_INPUT_SCHEMA = {
   },
 };
 
+const PROJECT_CREATE_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', description: 'Folder name of the new project (becomes <projects folder>/<name>).' },
+    externalRef: {
+      type: 'string',
+      description: 'Your own id for this project. A repeat call with the same externalRef creates nothing new and answers status existing.',
+    },
+    github: {
+      type: 'object',
+      description: 'Optional: also create a GitHub repo and set it as origin.',
+      properties: {
+        private: { type: 'boolean', description: 'Create the repo private (true).' },
+        owner: { type: 'string', description: 'Optional: GitHub user or org to own the repo; defaults to the signed-in account.' },
+      },
+    },
+    parentDir: {
+      type: 'string',
+      description: 'Optional: the projects folder. Only the folder the owner approved at pairing is accepted; omit it to use that folder.',
+    },
+  },
+  required: ['name', 'externalRef'],
+};
+
 const CATALOG_BY_NAME = new Map(MCP_TOOL_CATALOG.map((entry) => [entry.name, entry]));
 
 function catalogDescription(name) {
@@ -258,6 +283,20 @@ const SERVICE_TOOLS = Object.freeze([
       return { method: 'GET', path: '/admin/events', query };
     },
   },
+  {
+    name: 'project_create',
+    description: 'Create a new project folder in the projects folder the owner approved at pairing: git with one empty '
+      + 'commit, the Session Manager operations root, and optionally a private GitHub repo (github: { private: true }) set '
+      + 'as origin. Idempotent by externalRef: a repeat answers status existing with the same cwd and repo. Then open its '
+      + 'first session with feedback_open_session (toCwd = cwd). Answer: { ok, status, cwd, name, externalRef, repo, github? }.',
+    inputSchema: PROJECT_CREATE_INPUT_SCHEMA,
+    toRequest: (args) => {
+      const body = { name: args?.name, externalRef: args?.externalRef };
+      if (args?.github !== undefined) body.github = args.github;
+      if (args?.parentDir !== undefined) body.parentDir = args.parentDir;
+      return { method: 'POST', path: '/admin/projects/create', body };
+    },
+  },
 ].map((tool) => Object.freeze(tool)));
 
 // Fail at require time if the tool list and the pairing grant list drift.
@@ -269,7 +308,7 @@ const SERVICE_TOOLS = Object.freeze([
 }
 
 /** Names served only to a paired service, never by the local stdio server. */
-const SERVICE_ONLY_TOOL_NAMES = Object.freeze(['macro_run', 'events_read']);
+const SERVICE_ONLY_TOOL_NAMES = Object.freeze(['macro_run', 'events_read', 'project_create']);
 
 module.exports = {
   SERVICE_TOOLS,
@@ -281,4 +320,5 @@ module.exports = {
   EPIC_GET_INPUT_SCHEMA,
   MACRO_RUN_INPUT_SCHEMA,
   EVENTS_READ_INPUT_SCHEMA,
+  PROJECT_CREATE_INPUT_SCHEMA,
 };

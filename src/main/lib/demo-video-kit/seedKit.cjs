@@ -19,10 +19,10 @@ const path = require('node:path');
 const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
 const { writeTextAtomic } = require('../util/atomicFs.cjs');
 
-const KIT_VERSION = '44';
+const KIT_VERSION = '45';
 // sha256 of kitDigest(__dirname). Update together with a KIT_VERSION bump.
-const KIT_DIGEST = 'a8266c4c880696a02b7cd673a410b280bf4eb69c6184e7ee897053c030b71486';
-const KIT_FILES = Object.freeze(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md', 'kind-marketing.md', 'cast.md', 'project-home-html.md', 'resumableRun.cjs', 'voiceLibrary.cjs', 'voiceLane.cjs', 'kokoroSay.cjs', 'projectSounds.cjs']);
+const KIT_DIGEST = 'd1735e9ad8044d68d81ba52fd4d95f5b80f763f2811a8674211d25ef5d49f482';
+const KIT_FILES = Object.freeze(['checks.cjs', 'sound.cjs', 'capture.cjs', 'frames.cjs', 'character.cjs', 'playwrightLoader.cjs', 'export.cjs', 'kind-tiktok.md', 'kind-marketing.md', 'cast.md', 'project-home-html.md', 'resumableRun.cjs', 'voiceLibrary.cjs', 'voiceLane.cjs', 'kokoroSay.cjs', 'projectSounds.cjs', 'standalone.cjs']);
 const STAMP_FILE = 'KIT_VERSION';
 
 /** The single list of kit files (paths relative to the kit dir) the seeder copies. */

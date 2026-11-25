@@ -94,13 +94,13 @@ test('no false positive: billing utilization at/above utilizationThreshold (when
 });
 
 test('utilization hold with reset days out is flagged longHold; within 5h is benign', () => {
-  const far = evaluateTickLiveness(baseQueue(), { ts: NOW - 30_000, utilization: 95, utilizationWindow: 'weekly_all', nextReset: new Date(NOW + 3 * 86_400_000).toISOString() }, NOW);
+  const far = evaluateTickLiveness(baseQueue(), { ts: NOW - 30_000, utilization: 99, utilizationWindow: 'weekly_all', nextReset: new Date(NOW + 3 * 86_400_000).toISOString() }, NOW);
   assert.strictEqual(far.stalled, false);
   assert.strictEqual(far.longHold, true);
   assert.strictEqual(far.window, 'weekly_all');
   const unknown = evaluateTickLiveness(baseQueue(), { ts: NOW - 30_000, utilization: 95, nextReset: null }, NOW);
   assert.strictEqual(unknown.longHold, true);
-  const near = evaluateTickLiveness(baseQueue(), { ts: NOW - 30_000, utilization: 95, utilizationWindow: 'five_hour', nextReset: new Date(NOW + 2 * 3_600_000).toISOString() }, NOW);
+  const near = evaluateTickLiveness(baseQueue(), { ts: NOW - 30_000, utilization: 99, utilizationWindow: 'five_hour', nextReset: new Date(NOW + 2 * 3_600_000).toISOString() }, NOW);
   assert.strictEqual(near.stalled, false);
   assert.strictEqual(near.longHold, undefined);
 });

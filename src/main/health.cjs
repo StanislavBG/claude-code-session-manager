@@ -22,6 +22,7 @@ const { evaluateDispatchLiveness } = require('./lib/scheduler/watchdogHelpers.cj
 const { computeStallSummary, computeDepHistorySatisfaction, FAILURE_STREAK_ESCALATION_MS } = require('./scheduler/budget.cjs');
 const { classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler/starvation.cjs');
 const { REVERIFY_INTERVAL_MS } = require('./scheduler/reviewLadder.cjs');
+const { proRatedThreshold } = require('./scheduler/utilizationHold.cjs');
 const { makeDepResolver } = require('./lib/prd/depSlugResolve.cjs');
 const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/scheduler/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/telemetry/auditLog.cjs');
@@ -154,7 +155,16 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
         oldestPendingSlug: pending[0]?.slug,
       };
     }
-    if (typeof heartbeat.utilization === 'number' && heartbeat.utilization >= config.utilizationThreshold) {
+    // Same pro-rated 'pause above' the scheduler's own hold reads
+    // (scheduler/utilizationHold.cjs) — a flat cap here would call a
+    // dispatching queue held, or a held one stalled.
+    const effectiveThreshold = proRatedThreshold({
+      base: config.utilizationThreshold,
+      window: heartbeat.utilizationWindow,
+      resetsAt: heartbeat.nextReset,
+      now,
+    });
+    if (typeof heartbeat.utilization === 'number' && heartbeat.utilization >= effectiveThreshold) {
       // A hold on the binding window is benign only if it self-heals soon
       // (reset within 5h). A weekly hold, or an unknown reset horizon, can
       // last days — surface it rather than reading GREEN.

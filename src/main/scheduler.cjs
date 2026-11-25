@@ -2848,6 +2848,36 @@ function resolveRateLimitPauseReset(logPath, billingResetIso, nowMs = Date.now()
   return null;
 }
 
+/**
+ * The 'pause above' a rate_limit pause compares the billing binding window
+ * with: the same pro-rated threshold the auto-dispatch hold uses
+ * (utilizationHold.proRatedThreshold) for THAT window and its reset, so a
+ * weekly window in its last days is not read as over a flat cap the hold
+ * itself has already raised. Non-numeric base passes through unchanged.
+ * @param {unknown} base
+ * @param {string | null | undefined} resetIso
+ * @param {number} nowMs
+ */
+function bindingWindowPauseThreshold(base, resetIso, nowMs) {
+  if (typeof base !== 'number' || !Number.isFinite(base)) return base;
+  return autoDispatchHold.proRatedThreshold({ base, window: cachedBindingWindowName, resetsAt: resetIso ?? cachedNextReset, now: nowMs });
+}
+
+/**
+ * Effective 'pause above' for the binding window of the last known reading
+ * (renderer snapshot field effectiveUtilizationThreshold); null with no known
+ * reading or no numeric base.
+ * @param {unknown} base
+ * @param {number} [nowMs]
+ * @returns {number | null}
+ */
+function effectiveUtilizationThreshold(base, nowMs = Date.now()) {
+  if (typeof base !== 'number' || !Number.isFinite(base)) return null;
+  const reading = utilizationReading();
+  if (reading.known !== true || typeof reading.percent !== 'number' || !Number.isFinite(reading.percent)) return null;
+  return autoDispatchHold.proRatedThreshold({ base, window: reading.window, resetsAt: reading.resetsAt, now: nowMs });
+}
+
 /** Logs when a fresh billing reset was discarded because its reading is under threshold. */
 function logBillingResetRejected(billingResetIso, billingUtilization, threshold) {
   if (!billingResetIso || !Number.isFinite(threshold)) return;
@@ -3233,6 +3263,8 @@ function buildScheduleStatePayload(state) {
     utilization: cachedUtilization,
     utilizationWindow: cachedBindingWindowName,
     utilizationHold,
+    // Pro-rated 'pause above' for the binding window (utilizationHold.proRatedThreshold).
+    effectiveUtilizationThreshold: effectiveUtilizationThreshold(state.config?.utilizationThreshold),
     pollHealth: {
       lastPollAt,
       lastPollOk,
@@ -8531,7 +8563,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       const logPath = path.join(runDir, `${job.slug}.log`);
       const billingResetIso = await billingResetForPause();
       const pauseState = await readQueue().catch(() => null);
-      const pauseThreshold = pauseState?.config?.utilizationThreshold;
+      const pauseThreshold = bindingWindowPauseThreshold(pauseState?.config?.utilizationThreshold, billingResetIso, Date.now());
       const resetIso = resolveRateLimitPauseReset(logPath, billingResetIso, Date.now(), { billingUtilization: cachedUtilization, threshold: pauseThreshold });
       if (resetIso == null) logBillingResetRejected(billingResetIso, cachedUtilization, pauseThreshold);
       const observedAt = dispatchStartedAtMs;
@@ -11035,7 +11067,7 @@ async function reapDeadRunningJobs() {
       billing.usageCircuit.recordFailure('executor_429');
       const triggering = dead.find((d) => d.outcome === 'rate_limited');
       const billingResetIso = await billingResetForPause();
-      const pauseThreshold = state.config?.utilizationThreshold;
+      const pauseThreshold = bindingWindowPauseThreshold(state.config?.utilizationThreshold, billingResetIso, Date.now());
       const resetIso = resolveRateLimitPauseReset(triggering.logPath, billingResetIso, Date.now(), { billingUtilization: cachedUtilization, threshold: pauseThreshold });
       if (resetIso == null) logBillingResetRejected(billingResetIso, cachedUtilization, pauseThreshold);
       const triggeringRow = triggering ? state.jobs.find((x) => x.slug === triggering.slug) : null;

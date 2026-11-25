@@ -1465,6 +1465,8 @@ export interface ScheduleStateSnapshot {
   utilizationWindow?: string | null;
   /** Non-null while the when-available gate is holding the queue on utilization: which window, and its reset. */
   utilizationHold?: { window: string | null; percent: number; threshold: number; resetsAt: string | null } | null;
+  /** Pro-rated 'pause above' for the binding window of the last known reading (rises from config.utilizationThreshold to 100 as the window nears reset). null with no known reading. */
+  effectiveUtilizationThreshold?: number | null;
   /** Poll health — last billing poll result; used to detect stale utilization. */
   pollHealth?: SchedulePollHealth;
   /** Effective concurrency cap and whether it's env-pinned or config-driven. */

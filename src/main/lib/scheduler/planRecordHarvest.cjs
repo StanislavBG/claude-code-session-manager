@@ -105,10 +105,10 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
   }
 
   try {
-    if (typeof epicId !== 'string' || !EPIC_ID_RE.test(epicId)) {
-      skipped.push({ path: String(epicId), reason: 'unsafe epicId' });
-      return { copied, skipped };
-    }
+    // An unsafe epicId only disqualifies pass 1 (the job's own folder); each
+    // declared path is validated on its own in pass 2.
+    const ownFolderSafe = typeof epicId === 'string' && EPIC_ID_RE.test(epicId);
+    if (!ownFolderSafe) skipped.push({ path: String(epicId), reason: 'unsafe epicId' });
     if (typeof worktreeDir !== 'string' || !path.isAbsolute(worktreeDir)
       || typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) {
       skipped.push({ path: String(worktreeDir), reason: 'worktreeDir and projectRoot must be absolute paths' });
@@ -119,6 +119,7 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
 
     // Pass 1: everything in the job's own plan-records/<epicId>/ folder.
     folderPass: {
+      if (!ownFolderSafe) break folderPass;
       const srcDir = path.join(wtRoot, OPS_ROOT_DIR, NAMESPACE, epicId);
       let destDir;
       try {

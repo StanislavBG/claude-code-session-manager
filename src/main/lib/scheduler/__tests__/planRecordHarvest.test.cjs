@@ -184,4 +184,20 @@ describe('harvestPlanRecords declaredPaths', () => {
     assert.equal(res.skipped[0].reason, 'declared epic folder is not a directory');
     assert.equal(fs.existsSync(path.join(destDir(FOREIGN), 'leak.md')), false);
   });
+
+  it('(g) an unsafe epicId still copies a valid declared record and reports the epicId skip', () => {
+    writeSrc('validate.md', '# V\n', FOREIGN);
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: '../escape', declaredPaths: [rel(FOREIGN, 'validate.md')] });
+    assert.deepEqual(res.copied, [path.join(destDir(FOREIGN), 'validate.md')]);
+    assert.deepEqual(res.skipped, [{ path: '../escape', reason: 'unsafe epicId' }]);
+    assert.equal(fs.readFileSync(path.join(destDir(FOREIGN), 'validate.md'), 'utf8'), '# V\n');
+  });
+
+  it('(h) an unsafe epicId with no declared paths copies nothing', () => {
+    writeSrc('plan.md', 'p', 'Upper');
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: 'Upper', declaredPaths: [] });
+    assert.deepEqual(res.copied, []);
+    assert.deepEqual(res.skipped, [{ path: 'Upper', reason: 'unsafe epicId' }]);
+    assert.equal(fs.existsSync(path.join(projectRoot, OPS_ROOT_DIR)), false);
+  });
 });

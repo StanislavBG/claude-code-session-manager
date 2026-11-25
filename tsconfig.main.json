@@ -19,6 +19,7 @@
     "src/main/lib/scheduler/scheduleJobSchema.cjs",
     "src/main/lib/scheduler/usageHoldRoute.cjs",
     "src/main/lib/feedback-remote/createdProjects.cjs",
+    "src/main/lib/feedback-remote/projectCreate.cjs",
     "src/main/lib/feedback-remote/customerFeedbackAdminRoutes.cjs",
     "src/main/lib/feedback-remote/customerFeedbackClient.cjs",
     "src/main/lib/feedback-remote/customerFeedbackInbox.cjs",

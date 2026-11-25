@@ -7,8 +7,19 @@
  */
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { __test, billingReadingForPause } = require('../scheduler.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+// HOME points at a temp dir BEFORE scheduler.cjs loads: the end-to-end test
+// below drives reapDeadRunningJobs, which reads and writes queue + machine state.
+const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'binding-window-pause-threshold-'));
+process.env.HOME = tmpHome;
+
+const { __test, billingReadingForPause, reapDeadRunningJobs } = require('../scheduler.cjs');
 const billing = require('../usage.cjs');
+const schedulerPaths = require('../lib/scheduler/schedulerPaths.cjs');
+const { writeRunLog } = require('./_helpers/schedulerHarness.cjs');
 
 const { bindingWindowPauseThreshold } = __test;
 const HOUR = 3_600_000;
@@ -65,4 +76,55 @@ test('no reading passed -> the cached pair', async () => {
   );
   assert.strictEqual(bindingWindowPauseThreshold(90, null, NOW), 100);
   assert.strictEqual(bindingWindowPauseThreshold('x', null, NOW), 'x');
+});
+
+test('rate_limit reap pause end to end: weekly cached name + refreshed five_hour reading 4 h before reset, base 90 -> the five-hour value (~92.8) decides', async () => {
+  const now = Date.now();
+  // Cache a weekly binding window name (and its far reset).
+  await withUsage(
+    [{ kind: 'weekly_all', percent: 64, resets_at: new Date(now + 41 * HOUR).toISOString(), scope: null, is_active: true }],
+    () => billingReadingForPause(),
+  );
+
+  // Project with one running row whose dead process's log shows a 429 and no
+  // rate_limit_event reset, so the pause falls back to the billing reading.
+  const cwd = path.join(tmpHome, 'rl-project');
+  fs.mkdirSync(cwd, { recursive: true });
+  const slugDir = path.join(tmpHome, '.claude', 'projects', 'rl-project-slug');
+  fs.mkdirSync(slugDir, { recursive: true });
+  fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
+  require('../lib/activeSessions.cjs').__resetProjectCwdCacheForTests();
+  require('../lib/scheduler/queueStore.cjs').bustCwdCache();
+  const slug = 'rl-job';
+  const prdsDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
+  fs.mkdirSync(prdsDir, { recursive: true });
+  fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Test fixture PRD.', 'utf8');
+  const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({
+    jobs: [{ slug, status: 'running', cwd, runId: 'run-rl', startedAt: new Date(now - 10 * 60_000).toISOString(), runtime: { pid: 999999 } }],
+  }, null, 2));
+  writeRunLog('run-rl', slug, [
+    JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, api_error_status: 429, result: 'API Error: 429' }),
+  ]);
+  const machinePath = schedulerPaths.machineStatePath();
+  fs.mkdirSync(path.dirname(machinePath), { recursive: true });
+  fs.writeFileSync(machinePath, JSON.stringify({ config: { utilizationThreshold: 90 } }, null, 2));
+
+  // Refreshed reading: five_hour at 93% (above the five-hour pro-rated ~92.8,
+  // below the weekly pro-rated 100), resetting 4 h from now.
+  const fiveHourReset = new Date(now + 4 * HOUR).toISOString();
+  await withUsage(
+    [{ kind: 'five_hour', percent: 93, resets_at: fiveHourReset, scope: null, is_active: true }],
+    () => reapDeadRunningJobs(),
+  );
+
+  const machine = JSON.parse(fs.readFileSync(machinePath, 'utf8'));
+  assert.strictEqual(machine.paused?.reason, 'rate_limit', JSON.stringify(machine.paused));
+  // Weekly pairing (threshold 100) would reject 93% and arm the 30-minute
+  // fallback; the five-hour pairing (~92.8) accepts it and pauses to its reset.
+  assert.strictEqual(machine.paused.resumeAt, fiveHourReset, JSON.stringify(machine.paused));
+  // The scheduler's own threshold for that same reading, at the pause instant.
+  const t = bindingWindowPauseThreshold(90, { window: 'five_hour', resetsAt: fiveHourReset }, now);
+  assert.ok(Math.abs(t - 92.8) < 0.05, `threshold ${t}`);
 });

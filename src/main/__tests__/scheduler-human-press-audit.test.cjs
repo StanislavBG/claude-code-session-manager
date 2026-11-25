@@ -231,3 +231,25 @@ test('continuity: a human bypass after a resetsAt jitter across hh:mm:30 carries
   expect(press.at(-1).hold.holdKey).toBe(started[0].holdKey);
   expect(auditLines().slice(auditMark).filter((e) => e.kind === 'auto_dispatch_hold_started' || e.kind === 'auto_dispatch_hold_ended')).toHaveLength(1);
 });
+
+test('last-seen config: a press after a tick audits the hold without a queue read', async () => {
+  await reading(96, minuteReset(7 * DAY + HOUR));
+  await scheduler.tickQueue(); // refreshes lastSeenConfig
+  const readSpy = vi.spyOn(queueStore, 'readMerged');
+  await scheduler._auditHumanPressForTests('run-now');
+  expect(readSpy).not.toHaveBeenCalled();
+  const ev = pressEvents().filter((e) => e.kind === 'scheduler_human_press');
+  expect(ev).toHaveLength(1);
+  expect(ev[0].hold).toMatchObject({ reason: 'utilization-held', window: 'weekly_all', percent: 96, threshold: 90 });
+});
+
+test('last-seen config: a press before any queue read still reads the queue and audits the hold', async () => {
+  await reading(96, minuteReset(7 * DAY + HOUR));
+  scheduler._forgetLastSeenConfigForTests();
+  const readSpy = vi.spyOn(queueStore, 'readMerged');
+  await scheduler._auditHumanPressForTests('force-tick');
+  expect(readSpy).toHaveBeenCalledTimes(1);
+  const ev = pressEvents().filter((e) => e.kind === 'scheduler_human_press');
+  expect(ev).toHaveLength(1);
+  expect(ev[0]).toMatchObject({ press: 'force-tick', hold: { reason: 'utilization-held', window: 'weekly_all', percent: 96, threshold: 90 } });
+});

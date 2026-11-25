@@ -1741,6 +1741,7 @@ function normalizeConfig(cfg) {
 // currentAutoDispatchHold (state.config). The held-turns store's hold provider
 // reads it synchronously; undefined before the first read (DEFAULT_CONFIG applies).
 let lastSeenConfig;
+function _forgetLastSeenConfigForTests() { lastSeenConfig = undefined; }
 
 function readQueueSync() {
   const s = queueStore.readMergedSync();
@@ -10023,8 +10024,12 @@ function holdAuditFields(hold) {
  */
 async function auditHumanPress(press) {
   try {
+    // lastSeenConfig is refreshed by every queue read/write; only a press before
+    // the first read pays for a queue read just to audit itself.
     let config = lastSeenConfig;
-    try { config = (await readQueue()).config; } catch { /* last seen config */ }
+    if (config == null) {
+      try { config = (await readQueue()).config; } catch { /* DEFAULT_CONFIG applies */ }
+    }
     appendAuditEvent('scheduler_human_press', { press, hold: holdAuditFields(currentAutoDispatchHold(config)) });
   } catch (e) {
     console.error('[scheduler] human press audit failed', e?.message ?? String(e));
@@ -15217,6 +15222,7 @@ module.exports = {
   getSchedulerStateSnapshot,
   _getOpenAutoDispatchHoldForTests,
   _auditHumanPressForTests: auditHumanPress,
+  _forgetLastSeenConfigForTests,
   _forgetOpenAutoDispatchHoldForTests,
   _resetSawUnheldTickForTests,
   computeDegradedBudget,

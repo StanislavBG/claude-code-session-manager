@@ -128,16 +128,20 @@ function rotateIfNeeded(target, now, maxBytes) {
 /**
  * appendAuditEvent(kind, fields, opts?) — append one JSONL record. `kind` is a short
  * label ('epic_mint' | 'prd_create' | ...); `fields` is event-specific detail
- * (cwd, epicId, status, title, slug, etc). `opts.now` (Date) / `opts.target` are
+ * (cwd, epicId, status, title, slug, etc); a `fields.kind` never overrides `kind`
+ * and is stored as `fieldKind`. `opts.now` (Date) / `opts.target` are
  * test seams. Never throws; a rotation failure never drops the append.
  */
 function appendAuditEvent(kind, fields = {}, opts = {}) {
   try {
     const now = opts.now ?? new Date();
+    // The first-argument kind always wins; a caller field named `kind` is kept as `fieldKind`.
+    const { kind: fieldKind, ...rest } = fields ?? {};
     const record = {
       at: now.toISOString(),
       kind,
-      ...fields,
+      ...rest,
+      ...(fieldKind !== undefined ? { fieldKind } : {}),
       caller: callerContext(),
     };
     const target = opts.target ?? auditLogPath();

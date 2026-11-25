@@ -55,6 +55,9 @@
  * (`video-outcome-<id>`: 'Season complete' + its saved text), and a review entry with an outcome
  * gets the badge 'Season complete' instead of Building / Failed.
  *
+ * Scripts (ScriptPressSwitch, below the library / empty state): a collapsed disclosure holding this
+ * project's 'Scripts may run Demo Video' switch and who changed it last; its IPC errors go to the toast.
+ *
  * Presentational: entries, macro, launch state, job status and the last launch come from ProjectHome
  * through ProjectPagesSection; rename / delete go through ProjectLibraryList's `v2` layout.
  */
@@ -66,6 +69,7 @@ import { ProjectLibraryList, type LibraryRow } from './ProjectLibraryList'
 import { GenerateComposer, type ComposerRegen } from './GenerateComposer'
 import { LibraryEmptyState } from './LibraryEmptyState'
 import { VideoReviewPanel } from './VideoReviewPanel'
+import { ScriptPressSwitch } from './ScriptPressSwitch'
 import { MacroInputsForm } from '../../../epics/MacroInputsForm'
 import { VoiceSelect, useVoiceOptions } from './VoiceSelect'
 import {
@@ -887,6 +891,8 @@ export function VideosPane({
         />
         </>
       )}
+      {/* The 'Scripts may run Demo Video' switch, once, below the Demo Video controls in both branches; IPC errors toast inside it. */}
+      <ScriptPressSwitch cwd={cwd} />
       {composerNode}
     </>
   )

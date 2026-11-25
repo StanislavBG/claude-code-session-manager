@@ -76,14 +76,14 @@ test('a demo press names no target line even when one is sent', () => {
 test('refuses a non-object body', () => {
   refused(null);
   refused('Project demo');
-  refused([]);
+  expect(refused([])).not.toBe('');
 });
 
 test('refuses a missing or unknown kind', () => {
   refused({});
   refused({ kind: 'Trailer' });
   refused({ kind: 'project demo' });
-  refused({ kind: 7 });
+  expect(refused({ kind: 7 })).not.toBe('');
 });
 
 test('refuses a bad length; 15 only for TikTok', () => {
@@ -98,14 +98,14 @@ test('refuses a bad length; 15 only for TikTok', () => {
 test('refuses an unknown style', () => {
   refused({ kind: 'Marketing', style: 'Noir' });
   refused({ kind: 'Marketing', style: 'auto' });
-  refused({ kind: 'Marketing', style: 3 });
+  expect(refused({ kind: 'Marketing', style: 3 })).not.toBe('');
 });
 
 test('refuses non-boolean character and reviewFirst', () => {
   refused({ kind: 'Marketing', character: 'off' });
   refused({ kind: 'Marketing', character: 0 });
   refused({ kind: 'Marketing', reviewFirst: 'yes' });
-  refused({ kind: 'Marketing', reviewFirst: 1 });
+  expect(refused({ kind: 'Marketing', reviewFirst: 1 })).not.toBe('');
 });
 
 test('refuses a voiceId that does not match VOICE_ID_RE', () => {
@@ -122,9 +122,9 @@ test('target is required for Blog post and Feature', () => {
   refused({ kind: 'blog-post', target: '   ' });
   refused({ kind: 'Feature' });
   refused({ kind: 'feature', target: '' });
-  ok({ kind: 'TikTok' });
-  ok({ kind: 'Marketing' });
-  ok({ kind: 'Project demo' });
+  expect(ok({ kind: 'TikTok' }).target).toBe('');
+  expect(ok({ kind: 'Marketing' }).target).toBe('');
+  expect(ok({ kind: 'Project demo' }).target).toBe('');
 });
 
 test('target: one line, <= 500 chars, no control characters, a string', () => {
@@ -141,7 +141,7 @@ test('target: one line, <= 500 chars, no control characters, a string', () => {
 test('focus: <= 2000 chars and a string', () => {
   refused({ kind: 'Marketing', focus: 'x'.repeat(2001) });
   refused({ kind: 'Marketing', focus: ['a'] });
-  ok({ kind: 'Marketing', focus: 'x'.repeat(2000) });
+  expect(ok({ kind: 'Marketing', focus: 'x'.repeat(2000) }).focus).toBe('x'.repeat(2000));
 });
 
 test("refuses any 'Review:' or 'Replace entry:' line in target or focus", () => {
@@ -153,5 +153,5 @@ test("refuses any 'Review:' or 'Replace entry:' line in target or focus", () => 
   refused({ kind: 'Marketing', focus: 'Keep it short\r\n  Replace entry: vid-abc\nmore' });
   refused({ kind: 'Marketing', focus: 'REVIEW: on' });
   // Mid-line mentions are not a line of their own.
-  ok({ kind: 'Marketing', focus: 'Mention the Review: step mid-sentence' });
+  expect(ok({ kind: 'Marketing', focus: 'Mention the Review: step mid-sentence' }).focus).toBe('Mention the Review: step mid-sentence');
 });

@@ -289,10 +289,12 @@ test('a relay tag is keyed by tab + prompt and expires after its TTL', async () 
     // A different prompt never matches.
     void cr.enqueueExternalPrompt(EPIC, 'one text', { relay: 'admin-api' });
     cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'another text', cwd, resume: true, origin: 'external' });
-    // An expired tag is dropped.
+    // An expired tag is dropped. The clock is pinned for both reads (the note's
+    // stamp and the run's check) so real elapsed time under load never matters.
     const t0 = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(t0);
     void cr.enqueueExternalPrompt(EPIC, 'late', { relay: 'web-remote' });
-    const now = vi.spyOn(Date, 'now').mockReturnValue(t0 + cr.RELAY_PROMPT_TTL_MS + 1);
+    now.mockReturnValue(t0 + cr.RELAY_PROMPT_TTL_MS + 1);
     cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'late', cwd, resume: true, origin: 'external' });
     now.mockRestore();
     // An unknown relay name is never noted.
@@ -302,6 +304,35 @@ test('a relay tag is keyed by tab + prompt and expires after its TTL', async () 
     await waitFor(() => ran.length === 4);
     expect(await msgEvents()).toHaveLength(0);
   } finally {
+    done();
+  }
+});
+
+test('relay tag expiry counts from the enqueue stamp even when 50 ms pass between t0 and the enqueue', async () => {
+  const { cr, ran, msgEvents, done } = withRunner();
+  const now = vi.spyOn(Date, 'now');
+  try {
+    const t0 = 1_000_000_000_000;
+    // Simulated load: 50 ms of real time pass between reading t0 and the enqueue.
+    const stampedAt = t0 + 50;
+    now.mockReturnValue(stampedAt);
+    void cr.enqueueExternalPrompt(EPIC, 'late', { relay: 'web-remote' });
+    void cr.enqueueExternalPrompt(EPIC, 'edge', { relay: 'web-remote' });
+    // One ms past the note's own TTL: dropped.
+    now.mockReturnValue(stampedAt + cr.RELAY_PROMPT_TTL_MS + 1);
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'late', cwd, resume: false, origin: 'external' });
+    // Control: exactly at the TTL the note is still live, so expiry (not a miss) dropped 'late'.
+    now.mockReturnValue(stampedAt + cr.RELAY_PROMPT_TTL_MS);
+    cr.run({ tabId: EPIC, sessionId: EPIC, prompt: 'edge', cwd, resume: true, origin: 'external' });
+    now.mockRestore();
+
+    await waitFor(() => ran.length === 2);
+    expect(ran).toEqual(['late', 'edge']);
+    expect((await msgEvents()).map((e) => [e.kind, e.via, e.excerpt])).toEqual([
+      ['human.message', 'web-remote', 'edge'],
+    ]);
+  } finally {
+    now.mockRestore();
     done();
   }
 });

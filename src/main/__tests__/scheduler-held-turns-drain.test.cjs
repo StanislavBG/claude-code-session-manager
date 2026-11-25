@@ -113,3 +113,18 @@ test('heartbeat line carries heldSchedulerTurns { count, tabs }', () => {
   expect(lastLine().heldSchedulerTurns).toEqual({ count: 3, tabs: ['a', 'b'] });
   expect(noDrain).toHaveBeenCalledTimes(2);
 });
+
+test('heartbeat heldSchedulerTurns.tabs falls back to [] when summary() has no tabs', () => {
+  const q = () => ({ jobs: [], unreadable: true, paused: null });
+  const noDrain = vi.fn(async () => []);
+  const spy = vi.spyOn(heldSchedulerTurns, 'summary').mockReturnValue({ count: 2 });
+  try {
+    scheduler.heartbeatTick({ readQueueSync: q, drainHeldSchedulerTurns: noDrain });
+    expect(lastLine().heldSchedulerTurns).toEqual({ count: 2, tabs: [] });
+    spy.mockReturnValue({});
+    scheduler.heartbeatTick({ readQueueSync: q, drainHeldSchedulerTurns: noDrain });
+    expect(lastLine().heldSchedulerTurns).toEqual({ count: 0, tabs: [] });
+  } finally {
+    spy.mockRestore();
+  }
+});

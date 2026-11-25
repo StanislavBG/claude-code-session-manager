@@ -1554,8 +1554,11 @@ function heartbeatTick(deps = {}) {
         utilizationHold,
         // Scheduler chat turns the usage hold is keeping (heldSchedulerTurns.cjs).
         heldSchedulerTurns: (() => {
-          const sum = heldSchedulerTurns.summary();
-          return { count: sum.count || 0, tabs: sum.tabs || 0 };
+          const sum = heldSchedulerTurns.summary() || {};
+          return {
+            count: Number(sum.count) || 0,
+            tabs: Array.isArray(sum.tabs) ? sum.tabs : [],
+          };
         })(),
         consecutiveFailures,
         // Why a memory-held tick held (PRD 4019): the new job's reservation, the

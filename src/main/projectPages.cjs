@@ -1,16 +1,18 @@
 'use strict';
 
 /**
- * projectPages.cjs — read-only backend for Project Home. Project Home has two
- * self-contained generated artifacts under
- * `session-manager-operations/project-pages/`: `home.html` (written by the
- * `project_home_write` admin route) and `demo-video/index.html` (written by
- * the `project_demo_video_write` admin route) — both in
- * lib/feedback-remote/projectHomeAdminRoutes.cjs. This module only reads them: get() returns
- * home.html's content plus the demo video's { path, mtimeMs }, and a
- * refcounted per-cwd watcher pushes `project-pages:changed` for either. It
- * never writes content (watch()'s mkdir creates an empty directory only).
- * mdNetwork() maps the project's markdown link network on demand
+ * projectPages.cjs — main-process backend for Project Home. Its content is a
+ * library under `session-manager-operations/project-pages/`: one folder per
+ * entry in `knowledge/<id>/` and `videos/<id>/` (index.html + meta.json),
+ * listed by lib/project-pages/pagesLibrary.cjs listLibrary(). get() first runs
+ * migrateLegacy(), which moves the two legacy files (`home.html`,
+ * `demo-video/index.html`) into the library once, then returns { knowledge,
+ * videos, html, mtimeMs, demoVideo } (+ persona/outcomes when present); html
+ * is the `overview` page and demoVideo the newest video, kept for the phone
+ * remote. watchOutput()/unwatchOutput() run a refcounted per-cwd watcher that
+ * pushes get()'s result as `project-pages:changed` on library (and legacy or
+ * matrix.json) changes. renameEntry() rewrites one entry's meta.json title and
+ * deleteEntry() removes one entry folder (writer 'project-home'). mdNetwork() maps the project's markdown link network on demand
  * (lib/mdNetworkScan.cjs) for the Tools pane. matrix() reads the saved
  * Competitor matrix (lib/project-pages/competitiveMatrix.cjs readMatrix).
  * mdReview() reads the newest Review MD network record plus each review

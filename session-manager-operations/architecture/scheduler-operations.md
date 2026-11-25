@@ -700,6 +700,16 @@ host's `127.0.0.1`. The decision it led to is the
   `allowedDomains` `[localhost, 127.0.0.1]`.
 - `allowLocalBinding` had no effect on either result.
 
+### Dispatch-time live checks
+
+- The scheduler runs each judged PRD's http and file criteria once per validator run, just before the validator starts and outside its sandbox (`runDispatchCriteriaChecks` in `scheduler.cjs`). Checks run one after another; each http attempt is capped at `HTTP_TIMEOUT_MS` (15 s).
+- A failed http check whose request was sent (connection error, timeout, wrong status, `contains` miss) is retried: up to `HTTP_RETRY_ATTEMPTS` (3) attempts in all, `HTTP_RETRY_DELAY_MS` (10 s) apart. The waits are shared by all criteria of one judged PRD, not taken per check.
+- Never retried: spec refusals (bad URL, non-loopback host, credentials) and file, command and manual checks. The gate-shadow and job-row checks stay single-shot.
+- Why: a local dev server is often mid-reload in the seconds after a landing. A FAIL after 3 attempts is a real FAIL, not a reload blip.
+- Worst case per judged PRD: 3 attempts of up to 15 s per http criterion, plus 2 waits of 10 s. A stopped service refuses at once, so it costs about 20 s.
+- Each fresh row stores `attempts`, `ranAt`, `stage: validator-dispatch` and `bodyPath` (the body sits in a sidecar file).
+- The verdict is cross-checked against those same results. The dispatch-time expected map is stamped on the queue row as `validatorCriteriaExpected`; `notifyOriginatingTab` never re-runs the checks.
+
 ### Residual risks
 
 - **The CLI sandbox wraps Bash only.** Hooks and MCP servers run outside it; in-process tools

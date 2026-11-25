@@ -238,7 +238,7 @@ Off by default. Turn it on in App Settings, Startup. It is not offered in a dev 
 
 An npx install runs `npx claude-code-session-manager@latest` at each login, or the cached copy if that fails within two minutes. Its script, `~/.claude/session-manager/start-at-login.sh`, runs from `~/.config/autostart/claude-code-session-manager.desktop` (Linux) or `~/Library/LaunchAgents/run.bilko.session-manager.login.plist` (macOS). A packaged build uses a login item (macOS, Windows) or the autostart folder (Linux AppImage).
 
-To remove it, turn the switch off, or delete the script and its login entry.
+To remove it, turn the switch off, or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS). On a packaged macOS or Windows build, use login items.
 
 ### Check it worked
 

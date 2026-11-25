@@ -47,6 +47,11 @@ mode, write roots, network mode, secret deny paths, web tools), enforced by defa
   [scheduler-operations.md](scheduler-operations.md#11-job-sandbox).
 - Why: sandbox policy hard-coded per persona could not be audited or varied per project; a named profile is
   one file a human can read and diff, and the snapshot records which one a run used.
+- Loopback (decided 2026-11-24): a sandboxed job's Bash cannot reach host loopback at any profile, so a live
+  check is an http criterion the scheduler runs outside the sandbox just before the validator starts; the validator
+  judges the stored result. Allow-listing localhost was rejected: it works only when a client is forced through the
+  proxy against NO_PROXY, and it would open every local service to the job. Evidence:
+  [scheduler-operations.md](scheduler-operations.md#loopback-reach).
 
 ## Credentials
 

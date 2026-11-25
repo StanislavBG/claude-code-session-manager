@@ -563,7 +563,7 @@ contains Bash.
 
 | Level | Who gets it | What it passes |
 | --- | --- | --- |
-| `os-sandbox` | `validator` and `dev-lead` (the keys of `SANDBOX_PROFILES`), **only** when the OS sandbox dependencies are present | No `--dangerously-skip-permissions`. `--permission-mode <profile mode>` plus `--settings` that turn on the CLI sandbox (`enabled`, `failIfUnavailable`, `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed`), allow `Read(//**)`, `Glob`, `Grep`, `Bash`, `Skill`, `Agent`, `ToolSearch`, `TodoWrite`, and deny the secret paths plus `WebFetch` and `WebSearch`. |
+| `os-sandbox` | `validator` and `dev-lead` (the keys of `LEGACY_PERSONA_ENVIRONMENTS`, mapped onto environment profiles), or a persona that declares an `environment:`, **only** when the OS sandbox dependencies are present | No `--dangerously-skip-permissions`. `--permission-mode <profile mode>` plus `--settings` that turn on the CLI sandbox (`enabled`, `failIfUnavailable`, `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed`), allow `Read(//**)`, `Glob`, `Grep`, `Bash`, `Skill`, `Agent`, `ToolSearch`, `TodoWrite`, and deny the secret paths plus `WebFetch` and `WebSearch`. |
 | `tool-rules` | Every other persona, and `validator`/`dev-lead` when the dependencies are missing or disabled | Keeps `--dangerously-skip-permissions`, plus `--settings` with `permissions.deny` `Read`/`Edit` rules over the secret paths. This is a guard against plain tool use, not containment. |
 
 Dependencies (`sandboxDependencies`): Linux needs `bwrap` and `socat` on `PATH`; macOS needs
@@ -679,6 +679,19 @@ PASS: no escapes, controls ok
   `Read-only file system`. It found one hole — Bash could write anywhere in `/tmp` — closed by
   PRD `job-sandbox-private-tmp` (the private temp dir above).
 
+### Loopback reach
+
+Probe on 2026-11-24 (CLI 2.1.330, real policy argv, unpacked `socat`) against a server on the
+host's `127.0.0.1`. The decision it led to is the
+[Loopback bullet](managed-agents-alignment.md#environments).
+
+- Sandboxed Bash runs in its own network namespace.
+- The CLI sets `NO_PROXY=localhost,127.0.0.1,::1,…` in the job's environment.
+- Direct `curl` and node `fetch` to the host `127.0.0.1` server were refused.
+- Forced through the proxy (against `NO_PROXY`): `403` with `allowedDomains` `[]`, `200` with
+  `allowedDomains` `[localhost, 127.0.0.1]`.
+- `allowLocalBinding` had no effect on either result.
+
 ### Residual risks
 
 - **The CLI sandbox wraps Bash only.** Hooks and MCP servers run outside it; in-process tools
@@ -691,5 +704,6 @@ PASS: no escapes, controls ok
   `os-sandbox` denies `WebFetch`/`WebSearch` outright; at `tool-rules` they are unrestricted.
 - **No nested user namespaces inside sandboxed Bash** — Chromium/Electron's own sandbox (and so
   Playwright e2e) cannot start there.
-- **`socat` is required on Linux.** Without it `validator` and `dev-lead` fall back to
-  `tool-rules`.
+- **`socat` is required on Linux.** In report mode a missing `socat` drops `validator` and
+  `dev-lead` to `tool-rules`; in enforce mode it refuses those jobs (`environment_unavailable`)
+  and does not downgrade them.

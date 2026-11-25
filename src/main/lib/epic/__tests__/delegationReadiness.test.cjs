@@ -27,6 +27,7 @@ const {
   DESTRUCTIVE_GIT_GUARD_SCRIPT,
   INLINE_IMPLEMENTATION_GUARD_SCRIPT,
   SELF_SCHEDULE_GUARD_SCRIPT,
+  checkJobSandbox,
 } = require('../delegationReadiness.cjs');
 
 /** Host-independent: these tests are about the other checks, not this machine's bwrap/socat. */
@@ -1292,3 +1293,14 @@ test('scheduler-mcp: accepts a registration using execPath + ELECTRON_RUN_AS_NOD
   const result = await checkDelegationReadiness({ cwd, homeDir, sandboxDeps: SANDBOX_OK });
   expect(result.checks.find((c) => c.id === 'scheduler-mcp').ok).toBe(true);
 }, 15_000);
+
+test('job-sandbox: the missing-socat notice says jobs cannot reach loopback, so live checks are http criteria', () => {
+  const clause = "under the sandbox a job cannot reach services on this machine's loopback, so live checks run as http criteria";
+  const missing = { available: false, missing: ['socat'] };
+  const report = checkJobSandbox({ sandboxDeps: missing, platform: 'linux', mode: 'report', enforceFrom: Date.UTC(2026, 11, 1, 19, 46) });
+  const reportNoDate = checkJobSandbox({ sandboxDeps: missing, platform: 'linux', mode: 'report' });
+  const enforce = checkJobSandbox({ sandboxDeps: missing, platform: 'linux', mode: 'enforce' });
+  for (const r of [report, reportNoDate, enforce]) expect(r.detail).toContain(clause);
+  expect(enforce.ok).toBe(false);
+  expect(report.warn).toBe(true);
+});

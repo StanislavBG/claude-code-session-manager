@@ -457,6 +457,13 @@ function whichOnPath(name) {
   return null;
 }
 
+/**
+ * Said with every missing-sandbox notice: sandboxed Bash cannot reach host
+ * loopback, so a live check is an http criterion the scheduler runs outside
+ * the sandbox (managed-agents-alignment.md#environments).
+ */
+const SANDBOX_LOOPBACK_CLAUSE = "under the sandbox a job cannot reach services on this machine's loopback, so live checks run as http criteria";
+
 /** A local-timezone calendar date, e.g. "Nov 30, 2026". */
 function formatLocalDate(ms) {
   return new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
@@ -505,14 +512,14 @@ function checkJobSandbox({ sandboxDeps = null, platform = process.platform, mode
     : `Run Session Manager on Linux (bubblewrap + socat) or macOS (sandbox-exec)`;
   if (effectiveMode === 'report') {
     const detail = date
-      ? `missing: ${missing.join(', ')} — report mode until ${date}: jobs fall back to tool rules now; from ${date} headless dev-lead and validator jobs will park with environment_unavailable until installed`
-      : `missing: ${missing.join(', ')} — report mode: jobs fall back to tool rules`;
+      ? `missing: ${missing.join(', ')} — report mode until ${date}: jobs fall back to tool rules now; from ${date} headless dev-lead and validator jobs will park with environment_unavailable until installed; ${SANDBOX_LOOPBACK_CLAUSE}`
+      : `missing: ${missing.join(', ')} — report mode: jobs fall back to tool rules; ${SANDBOX_LOOPBACK_CLAUSE}`;
     return { ...base, ok: true, warn: true, detail, fix };
   }
   return {
     ...base,
     ok: false,
-    detail: `missing: ${missing.join(', ')} — dev-lead and validator jobs park with environment_unavailable until installed`,
+    detail: `missing: ${missing.join(', ')} — dev-lead and validator jobs park with environment_unavailable until installed; ${SANDBOX_LOOPBACK_CLAUSE}`,
     fix,
   };
 }

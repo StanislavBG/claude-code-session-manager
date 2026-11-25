@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->52<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->53<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -22,7 +22,7 @@
 
 - It is not a hosted or cloud service. Your sessions and files stay on your machine.
 - It is not made or backed by Anthropic. One person builds it as open source.
-- It does not replace a Claude plan. You need Claude Code, signed in with your own account.
+- It does not replace a Claude plan.
 - It has no paid, pro or trial tier. The app and the Field Manual are both free.
 - It is not a team product. It has no support deal or uptime promise.
 - It is not a library. You cannot `import` it.
@@ -168,6 +168,7 @@ Tools:
 | `scheduler_update_prd` | scheduler | `slug` | Edit a PRD that has not run yet or has stopped. |
 | `scheduler_archive_prd` | scheduler | `slugs` | Archive PRDs that are done or no longer needed. |
 | `scheduler_cancel_job` | scheduler | `slug` | Cancel a job that has not finished. |
+| `scheduler_dismiss_cancelled` | scheduler | `slug` | Clear a cancelled job out of the queue. |
 | `scheduler_retag_prd` | scheduler | `items` | Change a PRD's group number or time estimate. |
 | `chat_send_prompt` | chat | `tabId`, `prompt` | Send a prompt to a session tab that is already open. |
 | `feedback_list_projects` | feedback | — | List the other projects on this machine that can take feedback. |
@@ -309,7 +310,7 @@ An npx install runs `npx claude-code-session-manager@latest` at each login, or t
 
 A packaged build uses a login item (macOS, Windows) or the autostart folder (Linux AppImage).
 
-To remove it, turn the switch off, or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS). On a packaged macOS or Windows build, use login items.
+To remove it, turn the switch off, or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS).
 
 It is not offered for an npx install on Windows, or in a dev run.
 

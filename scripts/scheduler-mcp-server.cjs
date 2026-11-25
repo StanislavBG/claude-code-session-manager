@@ -900,6 +900,27 @@ const TOOLS = [
     },
   },
   {
+    name: 'scheduler_dismiss_cancelled',
+    description: descriptionFor('scheduler_dismiss_cancelled'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'PRD slug of the cancelled row to dismiss' },
+        cwd: { type: 'string', description: 'Optional: the PRD project cwd, narrows/speeds the search' },
+        dependents: {
+          type: 'object',
+          description: 'Required when the row has pending dependents (the dismiss is refused and lists them otherwise): "cascade" cancels them too, "repoint" makes them depend on `to` instead, "clear" drops the dependency.',
+          properties: {
+            action: { type: 'string', enum: ['cascade', 'repoint', 'clear'] },
+            to: { type: 'string', description: 'PRD slug the dependents should depend on instead — required for action "repoint"' },
+          },
+          required: ['action'],
+        },
+      },
+      required: ['slug'],
+    },
+  },
+  {
     name: 'scheduler_retag_prd',
     description: descriptionFor('scheduler_retag_prd'),
     inputSchema: {
@@ -1928,6 +1949,17 @@ async function handleCallTool(request) {
       // shape and refuses a cancel with pending dependents when it is absent.
       const dependents = args && args.dependents && typeof args.dependents === 'object' ? args.dependents : undefined;
       const result = await adminRequest('POST', '/admin/scheduler/cancel-job', { slug, cwd, dependents });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_dismiss_cancelled') {
+      const slug = args && typeof args.slug === 'string' ? args.slug : null;
+      if (!slug) {
+        return errorResult('missing required argument: slug');
+      }
+      const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
+      // Same body as cancel-job (schemas.adminCancelJob); the route validates dependents.
+      const dependents = args && args.dependents && typeof args.dependents === 'object' ? args.dependents : undefined;
+      const result = await adminRequest('POST', '/admin/scheduler/dismiss-cancelled', { slug, cwd, dependents });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_retag_prd') {

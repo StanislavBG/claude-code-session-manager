@@ -266,6 +266,22 @@ const MCP_TOOL_CATALOG = [
     notes: null,
   },
   {
+    name: 'scheduler_dismiss_cancelled',
+    group: 'scheduler',
+    purpose: "THE ONLY SUPPORTED WAY to dismiss a cancelled scheduler row via the session-manager app's admin API "
+      + '(POST /admin/scheduler/dismiss-cancelled). Removes the cancelled row from the live queue and files its PRD '
+      + 'under prds-cancelled/, which never satisfies a dependsOn (scheduler_archive_prd refuses cancelled rows, '
+      + 'because prds-archived/ does satisfy one). Refuses a row with no cancel marker. If the row has pending '
+      + 'dependents the dismiss is refused and lists them; call again with dependents: { action: "cascade" } '
+      + '(cancel them too), { action: "repoint", to: "<slug>" } (depend on another PRD instead) or '
+      + '{ action: "clear" } (drop the dependency).',
+    summary: 'Clear a cancelled job out of the queue.',
+    whenToUse: 'Use when a cancelled job still shows in the queue and scheduler_archive_prd refused it as cancelled.',
+    whenNotToUse: 'Do not use on a real failure that should run again (use scheduler_reset_job) or on finished work (use scheduler_archive_prd).',
+    exampleArgs: { slug: 'add-mcp-tool-catalog' },
+    notes: null,
+  },
+  {
     name: 'scheduler_retag_prd',
     group: 'scheduler',
     purpose: "THE ONLY SUPPORTED WAY to rewrite a PRD's parallelGroup and/or estimateMinutes frontmatter (and, if "

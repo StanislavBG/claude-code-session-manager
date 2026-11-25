@@ -267,6 +267,7 @@ test('archiveMany on a cancelled row warns to dismiss and does not archive it', 
   expect(res.warnings).toHaveLength(1);
   expect(res.warnings[0]).toMatch(/10-dead/);
   expect(res.warnings[0]).toMatch(/dismiss/i);
+  expect(res.warnings[0]).toContain('Dismiss it instead (scheduler_dismiss_cancelled, or POST /admin/scheduler/dismiss-cancelled); not archived.');
   expect(res.archived).toBe(1);
   const dead = res.results.find((r) => r.slug === '10-dead');
   expect(dead).toMatchObject({ ok: false, cancelled: true });
@@ -465,6 +466,7 @@ test('archiveMany refuses a needs_review+cancelledAt row with the dismiss warnin
   expect(res.archived).toBe(0);
   expect(res.warnings).toHaveLength(1);
   expect(res.warnings[0]).toMatch(/dismiss/i);
+  expect(res.warnings[0]).toContain('Dismiss it instead (scheduler_dismiss_cancelled, or POST /admin/scheduler/dismiss-cancelled); not archived.');
   expect(res.results[0]).toMatchObject({ ok: false, slug: '10-nr', cancelled: true });
   expect(fs.existsSync(path.join(prdsDir(), '10-nr.md'))).toBe(true);
   expect(fs.existsSync(path.join(epicDir(), 'prds-archived'))).toBe(false);

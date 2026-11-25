@@ -388,7 +388,7 @@ async function archiveMany(slugs, cwd, { retire = true, jobs } = {}) {
   for (const slug of slugs) {
     if (!cancelled.has(slug)) { toArchive.push(slug); continue; }
     const warning = `"${slug}" is a cancelled job — archiving it would make it satisfy dependsOn. `
-      + `Dismiss it instead (${DISMISS_ROUTE}); not archived.`;
+      + `Dismiss it instead (scheduler_dismiss_cancelled, or ${DISMISS_ROUTE}); not archived.`;
     warnings.push(warning);
     refused.push({ ok: false, slug, cancelled: true, warning, error: warning });
   }

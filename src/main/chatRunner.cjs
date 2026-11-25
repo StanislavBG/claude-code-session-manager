@@ -1402,8 +1402,51 @@ function hasLiveWindow() {
  * Resolves { disposition, reason? } once the renderer reports what it did, or
  * { disposition: 'unconfirmed', reason: 'timeout' | 'no-window' }. Never rejects.
  */
+// tabId -> identity key of the usage hold last audited for it (one audit per tab per hold).
+const heldTurnAuditKeys = new Map();
+
+function schedulerHoldKey(hold) {
+  try {
+    const { holdIdentityKey } = require('./scheduler/utilizationHold.cjs');
+    if (typeof holdIdentityKey === 'function') return holdIdentityKey(hold);
+  } catch { /* fall through to the local key */ }
+  return `${hold.reason}|${hold.window ?? ''}|${hold.resetsAt ?? ''}`;
+}
+
+/**
+ * Usage-hold seam: a scheduler-started turn under an active hold is deferred to the
+ * held store (no broadcast, no claude process). Returns the disposition, or null
+ * when the turn may run now. Required lazily to keep load order safe.
+ */
+function holdSchedulerTurn(tabId, prompt, extra) {
+  const heldSchedulerTurns = require('./lib/scheduler/heldSchedulerTurns.cjs');
+  const hold = heldSchedulerTurns.currentHold();
+  if (!hold) return null;
+  const { sessionId, cwd, heldKind } = extra;
+  const entry = heldSchedulerTurns.defer({ tabId, prompt, kind: heldKind || 'scheduler-notice', sessionId, cwd, hold });
+  const key = schedulerHoldKey(hold);
+  if (heldTurnAuditKeys.get(tabId) !== key) {
+    heldTurnAuditKeys.set(tabId, key);
+    // The turn kind is `heldKind`: appendAuditEvent spreads fields over the record,
+    // so a `kind` field would overwrite the event kind itself.
+    require('./lib/telemetry/auditLog.cjs').appendAuditEvent('scheduler_turn_held', {
+      tabId,
+      heldKind: entry.kind,
+      reason: hold.reason ?? null,
+      window: hold.window ?? null,
+      percent: hold.percent ?? null,
+      threshold: hold.threshold ?? null,
+    });
+  }
+  return { disposition: 'held', reason: hold.reason };
+}
+
 function enqueueExternalPrompt(tabId, prompt, extra = {}) {
   const { sessionId, cwd, origin, relay } = extra ?? {};
+  if (origin === 'scheduler') {
+    const heldResult = holdSchedulerTurn(tabId, prompt, extra ?? {});
+    if (heldResult) return Promise.resolve(heldResult);
+  }
   if (!hasLiveWindow()) return Promise.resolve({ disposition: 'unconfirmed', reason: 'no-window' });
   if (origin === 'scheduler') noteSchedulerPrompt(tabId, prompt);
   const note = origin !== 'scheduler' && relay !== undefined ? noteRelayPrompt(tabId, prompt, relay) : null;

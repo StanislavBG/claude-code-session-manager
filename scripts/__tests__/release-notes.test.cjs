@@ -117,6 +117,110 @@ describe('release-notes.cjs', () => {
   })
 })
 
+describe('release-notes.cjs upgrade-note rewriting', () => {
+  let repo2
+  const NOTE = [
+    '# Big change',
+    '',
+    'See [contract](../session-manager-operations/architecture/external-contract.md#v1),',
+    '[local](README.md), [root](/docs/x.md), [site](https://example.com/a), [mail](mailto:a@b.c) and [here](#big-change).',
+    '',
+    '## Details',
+    '',
+    '##### Deep',
+    '',
+    '###### Deepest',
+  ].join('\n')
+  const g = (...args) =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...args], {
+      cwd: repo2, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  const run2 = (...args) => spawnSync(process.execPath, [SCRIPT, '--repo', repo2, ...args], { encoding: 'utf8' })
+
+  beforeAll(() => {
+    repo2 = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-links-'))
+    g('init', '-q', '-b', 'main')
+    g('commit', '-q', '--allow-empty', '-m', 'feat: first')
+    g('tag', 'v1.0.0')
+    fs.mkdirSync(path.join(repo2, 'release-notes'))
+    fs.writeFileSync(path.join(repo2, 'release-notes', 'after-v1.0.0.md'), NOTE + '\n')
+    g('add', '.')
+    g('commit', '-q', '-m', 'docs: note without package.json')
+    g('tag', 'v1.1.0')
+    fs.writeFileSync(path.join(repo2, 'package.json'), JSON.stringify({ name: 'x', repository: { type: 'git', url: 'git+https://github.com/acme/widget.git' } }))
+    g('add', '.')
+    g('commit', '-q', '-m', 'chore: package.json')
+    g('tag', 'v1.2.0')
+    fs.writeFileSync(path.join(repo2, 'release-notes', 'after-v1.0.0.md'), 'long note ' + 'y'.repeat(5000) + '\n')
+    g('add', '.')
+    g('commit', '-q', '-m', 'docs: long note')
+    g('tag', 'v1.3.0')
+  })
+
+  afterAll(() => {
+    if (repo2) fs.rmSync(repo2, { recursive: true, force: true })
+  })
+
+  it('rewrites relative links to blob URLs at the tag and leaves absolute links and anchors alone', () => {
+    const r = run2('--tag', 'v1.2.0', '--prev', 'v1.0.0')
+    expect(r.status).toBe(0)
+    expect(r.stderr).toBe('')
+    const base = 'https://github.com/acme/widget/blob/v1.2.0/'
+    expect(r.stdout).toContain(`[contract](${base}session-manager-operations/architecture/external-contract.md#v1)`)
+    expect(r.stdout).toContain(`[local](${base}release-notes/README.md)`)
+    expect(r.stdout).toContain(`[root](${base}docs/x.md)`)
+    expect(r.stdout).toContain('[site](https://example.com/a)')
+    expect(r.stdout).toContain('[mail](mailto:a@b.c)')
+    expect(r.stdout).toContain('[here](#big-change)')
+  })
+
+  it('repoSlug parses repository.url, null without package.json', () => {
+    const { repoSlug } = require(SCRIPT)
+    expect(repoSlug(repo2, 'v1.2.0')).toBe('acme/widget')
+    expect(repoSlug(repo2, 'v1.1.0')).toBe(null)
+  })
+
+  it('leaves links as they are and warns once without a repository url', () => {
+    const r = run2('--tag', 'v1.1.0', '--prev', 'v1.0.0')
+    expect(r.status).toBe(0)
+    expect(r.stdout).toContain('[contract](../session-manager-operations/architecture/external-contract.md#v1)')
+    expect(r.stdout).toContain('[local](README.md)')
+    expect(r.stderr.trim().split('\n')).toHaveLength(1)
+    expect(r.stderr).toContain('warning')
+  })
+
+  it('demotes note headings two levels, capped at ######', () => {
+    const out = run2('--tag', 'v1.2.0', '--prev', 'v1.0.0').stdout
+    expect(out.startsWith('## Upgrade notes\n\n### Big change\n')).toBe(true)
+    expect(out).toContain('\n#### Details\n')
+    expect(out).toContain('\n###### Deep\n')
+    expect(out).toContain('\n###### Deepest\n')
+    expect(out).not.toMatch(/^# /m)
+    expect(out).not.toMatch(/^#{7}/m)
+    expect(out).toContain('\n## Changes since v1.0.0\n')
+  })
+
+  it('truncates an upgrade note longer than --max-chars and stays within the cap', () => {
+    const max = 1000
+    const r = run2('--tag', 'v1.3.0', '--prev', 'v1.0.0', '--max-chars', String(max))
+    expect(r.status).toBe(0)
+    expect(r.stdout.length).toBeLessThanOrEqual(max)
+    const marker = '\n\n…(upgrade notes truncated)\n'
+    const idx = r.stdout.indexOf(marker)
+    expect(idx).toBeGreaterThan(0)
+    const head = r.stdout.slice(0, idx + marker.length)
+    expect(head.endsWith('…(upgrade notes truncated)\n')).toBe(true)
+    expect(head.startsWith('## Upgrade notes\n\nlong note yyy')).toBe(true)
+  })
+
+  it.each([['abc'], ['0'], ['-5'], ['1.5']])('refuses --max-chars %s', (v) => {
+    const r = run2('--tag', 'v1.2.0', '--prev', 'v1.0.0', '--max-chars', v)
+    expect(r.status).toBe(1)
+    expect(r.stdout).toBe('')
+    expect(r.stderr.trim()).toBe('release-notes: --max-chars must be a positive integer')
+  })
+})
+
 describe('release.yml finalize-release', () => {
   const wf = yaml.load(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'release.yml'), 'utf8'))
   const steps = wf.jobs['finalize-release'].steps

@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 // Composes a GitHub release body for a tag: an optional upgrade note read from the
 // tag's own tree (release-notes/after-<prev>.md), then the commit subjects since prev.
-// Usage: node scripts/release-notes.cjs --tag <ref> [--prev <tag>] [--repo <dir>]
+// Usage: node scripts/release-notes.cjs --tag <ref> [--prev <tag>] [--repo <dir>] [--max-chars <n>]
+//   --max-chars: positive integer cap on the body length (default 120000, GitHub's release-body limit
+//   leaves headroom above it). Relative links in the note become github.com blob URLs at <ref>; its
+//   headings are demoted two levels so they nest under '## Upgrade notes'.
 // Convention: release-notes/README.md. Invoked by .github/workflows/release.yml (finalize-release).
 'use strict'
 
 const { execFileSync } = require('node:child_process')
+const path = require('node:path')
 
 const MAX_CHARS = 120000
 
@@ -32,6 +36,38 @@ function resolveCommit(repo, ref) {
   return out ? out.trim() : null
 }
 
+// owner/repo from the tag tree's package.json `repository` (string or { url }); null on any failure.
+function repoSlug(repo, tag) {
+  try {
+    const r = JSON.parse(git(repo, ['show', `${tag}:package.json`])).repository
+    const url = typeof r === 'string' ? r : r && r.url
+    const m = typeof url === 'string' ? url.match(/github\.com[/:]([^/]+\/[^/.]+?)(?:\.git)?$/) : null
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+}
+
+const LINK_RE = /\]\(([^)\s]+)\)/g
+const isRelative = (target) => !/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith('#')
+
+// A release body has no base path, so relative targets (resolved from release-notes/) become blob URLs.
+function rewriteLinks(note, slug, tag) {
+  if (!slug) return note
+  return note.replace(LINK_RE, (whole, target) => {
+    if (!isRelative(target)) return whole
+    let p = target.startsWith('/') ? target.slice(1) : path.posix.join('release-notes', target)
+    p = path.posix.normalize(p)
+    while (p.startsWith('../')) p = p.slice(3)
+    return `](https://github.com/${slug}/blob/${tag}/${p})`
+  })
+}
+
+// Nest the note under '## Upgrade notes': # -> ###, ## -> ####, capped at ######.
+function demoteHeadings(note) {
+  return note.replace(/^(#{1,6})(\s)/gm, (_, hashes, sp) => '#'.repeat(Math.min(6, hashes.length + 2)) + sp)
+}
+
 function buildNotes({ repo = process.cwd(), tag, prev, maxChars = MAX_CHARS } = {}) {
   if (!tag) throw new NotesError('release-notes: --tag <ref> is required')
   if (!resolveCommit(repo, tag)) throw new NotesError(`release-notes: unknown ref '${tag}'`)
@@ -46,7 +82,16 @@ function buildNotes({ repo = process.cwd(), tag, prev, maxChars = MAX_CHARS } = 
   // Read from the tag's tree, never the working tree.
   const notePath = `release-notes/after-${prev}.md`
   const hasNote = tryGit(repo, ['cat-file', '-e', `${tag}:${notePath}`]) !== null
-  const upgrade = hasNote ? git(repo, ['show', `${tag}:${notePath}`]).trim() : ''
+  let upgrade = hasNote ? git(repo, ['show', `${tag}:${notePath}`]).trim() : ''
+  if (upgrade) {
+    const needsSlug = [...upgrade.matchAll(LINK_RE)].some((m) => isRelative(m[1]))
+    if (needsSlug) {
+      const slug = repoSlug(repo, tag)
+      if (slug) upgrade = rewriteLinks(upgrade, slug, tag)
+      else process.stderr.write(`release-notes: warning: no GitHub repository url in ${tag}:package.json; relative links left as they are\n`)
+    }
+    upgrade = demoteHeadings(upgrade)
+  }
 
   const log = git(repo, ['log', '--no-merges', '--format=%h%x09%s', `${prev}..${tag}`])
   const lines = []
@@ -96,7 +141,11 @@ function parseArgs(argv) {
     if (a === '--tag') opts.tag = take()
     else if (a === '--prev') opts.prev = take()
     else if (a === '--repo') opts.repo = take()
-    else if (a === '--max-chars') opts.maxChars = Number(take())
+    else if (a === '--max-chars') {
+      const n = Number(take())
+      if (!Number.isInteger(n) || n <= 0) throw new NotesError('release-notes: --max-chars must be a positive integer')
+      opts.maxChars = n
+    }
     else throw new NotesError(`release-notes: unknown argument '${a}'`)
   }
   return opts
@@ -115,4 +164,4 @@ function main(argv) {
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2))
 
-module.exports = { buildNotes, MAX_CHARS }
+module.exports = { buildNotes, parseArgs, repoSlug, MAX_CHARS }

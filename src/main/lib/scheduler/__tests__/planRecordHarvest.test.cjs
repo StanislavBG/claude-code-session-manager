@@ -181,7 +181,7 @@ describe('harvestPlanRecords declaredPaths', () => {
     fs.symlinkSync(outsideDir, srcDir(FOREIGN));
     const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'leak.md')] });
     assert.deepEqual(res.copied, []);
-    assert.equal(res.skipped[0].reason, 'declared epic folder is not a directory');
+    assert.deepEqual(res.skipped, [{ path: srcDir(FOREIGN), reason: 'symlinked parent refused' }]);
     assert.equal(fs.existsSync(path.join(destDir(FOREIGN), 'leak.md')), false);
   });
 
@@ -243,5 +243,89 @@ describe('harvestPlanRecords declaredPaths', () => {
     assert.deepEqual(res.skipped, []);
     assert.deepEqual(res.copied, [path.join(destDir(), 'plan.md')]);
     assert.equal(fs.readFileSync(path.join(destDir(), 'plan.md'), 'utf8'), 'new\n');
+  });
+});
+
+describe('harvestPlanRecords symlinked parents', () => {
+  const FOREIGN = 'parent-epic-f93dac99';
+  const rel = (folder, name) => `${OPS_ROOT_DIR}/plan-records/${folder}/${name}`;
+  const opsDir = () => path.join(worktreeDir, OPS_ROOT_DIR);
+  const recordsDir = () => path.join(opsDir(), 'plan-records');
+
+  /** An outside tree shaped like plan-records/, with one record per folder. */
+  function outsideRecords() {
+    const outside = path.join(tmp, 'outside-records');
+    for (const folder of [EPIC, FOREIGN]) {
+      fs.mkdirSync(path.join(outside, folder), { recursive: true });
+      fs.writeFileSync(path.join(outside, folder, 'leak.md'), 'leak');
+    }
+    return outside;
+  }
+
+  it('a symlinked plan-records/ dir copies nothing in either pass', () => {
+    const outside = outsideRecords();
+    fs.mkdirSync(opsDir(), { recursive: true });
+    fs.symlinkSync(outside, recordsDir());
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'leak.md')] });
+    assert.deepEqual(res.copied, []);
+    assert.deepEqual(res.skipped, [
+      { path: recordsDir(), reason: 'symlinked parent refused' },
+      { path: recordsDir(), reason: 'symlinked parent refused' },
+    ]);
+    assert.equal(fs.existsSync(path.join(projectRoot, OPS_ROOT_DIR)), false);
+  });
+
+  it('a symlinked session-manager-operations/ dir copies nothing', () => {
+    const outsideOps = path.join(tmp, 'outside-ops');
+    fs.mkdirSync(outsideOps);
+    fs.symlinkSync(outsideRecords(), path.join(outsideOps, 'plan-records'));
+    fs.symlinkSync(outsideOps, opsDir());
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'leak.md')] });
+    assert.deepEqual(res.copied, []);
+    assert.deepEqual(res.skipped.map((s) => s.reason), ['symlinked parent refused', 'symlinked parent refused']);
+    assert.ok(res.skipped.every((s) => s.path === opsDir()));
+    assert.equal(fs.existsSync(path.join(projectRoot, OPS_ROOT_DIR)), false);
+  });
+
+  it('a symlinked own epic folder copies nothing in pass 1', () => {
+    const outside = outsideRecords();
+    fs.mkdirSync(recordsDir(), { recursive: true });
+    fs.symlinkSync(path.join(outside, EPIC), srcDir());
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC });
+    assert.deepEqual(res.copied, []);
+    assert.deepEqual(res.skipped, [{ path: srcDir(), reason: 'symlinked parent refused' }]);
+    assert.equal(fs.existsSync(path.join(destDir(), 'leak.md')), false);
+  });
+
+  it('a symlinked declared epic folder is refused while a normal one still copies', () => {
+    const outside = outsideRecords();
+    fs.mkdirSync(recordsDir(), { recursive: true });
+    fs.symlinkSync(path.join(outside, FOREIGN), srcDir(FOREIGN));
+    writeSrc('plan.md', 'p');
+    writeSrc('ok.md', 'ok', 'other-epic');
+    const res = harvestPlanRecords({
+      worktreeDir, projectRoot, epicId: EPIC,
+      declaredPaths: [rel(FOREIGN, 'leak.md'), rel('other-epic', 'ok.md')],
+    });
+    assert.deepEqual(res.copied, [path.join(destDir(), 'plan.md'), path.join(destDir('other-epic'), 'ok.md')]);
+    assert.deepEqual(res.skipped, [{ path: srcDir(FOREIGN), reason: 'symlinked parent refused' }]);
+    assert.equal(fs.existsSync(path.join(destDir(FOREIGN), 'leak.md')), false);
+  });
+
+  it('a normal tree with no symlinks copies as before', () => {
+    writeSrc('plan.md', '# Plan\n');
+    writeSrc('v.md', 'v\n', FOREIGN);
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'v.md')] });
+    assert.deepEqual(res.skipped, []);
+    assert.deepEqual(res.copied, [path.join(destDir(), 'plan.md'), path.join(destDir(FOREIGN), 'v.md')]);
+  });
+
+  it('still works with an injected fsImpl', () => {
+    writeSrc('plan.md', 'x');
+    const calls = [];
+    const fsImpl = { ...fs, lstatSync: (p) => { calls.push(p); return fs.lstatSync(p); } };
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, fsImpl });
+    assert.deepEqual(res.copied, [path.join(destDir(), 'plan.md')]);
+    assert.ok(calls.includes(opsDir()) && calls.includes(recordsDir()));
   });
 });

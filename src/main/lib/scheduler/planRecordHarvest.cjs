@@ -26,6 +26,30 @@ function errMsg(e) {
 
 const DECLARED_PREFIX = `${OPS_ROOT_DIR}/${NAMESPACE}/`;
 const CROSS_EPIC_EXISTS = 'exists in another Epic folder; not overwritten';
+const SYMLINKED_PARENT = 'symlinked parent refused';
+
+/**
+ * refusedParent(chain) → { path, reason } | null
+ * lstat-checks each source parent in order (outermost first) without ever
+ * following a link. A symlink anywhere in the chain is refused; a missing
+ * entry ends the check (nothing below it exists to copy); any other lstat
+ * error is refused too, so an unreadable parent never lets a pass through.
+ * @param {string[]} chain @param {typeof fs} [fsImpl]
+ * @returns {{ path: string, reason: string } | null}
+ */
+function refusedParent(chain, fsImpl = fs) {
+  for (const p of chain) {
+    let st;
+    try {
+      st = fsImpl.lstatSync(p);
+    } catch (e) {
+      if (e && /** @type {NodeJS.ErrnoException} */ (e).code === 'ENOENT') return null;
+      return { path: p, reason: `cannot check parent: ${errMsg(e)}` };
+    }
+    if (st.isSymbolicLink()) return { path: p, reason: SYMLINKED_PARENT };
+  }
+  return null;
+}
 
 /**
  * destExists(dest) → true when anything (file, folder, symlink — never
@@ -136,11 +160,13 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
     }
     if (path.resolve(worktreeDir) === path.resolve(projectRoot)) return { copied, skipped };
     const wtRoot = path.resolve(worktreeDir);
+    const opsSrc = path.join(wtRoot, OPS_ROOT_DIR);
+    const recordsSrc = path.join(opsSrc, NAMESPACE);
 
     // Pass 1: everything in the job's own plan-records/<epicId>/ folder.
     folderPass: {
       if (!ownFolderSafe) break folderPass;
-      const srcDir = path.join(wtRoot, OPS_ROOT_DIR, NAMESPACE, epicId);
+      const srcDir = path.join(recordsSrc, epicId);
       let destDir;
       try {
         destDir = path.resolve(opsPath(projectRoot, NAMESPACE, epicId));
@@ -149,6 +175,10 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
         break folderPass;
       }
       if (destDir === srcDir) break folderPass;
+      // Never read through a symlinked session-manager-operations/,
+      // plan-records/ or epic folder: it could point outside the worktree.
+      const refused = refusedParent([opsSrc, recordsSrc, srcDir], fsImpl);
+      if (refused) { skipped.push(refused); break folderPass; }
       let srcStat;
       try {
         srcStat = fsImpl.lstatSync(srcDir);
@@ -171,14 +201,19 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
 
     // Pass 2: records the PRD declared in frontmatter artifactPaths.
     const declared = Array.isArray(declaredPaths) ? declaredPaths : [];
-    for (const p of declared) {
+    // The shared parents are checked once; a symlink there refuses the pass.
+    const sharedRefused = declared.length ? refusedParent([opsSrc, recordsSrc], fsImpl) : null;
+    if (sharedRefused) skipped.push(sharedRefused);
+    for (const p of sharedRefused ? [] : declared) {
       const parsed = parseDeclaredPath(p);
       if (!('folder' in parsed)) { skipped.push({ path: String(p), reason: parsed.reason }); continue; }
-      const src = path.join(wtRoot, OPS_ROOT_DIR, NAMESPACE, parsed.folder, parsed.name);
+      const src = path.join(recordsSrc, parsed.folder, parsed.name);
       if (seen.has(src)) continue;
       // Pass 1 refuses a symlinked/non-directory own folder; hold every
       // declared folder to the same rule so a declaration cannot bypass it.
       const folderDir = path.dirname(src);
+      const folderRefused = refusedParent([folderDir], fsImpl);
+      if (folderRefused) { seen.add(src); skipped.push(folderRefused); continue; }
       let folderStat = null;
       try { folderStat = fsImpl.lstatSync(folderDir); } catch { /* missing: copyOne reports */ }
       if (folderStat && (folderStat.isSymbolicLink() || !folderStat.isDirectory())) {

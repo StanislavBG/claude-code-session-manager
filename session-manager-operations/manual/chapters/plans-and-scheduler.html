@@ -113,7 +113,11 @@ tab. Set it to zero and nothing new starts, while running work carries on.</p>
 <p>Claude Code also has a usage limit that resets every few hours. At your <strong>pause
 above</strong> line, 90% by default, the Scheduler stops starting automatic work. That covers work
 orders and script Tasks. Your own chats keep running, so the headroom left above the line is yours.
-Automatic work starts again once usage drops below the line or the window resets.</p>
+Automatic work starts again once usage drops below the line or the window resets. The line rises
+as the window's reset nears, so unused credit is not wasted. It tops out at 99%, not 100%. That
+leaves the last 1% for your chats until the reset. Home shows the same <strong>pause above</strong>
+setting under the usage meters, with the cap in force now when it differs. Click the number to edit
+it. Changing it on Home changes it in the Scheduler band too, because it is one setting.</p>
 
 <ol class="manual-steps">
   <li><strong>Pause</strong> stops new work orders from starting. Running work keeps going.</li>

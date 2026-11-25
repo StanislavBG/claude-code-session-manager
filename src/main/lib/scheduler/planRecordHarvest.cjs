@@ -25,6 +25,22 @@ function errMsg(e) {
 }
 
 const DECLARED_PREFIX = `${OPS_ROOT_DIR}/${NAMESPACE}/`;
+const CROSS_EPIC_EXISTS = 'exists in another Epic folder; not overwritten';
+
+/**
+ * destExists(dest) → true when anything (file, folder, symlink — never
+ * followed) sits at `dest`. Any lstat error other than ENOENT counts as
+ * existing, so an unreadable destination is never overwritten.
+ * @param {string} dest @param {typeof fs} [fsImpl]
+ */
+function destExists(dest, fsImpl = fs) {
+  try {
+    fsImpl.lstatSync(dest);
+    return true;
+  } catch (e) {
+    return !(e && /** @type {NodeJS.ErrnoException} */ (e).code === 'ENOENT');
+  }
+}
 
 /**
  * parseDeclaredPath(p) → { folder, name } | { reason }
@@ -53,8 +69,9 @@ function parseDeclaredPath(p) {
  *   → { copied: string[], skipped: { path, reason }[] }
  * Copies every record in the job's own `plan-records/<epicId>/` folder, plus
  * each well-formed `declaredPaths` entry (the PRD's frontmatter
- * artifactPaths), whose folder may be a different Epic's. `copied` holds
- * destination absolute paths.
+ * artifactPaths), whose folder may be a different Epic's — create-only there:
+ * an existing destination in another Epic's folder is never overwritten.
+ * `copied` holds destination absolute paths.
  */
 function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = [], fsImpl = fs } = {}) {
   /** @type {string[]} */
@@ -70,8 +87,10 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
    * set and the source does not exist (reported with that reason).
    * @param {string} src @param {string} folder @param {string} name
    * @param {string} [missingReason]
+   * @param {boolean} [createOnly] another Epic's folder: never overwrite an
+   *   existing destination (checked with lstat, so a symlink counts as existing)
    */
-  function copyOne(src, folder, name, missingReason) {
+  function copyOne(src, folder, name, missingReason, createOnly = false) {
     seen.add(src);
     try {
       if (!NAME_RE.test(name)) { skipped.push({ path: src, reason: 'name not allowed' }); return; }
@@ -97,6 +116,7 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
 
       const text = fsImpl.readFileSync(src, 'utf8');
       if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) { skipped.push({ path: src, reason: 'oversize after read' }); return; }
+      if (createOnly && destExists(dest, fsImpl)) { skipped.push({ path: src, reason: CROSS_EPIC_EXISTS }); return; }
       writeTextAtomicSync(dest, text);
       copied.push(dest);
     } catch (e) {
@@ -166,7 +186,9 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
         skipped.push({ path: src, reason: 'declared epic folder is not a directory' });
         continue;
       }
-      copyOne(src, parsed.folder, parsed.name, 'declared plan record not found in worktree');
+      // Another Epic's folder is create-only: a job may add a record there
+      // (a validator writing into the Epic it validates) but never overwrite one.
+      copyOne(src, parsed.folder, parsed.name, 'declared plan record not found in worktree', parsed.folder !== epicId);
     }
   } catch (e) {
     skipped.push({ path: String(worktreeDir), reason: `harvest failed: ${errMsg(e)}` });

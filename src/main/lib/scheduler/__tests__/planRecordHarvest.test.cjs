@@ -200,4 +200,48 @@ describe('harvestPlanRecords declaredPaths', () => {
     assert.deepEqual(res.skipped, [{ path: 'Upper', reason: 'unsafe epicId' }]);
     assert.equal(fs.existsSync(path.join(projectRoot, OPS_ROOT_DIR)), false);
   });
+
+  it('(i) cross-Epic declared record with no existing destination is copied', () => {
+    writeSrc('v.md', 'new\n', FOREIGN);
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'v.md')] });
+    assert.deepEqual(res.skipped, []);
+    assert.deepEqual(res.copied, [path.join(destDir(FOREIGN), 'v.md')]);
+    assert.equal(fs.readFileSync(path.join(destDir(FOREIGN), 'v.md'), 'utf8'), 'new\n');
+  });
+
+  it('(j) cross-Epic declared record never overwrites an existing destination', () => {
+    fs.mkdirSync(destDir(FOREIGN), { recursive: true });
+    const dest = path.join(destDir(FOREIGN), 'v.md');
+    const original = Buffer.from('original record\n');
+    fs.writeFileSync(dest, original);
+    writeSrc('v.md', 'attacker\n', FOREIGN);
+    const src = path.join(srcDir(FOREIGN), 'v.md');
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'v.md')] });
+    assert.deepEqual(res.copied, []);
+    assert.deepEqual(res.skipped, [{ path: src, reason: 'exists in another Epic folder; not overwritten' }]);
+    assert.deepEqual(fs.readFileSync(dest), original);
+  });
+
+  it('(k) cross-Epic declared record does not follow a destination symlink', () => {
+    fs.mkdirSync(destDir(FOREIGN), { recursive: true });
+    const target = path.join(tmp, 'target.md');
+    fs.writeFileSync(target, 'target\n');
+    fs.symlinkSync(target, path.join(destDir(FOREIGN), 'v.md'));
+    writeSrc('v.md', 'attacker\n', FOREIGN);
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'v.md')] });
+    assert.deepEqual(res.copied, []);
+    assert.equal(res.skipped[0].reason, 'exists in another Epic folder; not overwritten');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'target\n');
+    assert.ok(fs.lstatSync(path.join(destDir(FOREIGN), 'v.md')).isSymbolicLink());
+  });
+
+  it('(l) own-folder record still overwrites, declared or not', () => {
+    fs.mkdirSync(destDir(), { recursive: true });
+    fs.writeFileSync(path.join(destDir(), 'plan.md'), 'old\n');
+    writeSrc('plan.md', 'new\n');
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(EPIC, 'plan.md')] });
+    assert.deepEqual(res.skipped, []);
+    assert.deepEqual(res.copied, [path.join(destDir(), 'plan.md')]);
+    assert.equal(fs.readFileSync(path.join(destDir(), 'plan.md'), 'utf8'), 'new\n');
+  });
 });

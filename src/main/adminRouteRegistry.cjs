@@ -14,6 +14,8 @@ function registerAppAdminRoutes(adminHttp, deps = {}) {
   scheduler.registerAdminRoutes(adminHttp);
   // GET/POST /admin/scheduler/slots — read the slot cap; change it only on the human's verified words.
   require('./lib/scheduler/slotsRoute.cjs').registerSlotsRoute(adminHttp);
+  // GET /admin/usage-hold — the 'pause above' hold POST /admin/tasks refuses on, for runners that start claude -p directly (read-only).
+  require('./lib/scheduler/usageHoldRoute.cjs').registerUsageHoldRoute(adminHttp);
   require('./lib/prd/prdCreate.cjs').registerAdminRoute(adminHttp, scheduler.remote);
   require('./lib/prd/prdAdminRoutes.cjs').registerAdminRoute(adminHttp, scheduler.remote);
   require('./lib/feedback-remote/projectHomeAdminRoutes.cjs').registerAdminRoute(adminHttp);

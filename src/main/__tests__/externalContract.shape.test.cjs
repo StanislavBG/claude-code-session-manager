@@ -84,6 +84,7 @@ test('every listed admin route is registered by its module', async () => {
   require('../lib/feedback-remote/needsYouAdminRoutes.cjs').registerAdminRoute(fake);
   require('../lib/tasks/taskAdminRoutes.cjs').registerAdminRoute(fake);
   require('../validationQualityHandlers.cjs').registerAdminRoute(fake);
+  require('../lib/scheduler/usageHoldRoute.cjs').registerUsageHoldRoute(fake);
 
   // The health route lives inside localAdminHttp.cjs itself — check it on a real server.
   const admin = createAdminHttp();

@@ -75,6 +75,7 @@ const CONTRACT = deepFreeze({
     { method: 'POST', path: '/admin/tasks/import' },
     { method: 'POST', path: '/admin/tasks/switch' },
     { method: 'GET', path: '/admin/validation-quality' },
+    { method: 'GET', path: '/admin/usage-hold' },
   ],
   tools: {
     feedback_open_session: { required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'] },
@@ -161,6 +162,7 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
   // then taskBodyKeys + taskRuntimeKeys + taskGetKeys (advertised on GET /__admin/health via healthInfo()),
   // then epicStateChangedTo: the pinned `to` set of epic_state_changed rows (the 8 outside states + 'gone',
   // back to the v1 shape 0.141.0 served; 0.142.0 served lifecycle words only, after C6 909f6e47 narrowed it).
+  // then GET /admin/usage-hold (scheduler/usageHoldRoute.cjs): the 'pause above' hold POST /admin/tasks refuses on.
   1: Object.freeze([
     '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
     '7383ff32c80561b1b2c505a78a1e8313ae2851bdc6e8fce6c6a88e1ab119bf5a',
@@ -169,6 +171,7 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
     'a5be9b9b073639b4622574c842ed9a41ebb39c24c0919d699b18d2e197a8eb67',
     'ffb97327f0bd2da7d3f29693171ee7ee53982d8347d20d009e5aa5baf2bc15d1',
     '4f4ee647977bb670c71db57c6fdfa8dc5db89ce789a1f05dbf23f9468dcff30b',
+    '2c87717d95b8b7dceb8a2138affcd3fc990f762072691de7a433b2874fe89d4d',
   ]),
 });
 

@@ -11,8 +11,10 @@ import { test, expect } from 'vitest';
 const utilizationHold = require('../utilizationHold.cjs');
 
 const NOW = Date.parse('2026-11-23T23:30:00Z');
-const FUTURE = '2026-11-24T05:00:00Z';
-const LATER = '2026-11-26T17:00:00Z';
+// FUTURE and LATER sit more than a week ahead, so every window is read at the
+// flat 'pause above' value (no pro-rating) in the cases below the pro-rate block.
+const FUTURE = '2026-12-01T05:00:00Z';
+const LATER = '2026-12-03T17:00:00Z';
 const PAST = '2026-11-23T22:00:00Z';
 
 function evalHold(args) {
@@ -51,6 +53,7 @@ test('non-finite threshold returns null', () => {
 test('single reading at the threshold holds (90 at 90)', () => {
   expect(evalHold({ reading: single(90) })).toEqual({
     reason: 'utilization-held', window: 'weekly_all', percent: 90, threshold: 90, resetsAt: FUTURE,
+    baseThreshold: 90,
     detail: `weekly_all window at 90% ≥ 90%, resets ${FUTURE}`,
   });
 });
@@ -75,7 +78,7 @@ test("Self's case: session reset, weekly_all still holds; then null after weekly
   };
   const r = evalHold({ reading });
   expect(r).toMatchObject({ reason: 'utilization-held', window: 'weekly_all', percent: 92, resetsAt: LATER, threshold: 90 });
-  expect(evalHold({ reading, now: Date.parse('2026-11-26T18:00:00Z') })).toBeNull();
+  expect(evalHold({ reading, now: Date.parse('2026-12-03T18:00:00Z') })).toBeNull();
 });
 
 test('a reset window above threshold plus a live window below gives null', () => {
@@ -177,6 +180,84 @@ test('single reading with non-finite percent returns null', () => {
 test('windows take precedence over the top-level single reading', () => {
   const reading = { ...single(99), windows: [{ window: 'weekly_all', percent: 40, resetsAt: LATER }] };
   expect(evalHold({ reading })).toBeNull();
+});
+
+// ── Pro-rated threshold: rises with the share of the window elapsed ──
+const H = 60 * 60 * 1000;
+const DAY = 24 * H;
+const at = (ms) => new Date(NOW + ms).toISOString();
+
+test('pro-rate constants are exported', () => {
+  expect(utilizationHold.PRO_RATE_CEILING).toBe(100);
+  expect(utilizationHold.PRO_RATE_FULL_FRACTION).toBe(2 / 7);
+  expect(utilizationHold.WINDOW_LENGTH_MS).toEqual({ weekly: 7 * DAY, fiveHour: 5 * H });
+});
+
+test('proRatedThreshold: weekly 7 days left -> base, 4.5 days -> 95, 41 h -> 100', () => {
+  const pr = (left, window = 'weekly_all', base = 90) =>
+    utilizationHold.proRatedThreshold({ base, window, resetsAt: at(left), now: NOW });
+  expect(pr(7 * DAY)).toBe(90);
+  expect(pr(8 * DAY)).toBe(90);
+  expect(pr(4.5 * DAY)).toBeCloseTo(95, 9);
+  expect(pr(41 * H)).toBe(100);
+  expect(pr(2 * DAY)).toBe(100);
+  expect(pr(4.5 * DAY, 'seven_day_opus')).toBeCloseTo(95, 9);
+  expect(pr(4 * H, 'five_hour')).toBeCloseTo(92.8, 9);
+  expect(pr(4 * H, 'session')).toBeCloseTo(92.8, 9);
+  expect(pr(1 * H, 'five_hour')).toBe(100);
+  expect(pr(4.5 * DAY, 'weekly_all', 100)).toBe(100);
+  expect(pr(41 * H, 'weekly_all', 100)).toBe(100);
+  expect(pr(41 * H, 'weekly_all', 120)).toBe(120);
+});
+
+test('proRatedThreshold: unknown window, missing/unparseable reset, non-finite base -> base', () => {
+  const p = utilizationHold.proRatedThreshold;
+  expect(p({ base: 90, window: 'mystery', resetsAt: at(H), now: NOW })).toBe(90);
+  expect(p({ base: 90, window: null, resetsAt: at(H), now: NOW })).toBe(90);
+  expect(p({ base: 90, window: 'weekly_all', resetsAt: null, now: NOW })).toBe(90);
+  expect(p({ base: 90, window: 'weekly_all', resetsAt: 'not-a-date', now: NOW })).toBe(90);
+  expect(p({ base: NaN, window: 'weekly_all', resetsAt: at(H), now: NOW })).toBeNaN();
+  expect(p({ base: Infinity, window: 'weekly_all', resetsAt: at(H), now: NOW })).toBe(Infinity);
+});
+
+test('base 90, weekly_all with reset 41 h ahead: 82% and 99.5% run, 100% holds at 100', () => {
+  const reset = at(41 * H);
+  expect(evalHold({ reading: single(82, reset) })).toBeNull();
+  expect(evalHold({ reading: single(99.5, reset) })).toBeNull();
+  const r = evalHold({ reading: single(100, reset) });
+  expect(r).toMatchObject({ reason: 'utilization-held', window: 'weekly_all', percent: 100, threshold: 100, baseThreshold: 90 });
+  expect(r.detail).toBe(`weekly_all window at 100% ≥ 100% (pause above 90%, pro-rated: 1.7 days to reset), resets ${reset}`);
+});
+
+test('base 90, weekly_all 4.5 days left: 94 runs, 95 holds at 95', () => {
+  expect(evalHold({ reading: single(94, at(4.5 * DAY)) })).toBeNull();
+  const r = evalHold({ reading: single(95, at(4.5 * DAY)) });
+  expect(r.threshold).toBeCloseTo(95, 9);
+  expect(r.baseThreshold).toBe(90);
+});
+
+test('base 90, five_hour 95%: 4 h left holds (cap ~92.8), 1 h left runs', () => {
+  const r = evalHold({ reading: single(95, at(4 * H), 'five_hour') });
+  expect(r).toMatchObject({ reason: 'utilization-held', window: 'five_hour', percent: 95, baseThreshold: 90 });
+  expect(r.threshold).toBeCloseTo(92.8, 9);
+  expect(r.detail).toBe(`five_hour window at 95% ≥ 92.8% (pause above 90%, pro-rated: 4.0 h to reset), resets ${at(4 * H)}`);
+  expect(evalHold({ reading: single(95, at(1 * H), 'five_hour') })).toBeNull();
+});
+
+test('base 100 holds only at 100 whatever the time left', () => {
+  expect(evalHold({ threshold: 100, reading: single(99.9, at(41 * H)) })).toBeNull();
+  expect(evalHold({ threshold: 100, reading: single(100, at(6 * DAY)) })).toMatchObject({ threshold: 100, baseThreshold: 100 });
+});
+
+test('each window uses its own effective limit', () => {
+  const reading = {
+    ...single(0),
+    windows: [
+      { window: 'five_hour', percent: 95, resetsAt: at(1 * H) }, // cap 100: runs
+      { window: 'weekly_all', percent: 96, resetsAt: at(4.5 * DAY) }, // cap 95: holds
+    ],
+  };
+  expect(evalHold({ reading })).toMatchObject({ window: 'weekly_all', percent: 96 });
 });
 
 // Real usage-API resets_at strings for the Thu 2026-11-26 17:00Z weekly reset

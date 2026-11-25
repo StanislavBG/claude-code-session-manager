@@ -16,15 +16,28 @@
 const { sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 
 /**
+ * @typedef {import('../../scheduler/utilizationHold.cjs').AutoDispatchHold} AutoDispatchHold
+ * @typedef {{
+ *   reason: AutoDispatchHold['reason'] | null,
+ *   window: string | null,
+ *   percent: number | null,
+ *   threshold: number | null,
+ *   resetsAt: string | null,
+ *   detail: string | null,
+ *   baseThreshold?: number,
+ * }} PublicHold
+ */
+
+/**
  * The hold's one outside shape, shared by GET /admin/usage-hold and every
  * 429 usage_held answer. baseThreshold (the saved 'pause above' before
  * pro-rating) is forwarded only when it is a finite number.
- * @param {any} hold
- * @returns {Record<string, unknown> | null}
+ * @param {AutoDispatchHold | null | undefined} hold
+ * @returns {PublicHold | null}
  */
 function publicHold(hold) {
   if (hold == null) return null;
-  /** @type {Record<string, unknown>} */
+  /** @type {PublicHold} */
   const out = {
     reason: hold.reason ?? null,
     window: hold.window ?? null,
@@ -42,17 +55,21 @@ function publicHold(hold) {
 /**
  * The 429 usage_held body: the public hold minus detail, with detail and the
  * caller's hint at the top level.
- * @param {any} hold
+ * A missing hold answers the all-null public shape (what publicHold of an
+ * empty object gave before this module was typed).
+ * @param {AutoDispatchHold} hold
  * @param {string} hint
  */
 function usageHeldBody(hold, hint) {
-  const { detail, ...rest } = publicHold(hold ?? {}) || {};
+  /** @type {PublicHold} */
+  const empty = { reason: null, window: null, percent: null, threshold: null, resetsAt: null, detail: null };
+  const { detail, ...rest } = (hold == null ? empty : publicHold(hold)) || empty;
   return { ok: false, error: 'usage_held', hold: rest, detail: detail ?? null, hint };
 }
 
 /**
  * @param {{ registerRoute: Function }} adminHttp
- * @param {{ usageHold?: () => unknown, threshold?: () => number }} [deps]
+ * @param {{ usageHold?: () => AutoDispatchHold | null, threshold?: () => number }} [deps]
  */
 function registerUsageHoldRoute(adminHttp, deps = {}) {
   const usageHold = deps.usageHold || (() => require('../../scheduler.cjs').currentUsageHold());

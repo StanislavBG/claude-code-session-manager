@@ -255,6 +255,16 @@ test('RECOVERY_ACTIONS: every FAILURE_CLASSES member has an entry from the close
   }
 });
 
+/** One stream-json assistant event carrying a single Bash tool_use. */
+function bashToolUse(command) {
+  return JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command, description: 'x' } }] } });
+}
+
+/** One stream-json assistant event carrying a single text block. */
+function assistantText(text) {
+  return JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+}
+
 test('recoveryActionFor: maps each known failure class to its expected action', () => {
   const { FAILURE_CLASSES, recoveryActionFor } = rcaReport;
   expect(recoveryActionFor(FAILURE_CLASSES.ALREADY_SHIPPED)).toBe('archive');
@@ -265,6 +275,78 @@ test('recoveryActionFor: maps each known failure class to its expected action', 
   expect(recoveryActionFor(FAILURE_CLASSES.POST_AC_OVERRUN)).toBe('investigate');
   expect(recoveryActionFor(FAILURE_CLASSES.TRANSCRIPT_ERRORS)).toBe('investigate');
   expect(recoveryActionFor(FAILURE_CLASSES.UNKNOWN)).toBe('investigate');
+  expect(recoveryActionFor(FAILURE_CLASSES.EXECUTOR_FAIL)).toBe('investigate');
+});
+
+test('FAILURE_CLASSES / RECOVERY_ACTIONS: pre-existing values are unchanged, EXECUTOR_FAIL is added', () => {
+  const { FAILURE_CLASSES, RECOVERY_ACTIONS } = rcaReport;
+  expect(FAILURE_CLASSES).toEqual({
+    ALREADY_SHIPPED: 'already-shipped',
+    SELF_QUEUE: 'self-queue',
+    STUCK_LOOP: 'stuck-loop',
+    POST_AC_OVERRUN: 'post-ac-overrun',
+    NO_SENTINEL: 'no-sentinel',
+    UNCOMMITTED: 'uncommitted-changes',
+    TRANSCRIPT_ERRORS: 'transcript-errors',
+    ABANDONED_BACKGROUND_TASK: 'abandoned-background-task',
+    BLOCKED_BY_FOREIGN_WIP: 'blocked-by-foreign-wip',
+    EXECUTOR_FAIL: 'executor-fail',
+    UNKNOWN: 'unknown',
+  });
+  expect(RECOVERY_ACTIONS).toEqual({
+    'already-shipped': 'archive',
+    'self-queue': 'investigate',
+    'stuck-loop': 'investigate',
+    'post-ac-overrun': 'investigate',
+    'no-sentinel': 'verify-and-close',
+    'uncommitted-changes': 'resume-and-commit',
+    'transcript-errors': 'investigate',
+    'abandoned-background-task': 'investigate',
+    'blocked-by-foreign-wip': 'archive',
+    'executor-fail': 'investigate',
+    unknown: 'investigate',
+  });
+});
+
+test('classifyFailure: sentinel_fail is executor-fail even when the tail has loop-word prose', () => {
+  const { classifyFailure, FAILURE_CLASSES } = rcaReport;
+  expect(classifyFailure({ verdict: 'sentinel_fail', logTail: 'The choice stays until you pass --max-findings default.' })).toBe(FAILURE_CLASSES.EXECUTOR_FAIL);
+  expect(classifyFailure({ verdict: 'sentinel_fail', logTail: 'HUMAN_ACTION_REQUIRED: builds 2-4 are expired\nwhile true is not used here' })).toBe(FAILURE_CLASSES.EXECUTOR_FAIL);
+  // Earlier rules still win over executor-fail.
+  expect(classifyFailure({ verdict: 'sentinel_fail', logTail: 'Launching skill: session-manager-dev:develop' })).toBe(FAILURE_CLASSES.SELF_QUEUE);
+});
+
+test('classifyFailure: prose in an assistant text event never matches stuck-loop', () => {
+  const { classifyFailure, FAILURE_CLASSES } = rcaReport;
+  expect(classifyFailure({ verdict: 'silent_no_op', logTail: assistantText('files stay dirty until someone commits') })).toBe(FAILURE_CLASSES.UNCOMMITTED);
+  expect(classifyFailure({ verdict: 'silent_no_op', logTail: 'plain text: while true; do sleep 1; done' })).toBe(FAILURE_CLASSES.UNCOMMITTED);
+  const toolResult = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'until x; do sleep 5; done' }] } });
+  expect(classifyFailure({ verdict: 'silent_no_op', logTail: toolResult })).toBe(FAILURE_CLASSES.UNCOMMITTED);
+});
+
+test('classifyFailure: only an unbounded Bash loop command is stuck-loop', () => {
+  const { classifyFailure, FAILURE_CLASSES } = rcaReport;
+  expect(classifyFailure({ verdict: 'transcript_errors', logTail: bashToolUse('until curl -sf http://127.0.0.1:9/x; do sleep 5; done') })).toBe(FAILURE_CLASSES.STUCK_LOOP);
+  expect(classifyFailure({ verdict: 'transcript_errors', logTail: bashToolUse('while :\ndo sleep 1\ndone') })).toBe(FAILURE_CLASSES.STUCK_LOOP);
+  for (const cmd of [
+    "timeout 300 bash -c 'until curl -sf http://127.0.0.1:9/x; do sleep 5; done'",
+    'for i in 1 2 3; do sleep 30; done',
+    'git commit -m "hold until the agreement is accepted"',
+    'sleep 30',
+  ]) {
+    expect(classifyFailure({ verdict: 'transcript_errors', logTail: bashToolUse(cmd) })).not.toBe(FAILURE_CLASSES.STUCK_LOOP);
+  }
+});
+
+test('bashCommandsIn: returns only Bash tool_use commands, skipping malformed and non-Bash lines', () => {
+  const lines = [
+    bashToolUse('echo hi'),
+    '{"type":"assistant","tool_use" "Bash" broken',
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/x' } }] } }),
+    assistantText('Bash tool_use until'),
+    'plain "tool_use" "Bash" line',
+  ];
+  expect(rcaReport.bashCommandsIn(lines)).toEqual(['echo hi']);
 });
 
 test('recoveryActionFor: defaults to investigate for an unrecognised class', () => {
@@ -281,7 +363,8 @@ test('writeRcaReport: markdown carries a machine-readable recovery-action line m
   const cases = [
     { verdict: 'pass_no_commit', logTail: 'The work was already implemented in a prior commit.', expectedClass: rcaReport.FAILURE_CLASSES.ALREADY_SHIPPED },
     { verdict: 'transcript_errors', logTail: 'Launching skill: session-manager-dev:develop', expectedClass: rcaReport.FAILURE_CLASSES.SELF_QUEUE },
-    { verdict: 'transcript_errors', logTail: 'while true; do sleep 1; done', expectedClass: rcaReport.FAILURE_CLASSES.STUCK_LOOP },
+    { verdict: 'transcript_errors', logTail: bashToolUse('while true; do sleep 1; done'), expectedClass: rcaReport.FAILURE_CLASSES.STUCK_LOOP },
+    { verdict: 'sentinel_fail', logTail: 'The choice stays until you pass --max-findings default.', expectedClass: rcaReport.FAILURE_CLASSES.EXECUTOR_FAIL },
     { verdict: 'uncommitted_changes', logTail: 'plain log tail', expectedClass: rcaReport.FAILURE_CLASSES.UNCOMMITTED },
     { verdict: 'no_verdict_sentinel', logTail: 'plain log tail', expectedClass: rcaReport.FAILURE_CLASSES.NO_SENTINEL },
     { verdict: 'transcript_errors', logTail: 'plain log tail', expectedClass: rcaReport.FAILURE_CLASSES.TRANSCRIPT_ERRORS },

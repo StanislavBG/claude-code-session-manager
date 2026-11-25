@@ -80,6 +80,7 @@ const FAILURE_CLASSES = {
   TRANSCRIPT_ERRORS: 'transcript-errors',
   ABANDONED_BACKGROUND_TASK: 'abandoned-background-task',
   BLOCKED_BY_FOREIGN_WIP: 'blocked-by-foreign-wip',
+  EXECUTOR_FAIL: 'executor-fail',
   UNKNOWN: 'unknown',
 };
 
@@ -111,6 +112,7 @@ const RECOVERY_ACTIONS = {
   // guidance into that cold-read investigation.
   [FAILURE_CLASSES.ABANDONED_BACKGROUND_TASK]: 'investigate',
   [FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP]: 'archive',
+  [FAILURE_CLASSES.EXECUTOR_FAIL]: 'investigate',
   [FAILURE_CLASSES.UNKNOWN]: 'investigate',
 };
 
@@ -138,6 +140,8 @@ const PREVENTION_HINTS = {
     'A headless run cannot receive a background-task completion notification — never let a long Bash command auto-background past its foreground timeout and then wait for it. Run long commands with an explicit bound (`timeout <N> <cmd>`) so they finish in the foreground, or poll their output file directly instead of waiting on Monitor/notification.',
   [FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP]:
     'This job correctly reported `SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP` against a sibling job\'s in-flight, uncommitted files three times in a row — auto-requeue is exhausted (reconcile() only clears this once the blocked paths go clean). This is not a defect in this PRD\'s own work: check on the sibling job/human that owns the still-dirty path(s) named on the job row, and either wait for them to commit or manually reset this job to `pending` once the tree is clear. Do not author a fix-plan PRD against it.',
+  [FAILURE_CLASSES.EXECUTOR_FAIL]:
+    "The executor ended `SCHEDULER_VERDICT: FAIL` and stated why — read its reason under 'What happened'. That stated reason, not a log-tail pattern, is what to fix. If the blocker is a step only a person can do (an account, dashboard or signing action), it belongs behind a preflight hold, not in the job body (PRD_AUTHORING.md §6).",
   [FAILURE_CLASSES.UNKNOWN]:
     'Re-run the acceptance criteria gate locally against the failure log to pin down the specific break before re-queuing.',
 };
@@ -168,7 +172,13 @@ const SELF_QUEUE_SKILL_RE = /Launching skill: session-manager-dev:(develop|proce
 // rule now requires a stream-json tool_use `"name":"ScheduleWakeup"` field, and
 // classifyFailure strips init events before any rule runs.
 const SELF_QUEUE_WAKEUP_RE = /"name"\s*:\s*"ScheduleWakeup"/;
-const STUCK_LOOP_RE = /\b(until\s|while\s+true|sleep\s)/i;
+// Stuck-loop rule: matched only against real Bash tool_use commands (see
+// bashCommandsIn), never prose. Incident: starry-night-2
+// 856-ios-testflight-public-link (run 2026-11-24T17-02-30-189Z) — the old
+// word rule matched 'until ' in skill-catalog text in the log tail; 49 of 114
+// reports since 2026-11-17 were prose false positives.
+const UNBOUNDED_LOOP_RE = /\b(?:while\s+(?:true\b|:)|until\s)[\s\S]*?(?:;|\n)\s*do\b/;
+const TIMEOUT_BOUND_RE = /\btimeout\s+(?:-\S+\s+)*\d/;
 const AC_CHECKBOX_RE = /^\s*[-*]\s*\[[xX]\]/;
 const SENTINEL_PASS_RE = /SCHEDULER_VERDICT:\s*PASS/;
 const STUCK_LOOP_WINDOW = 40; // "final lines" per AC
@@ -192,6 +202,31 @@ function structuredPassLine(line) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Shell commands from stream-json Bash tool_use events in `lines`. Plain-text
+ * lines, assistant text blocks, tool_result content and system events yield
+ * nothing; malformed JSON lines are skipped. Pure; O(n) in characters.
+ */
+function bashCommandsIn(lines) {
+  const out = [];
+  for (const line of lines || []) {
+    if (typeof line !== 'string' || !line.includes('"tool_use"') || !line.includes('"Bash"')) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line.trim());
+    } catch {
+      continue;
+    }
+    if (!obj || obj.type !== 'assistant' || !Array.isArray(obj.message?.content)) continue;
+    for (const c of obj.message.content) {
+      if (c && c.type === 'tool_use' && c.name === 'Bash' && typeof c.input?.command === 'string') {
+        out.push(c.input.command);
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -245,22 +280,27 @@ function classifyFailure({ verdict, logTail: rawLogTail }) {
   // Checked before SELF_QUEUE/STUCK_LOOP: the verifier already did the real
   // detection work (scanning for the harness's own auto-background marker
   // text) to produce this verdict — trust it rather than re-deriving from the
-  // log tail, which can otherwise false-match SELF_QUEUE_WAKEUP_RE/STUCK_LOOP_RE
-  // on words like "sleep"/"background" that appear in the harness's own
-  // auto-background tool_result.
+  // log tail, which can otherwise false-match SELF_QUEUE_WAKEUP_RE on words
+  // like "background" that appear in the harness's own auto-background
+  // tool_result.
   if (verdict === 'abandoned_background_task') {
     return FAILURE_CLASSES.ABANDONED_BACKGROUND_TASK;
   }
 
   // Checked before STUCK_LOOP: a backgrounded command + ScheduleWakeup
   // (variant b) can land words like "sleep"/"poll" in the tail via the PRD's
-  // own AC text, which would otherwise false-match STUCK_LOOP_RE (see PRD 771).
+  // own AC text; self-queue is the truer class for that run (see PRD 771).
   if (SELF_QUEUE_SKILL_RE.test(logTail || '') || SELF_QUEUE_WAKEUP_RE.test(logTail || '')) {
     return FAILURE_CLASSES.SELF_QUEUE;
   }
 
+  // Checked before STUCK_LOOP: the executor ended SCHEDULER_VERDICT: FAIL and
+  // stated its own reason — trust that over any log-tail pattern.
+  if (verdict === 'sentinel_fail') return FAILURE_CLASSES.EXECUTOR_FAIL;
+
+  // Only a real, unbounded Bash loop command counts — never prose.
   const tailWindow = lines.slice(-STUCK_LOOP_WINDOW);
-  if (tailWindow.some((l) => STUCK_LOOP_RE.test(l))) {
+  if (bashCommandsIn(tailWindow).some((cmd) => UNBOUNDED_LOOP_RE.test(cmd) && !TIMEOUT_BOUND_RE.test(cmd))) {
     return FAILURE_CLASSES.STUCK_LOOP;
   }
 
@@ -465,6 +505,7 @@ module.exports = {
   // Pure helpers, exported for unit tests.
   humanVerdict,
   classifyFailure,
+  bashCommandsIn,
   stripHarnessInitEvents,
   extractAcceptanceCriteria,
   extractRcaBlock,

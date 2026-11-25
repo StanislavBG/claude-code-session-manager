@@ -169,7 +169,7 @@ const { runDefinitionOfDoneOnDrain } = require('./lib/scheduler/dodDrainHook.cjs
 const { writeRcaReport, extractRcaBlock } = require('./lib/scheduler/rcaReport.cjs');
 const queueHistory = require('./lib/scheduler/queueHistory.cjs');
 const { resolveGate, runGateSequence, gateTimeoutMs } = require('./lib/scheduler/definitionOfDone.cjs');
-const { runCriteriaChecks } = require('./lib/scheduler/criteriaChecks.cjs');
+const { runCriteriaChecks, HTTP_RETRY_ATTEMPTS, HTTP_RETRY_DELAY_MS } = require('./lib/scheduler/criteriaChecks.cjs');
 const queueOps = require('./queueOps.cjs');
 // Feedback-auto-PRD sweep — formerly only run by the external scheduler-watchdog
 // while the app was down (PRD 686 moved it in-app so it also runs while alive).
@@ -4257,20 +4257,28 @@ async function readStoredCriteriaChecks(cwd, epicId, slug) {
 }
 
 /**
- * runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored) → merged checks.
+ * runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored, { httpRetry }?) → merged checks.
  * Runs the PRD's http + file criteria fresh in `cwd` (outside the job
  * sandbox, whose Bash cannot reach host loopback), never command or manual
- * ones. http bodies go to a sidecar file (writeCheckBody); the row keeps
+ * ones. A failed http check is retried (default HTTP_RETRY_ATTEMPTS,
+ * HTTP_RETRY_DELAY_MS apart; `httpRetry` overrides, tests only) because a
+ * local dev server may be mid-reload just after a landing; each http row
+ * keeps its `attempts`. http bodies go to a sidecar file (writeCheckBody); the row keeps
  * only bodyPath/bodyBytes/truncated. Fresh rows replace stored ones by id;
  * the exact-slug outcome record (when one exists) is updated in place.
  * Falls back to `stored` on any error. Never rejects.
  */
-async function runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored) {
+async function runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored, { httpRetry } = {}) {
   try {
     const subset = criteria.filter((c) => c && c.check && (c.check.kind === 'http' || c.check.kind === 'file'));
     if (!subset.length) return stored;
     const ranAt = new Date().toISOString();
-    const rows = await runCriteriaChecks({ criteria: subset, cwd, keepBody: true });
+    const rows = await runCriteriaChecks({
+      criteria: subset,
+      cwd,
+      keepBody: true,
+      httpRetry: httpRetry || { attempts: HTTP_RETRY_ATTEMPTS, delayMs: HTTP_RETRY_DELAY_MS },
+    });
     const fresh = [];
     for (const r of rows) {
       const { body, ...rest } = r;
@@ -4304,11 +4312,12 @@ async function runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored) {
  * nothing is structured. Never rejects. With `runChecks: false` (the notify
  * fallback for a row without a dispatch-time stamp) it reads the stored
  * checks only: no http request, no outcome record or body file write.
+ * `httpRetry` overrides the dispatch retry defaults (tests only).
  * @param {any} job
- * @param {{ runChecks?: boolean }} [opts]
+ * @param {{ runChecks?: boolean, httpRetry?: { attempts?: number, delayMs?: number } }} [opts]
  * @returns {Promise<{ expected: Record<string, { ids: string[], failedIds: string[] }>, section: string }>}
  */
-async function loadValidatorCriteriaContext(job, { runChecks = true } = {}) {
+async function loadValidatorCriteriaContext(job, { runChecks = true, httpRetry } = {}) {
   /** @type {Record<string, { ids: string[], failedIds: string[] }>} */
   const expected = {};
   try {
@@ -4324,7 +4333,7 @@ async function loadValidatorCriteriaContext(job, { runChecks = true } = {}) {
       try { criteria = parsePrdFile(text).frontmatter.criteria; } catch { criteria = null; }
       if (!Array.isArray(criteria) || !criteria.length) continue;
       const stored = await readStoredCriteriaChecks(job.cwd, epicId, slug);
-      const checks = runChecks ? await runDispatchCriteriaChecks(job.cwd, epicId, slug, criteria, stored) : stored;
+      const checks = runChecks ? await runDispatchCriteriaChecks(job.cwd, epicId, slug, criteria, stored, { httpRetry }) : stored;
       const exp = expectedFromCriteria(criteria, checks);
       if (exp) expected[slug] = exp;
       prds.push({ slug, criteria, checks });

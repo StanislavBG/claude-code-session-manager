@@ -15,8 +15,11 @@
  * mechanical check results) it also refuses an entry that omits a criterion
  * id or marks met: true a criterion whose mechanical check failed.
  *
- * Pure: no I/O, no dependencies, never throws, never mutates its input.
+ * Pure: no I/O, never throws, never mutates its input. Its one dependency is
+ * criteriaChecks.cjs, for the http retry constants the prompt section names.
  */
+
+const { HTTP_RETRY_ATTEMPTS, HTTP_RETRY_DELAY_MS } = require('./criteriaChecks.cjs');
 
 /** @typedef {'not-landed'|'gate-red'|'behavior-wrong'|'not-checked-live'|'missing-test'|'regression'|'spec-gap'|'security'|'docs-drift'|'other'} MissKind */
 /** @typedef {'Critical'|'Important'|'Minor'} Severity */
@@ -343,7 +346,8 @@ function formatCriteriaChecksSection(prds) {
       const result = !r ? 'not run' : r.ok === true ? 'PASS' : r.ok === false ? 'FAIL' : 'manual';
       const detail = r && r.detail ? ` — ${oneLine(r.detail)}` : '';
       const ranAt = r && typeof r.ranAt === 'string' && r.ranAt ? ` (ran ${oneLine(r.ranAt, 40)})` : '';
-      lines.push(`- \`${oneLine(c.id, 60)}\` (${kind}) ${result}${ranAt}${detail}: ${oneLine(c.statement)}`);
+      const attempts = r && Number.isInteger(r.attempts) && /** @type {number} */ (r.attempts) > 1 ? ` (${r.attempts} attempts)` : '';
+      lines.push(`- \`${oneLine(c.id, 60)}\` (${kind}) ${result}${ranAt}${attempts}${detail}: ${oneLine(c.statement)}`);
       if (r && typeof r.bodyPath === 'string' && r.bodyPath) {
         const bytes = Number.isFinite(r.bodyBytes) ? r.bodyBytes : 0;
         lines.push(`  - body: ${oneLine(r.bodyPath, 500)} (${bytes} bytes${r.truncated === true ? ', truncated at 1 MiB' : ''})`);
@@ -352,10 +356,11 @@ function formatCriteriaChecksSection(prds) {
     blocks.push(lines.join('\n'));
   }
   if (!blocks.length) return '';
+  const retrySentence = `A failed \`http\` check was retried (up to ${HTTP_RETRY_ATTEMPTS} attempts, ${Math.round(HTTP_RETRY_DELAY_MS / 1000)} s apart) before it was recorded, so a FAIL row is a repeated failure.`;
   return [
     '## Stored mechanical check results',
     '',
-    'The `http` and `file` checks below were run by the scheduler outside your sandbox just before you started. `command` rows show a stored result or `not run` — re-run those yourself. Your Bash cannot reach host loopback, so never probe a running service: judge `http` criteria from these results. Each `http` row names a `body:` file holding the response body; judge structural expectations (for example every item has a non-empty field) by reading that file inside your sandbox. In your verdict JSON, return one `criteria` entry per criterion id below, using that id exactly. A criterion whose check is FAIL must be `met: false` — a verdict marking it met is refused.',
+    'The `http` and `file` checks below were run by the scheduler outside your sandbox just before you started. `command` rows show a stored result or `not run` — re-run those yourself. Your Bash cannot reach host loopback, so never probe a running service: judge `http` criteria from these results. ' + retrySentence + ' Each `http` row names a `body:` file holding the response body; judge structural expectations (for example every item has a non-empty field) by reading that file inside your sandbox. In your verdict JSON, return one `criteria` entry per criterion id below, using that id exactly. A criterion whose check is FAIL must be `met: false` — a verdict marking it met is refused.',
     '',
     ...blocks,
   ].join('\n');

@@ -220,9 +220,9 @@ describe('scheduler loadValidatorCriteriaContext', () => {
         slug: '4459-live', verdict: 'completed', checks: [{ id: 'gate', kind: 'command', ok: true, detail: 'exit 0' }, { id: 'live-bad', kind: 'http', ok: null, detail: 'old' }],
       }));
 
-      const ctx = await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '4460-validate', dependsOn: ['4459-live'] });
+      const ctx = await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '4460-validate', dependsOn: ['4459-live'] }, { httpRetry: { delayMs: 5 } });
       assert.match(ctx.section, /`live-ok` \(http\) PASS \(ran [^)]+\) — HTTP 200/);
-      assert.match(ctx.section, /`live-bad` \(http\) FAIL \(ran [^)]+\) — HTTP 500, expected 200/);
+      assert.match(ctx.section, /`live-bad` \(http\) FAIL \(ran [^)]+\) \(3 attempts\) — HTTP 500, expected 200/);
       assert.match(ctx.section, /`gate` \(command\) PASS — exit 0/);
       assert.match(ctx.section, /run by the scheduler outside your sandbox just before you started/);
       assert.match(ctx.section, /cannot reach host loopback/);
@@ -291,5 +291,85 @@ describe('scheduler loadValidatorCriteriaContext', () => {
         await new Promise((resolve) => counted.close(resolve));
       }
     });
+
+    /** @param {string} epicId @param {string} slug @param {unknown[]} criteria */
+    const fixture = (epicId, slug, criteria) => {
+      const cwd = fs.mkdtempSync(path.join(tmpHome, 'proj-'));
+      const epicDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId);
+      fs.mkdirSync(path.join(epicDir, 'prds'), { recursive: true });
+      fs.mkdirSync(path.join(epicDir, 'outcomes'), { recursive: true });
+      fs.writeFileSync(path.join(epicDir, 'prds', `${slug}.md`), `---\ntitle: R\ncriteria: ${JSON.stringify(criteria)}\n---\n# Goal\n\nx\n`);
+      fs.writeFileSync(path.join(epicDir, 'outcomes', `${slug}.json`), JSON.stringify({ slug, verdict: 'completed', checks: [] }));
+      return { cwd, recPath: path.join(epicDir, 'outcomes', `${slug}.json`) };
+    };
+
+    it('retries an http check that 503s once while the server reloads → PASS (2 attempts)', async () => {
+      let hits = 0;
+      const flaky = http.createServer((req, res) => { hits += 1; if (hits === 1) { res.writeHead(503); res.end('reloading'); return; } res.writeHead(200); res.end('ok'); });
+      await new Promise((resolve) => flaky.listen(0, '127.0.0.1', resolve));
+      try {
+        const url = `http://127.0.0.1:${flaky.address().port}/ok`;
+        const epicId = 'epic-retry';
+        const { cwd, recPath } = fixture(epicId, '4546-flaky', [{ id: 'live', statement: 'route answers', check: { kind: 'http', spec: { url } } }]);
+        const ctx = await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '4547-validate', dependsOn: ['4546-flaky'] }, { httpRetry: { delayMs: 5 } });
+        assert.equal(hits, 2);
+        assert.deepEqual(ctx.expected['4546-flaky'], { ids: ['live'], failedIds: [] });
+        const row = JSON.parse(fs.readFileSync(recPath, 'utf8')).checks.find((c) => c.id === 'live');
+        assert.equal(row.ok, true);
+        assert.equal(row.attempts, 2);
+        const line = ctx.section.split('\n').find((l) => l.includes('`live`'));
+        assert.match(line, /PASS/);
+        assert.ok(line.includes('(2 attempts)'), line);
+        assert.match(ctx.section, /retried \(up to 3 attempts, 10 s apart\)/);
+      } finally {
+        await new Promise((resolve) => flaky.close(resolve));
+      }
+    });
+
+    it('an always-404 http check is still a FAIL after 3 attempts', async () => {
+      let hits = 0;
+      const gone = http.createServer((req, res) => { hits += 1; res.writeHead(404); res.end('nope'); });
+      await new Promise((resolve) => gone.listen(0, '127.0.0.1', resolve));
+      try {
+        const url = `http://127.0.0.1:${gone.address().port}/missing`;
+        const epicId = 'epic-retry404';
+        const { cwd, recPath } = fixture(epicId, '4546-gone', [{ id: 'live', statement: 'route answers', check: { kind: 'http', spec: { url } } }]);
+        const ctx = await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '4547-validate', dependsOn: ['4546-gone'] }, { httpRetry: { delayMs: 5 } });
+        assert.equal(hits, 3);
+        assert.deepEqual(ctx.expected['4546-gone'], { ids: ['live'], failedIds: ['live'] });
+        const row = JSON.parse(fs.readFileSync(recPath, 'utf8')).checks.find((c) => c.id === 'live');
+        assert.equal(row.ok, false);
+        assert.equal(row.attempts, 3);
+        const line = ctx.section.split('\n').find((l) => l.includes('`live`'));
+        assert.match(line, /FAIL/);
+        assert.ok(line.includes('(3 attempts)'), line);
+      } finally {
+        await new Promise((resolve) => gone.close(resolve));
+      }
+    });
+  });
+});
+
+describe('formatCriteriaChecksSection attempts suffix', () => {
+  const criteria = [
+    { id: 'one', statement: 's1', check: { kind: 'http', spec: { url: 'http://127.0.0.1:1/' } } },
+    { id: 'none', statement: 's2', check: { kind: 'file', spec: 'a.txt' } },
+    { id: 'three', statement: 's3', check: { kind: 'http', spec: { url: 'http://127.0.0.1:1/' } } },
+  ];
+  const checks = [
+    { id: 'one', ok: true, detail: 'HTTP 200', ranAt: '2026-11-24T00:00:00.000Z', attempts: 1 },
+    { id: 'none', ok: true, detail: 'exists', ranAt: '2026-11-24T00:00:00.000Z' },
+    { id: 'three', ok: false, detail: 'HTTP 404, expected 200', ranAt: '2026-11-24T00:00:00.000Z', attempts: 3 },
+  ];
+  const section = formatCriteriaChecksSection([{ slug: '4546-x', criteria, checks }]);
+  const line = (id) => section.split('\n').find((l) => l.includes(`\`${id}\``));
+
+  it('prints no suffix for attempts 1 or absent', () => {
+    assert.doesNotMatch(line('one'), /attempts?\)/);
+    assert.doesNotMatch(line('none'), /attempts?\)/);
+  });
+
+  it('prints (N attempts) right after the ranAt part when N > 1', () => {
+    assert.ok(line('three').includes('FAIL (ran 2026-11-24T00:00:00.000Z) (3 attempts) — HTTP 404'), line('three'));
   });
 });

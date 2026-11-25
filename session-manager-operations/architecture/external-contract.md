@@ -860,7 +860,7 @@ threshold or lift the hold.
 ## Paired services (over the relay)
 
 A service that does not run on this machine (first one: Kiln) can still hand work to Session Manager. It
-pairs once, like the phone, and then calls six MCP tools through the bilko.run Web Remote relay. Every
+pairs once, like the phone, and then calls seven MCP tools through the bilko.run Web Remote relay. Every
 message is end-to-end encrypted; the relay sees only boxes. The desktop answers each call by running the
 same loopback admin route the tool mirrors, so the answers have the shapes in sections 2-4.
 
@@ -890,12 +890,13 @@ Enforced on the desktop by [`serviceMcpSession.cjs`](../../src/main/lib/feedback
 | `replyMode` default `event` | A service has no chat to wake, so a missing `replyMode` becomes `event`. Replies arrive as `epic_cross_project_reply` rows through `events_read`. |
 | `cmd:mcp` only | A service may send only boxed `cmd:mcp` envelopes. Anything else is refused with an opaque `rejected` and written to the audit log. |
 | No env identity | `originClaudeSessionId` / `originProjectRoot` sent by a service are dropped; only a local process may vouch for a session. |
+| Projects folder binds `parentDir` | `project_create` always runs in the projects folder the owner approved at pairing. A pairing without one is refused with 403 (audit `refused:projectRoot`; re-pair to grant the tool). A `parentDir` that does not resolve to that folder is refused with 403 (audit `refused:parentDir`; the answer names the approved `projectRoot`). `fromCwd` is always the service's home project; one sent by the service is overwritten. |
 
-### The six tools
+### The seven tools
 
 Defined once in [`serviceMcpTools.cjs`](../../src/main/lib/feedback-remote/serviceMcpTools.cjs). The first four share their
 `inputSchema` objects with the local stdio MCP server, so a service and a local agent see the same schemas.
-`macro_run` and `events_read` are served only to a paired service.
+`macro_run`, `events_read` and `project_create` are served only to a paired service.
 
 | Tool | Arguments (required in **bold**) | Route it mirrors |
 | --- | --- | --- |
@@ -905,10 +906,93 @@ Defined once in [`serviceMcpTools.cjs`](../../src/main/lib/feedback-remote/servi
 | `macro_run` | **`cwd`**, **`id`**, `inputs` (string map), `effort`, `externalRef` | `POST /admin/macros/run` (§2 B) |
 | `epic_get` | **`cwd`**, exactly one of `id` / `externalRef`, `receipt` | `GET /admin/epic` (§3) |
 | `events_read` | `after`, `kinds` (`epic_state_changed`, `epic_cross_project_reply`), `limit` (1-500) | `GET /admin/events` (§4) |
+| `project_create` | **`name`**, **`externalRef`**, `github`, `parentDir` | `POST /admin/projects/create` |
 
 The schema says `fromCwd` is required for `feedback_open_session`, but a service may leave it out (see the
 scope table). A tool result is MCP `content: [{ type: 'text', text: <route JSON> }]`, with `isError: true`
 when the route answered outside 2xx.
+
+### project_create
+
+Creates a new local project for the service, and optionally a private GitHub repo for it, so the service
+can open its first session there. The owner grants it by ticking **Create projects** at pairing; it is off
+unless ticked, and the dialog then asks for the projects folder. Logic:
+[`projectCreate.cjs`](../../src/main/lib/feedback-remote/projectCreate.cjs).
+
+**Arguments**
+
+| Argument | Meaning |
+| --- | --- |
+| **`name`** | The folder name: 1 to 100 letters, digits or `. _ -`, starting with a letter or digit, not ending in `.git`. It is used as given (no trimming). The project becomes `<projects folder>/<name>`. |
+| **`externalRef`** | Your own id for this project, with the [`externalRef` rules](#externalref-rules-srcmainlibepicexternalrefcjs). Required. |
+| `github` | Leave out (or `false`) for no repo. `true` or `{ private: true }` creates a private repo. `{ owner }` is allowed only when it names the account `gh` is signed in as (case-insensitive). `{ private: false }` is refused: only private repos are created. |
+| `parentDir` | Optional. Only the approved projects folder is accepted (see the scope table); leave it out to use that folder. |
+
+**What a create does.** It makes the folder (never its parents), runs `git init` on `main`, makes one empty
+commit (so Epic worktrees can fork), creates the bare `session-manager-operations/` root (so
+`feedback_open_session` accepts the folder as `toCwd`) and records the project in a ledger. With `github`,
+it then runs `gh repo create <owner>/<name> --private --source=<cwd> --remote=origin --push`. `<owner>` is
+always the account `gh` is signed in as. Creates run one at a time.
+
+**The answer** (200):
+
+```json
+{
+  "ok": true,
+  "status": "created",
+  "cwd": "/home/me/Projects/<name>",
+  "name": "<name>",
+  "externalRef": "kiln:idea-42",
+  "repo": { "fullName": "<owner>/<name>", "url": "https://github.com/<owner>/<name>", "private": true }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `created` for a new project, `existing` for a repeat. |
+| `existing` | `true`, only when `status` is `existing`. |
+| `cwd` | The absolute project folder. Use it as `toCwd`. |
+| `name` | The folder name (for a repeat, the recorded folder's name). |
+| `externalRef` | Your id, normalized. |
+| `repo` | `{ fullName, url, private: true }`, or `null` when no GitHub repo is set as `origin`. |
+| `github` | Present only when the GitHub step failed: `{ ok: false, error }`. |
+
+**Idempotency.** A project is keyed by the service's home project plus `externalRef`. A repeat call with
+the same key creates nothing and answers `status: 'existing'` with the recorded `cwd`, whatever `name` it
+sends. Its `repo` is read from the folder's `origin`. A repeat with `github` on a project that has no
+`origin` yet runs the GitHub step again, so a failed repo can be retried.
+
+**GitHub failure.** A failed `gh repo create` (or an `origin` that is not a GitHub remote afterwards) keeps
+the local project. The answer is still 200 with `ok: true`, `repo: null` and
+`github: { ok: false, error }`. Retry with the same `externalRef` to try GitHub again.
+
+**Refusals.** Every refusal is `{ ok: false, status, code, error }` with the HTTP status below, checked in
+this order. Nothing is created on a refusal: all input checks (including `gh`) run before any disk write,
+and a failure after the folder is made removes it again.
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 400 | `invalid-ref` | `externalRef` is missing or breaks its rules, or `fromCwd` is not an absolute path. |
+| 400 | `invalid-parent` | `parentDir` is not an absolute path, is outside the allowed roots, does not exist or is not a folder. |
+| 400 | `invalid-name` | `name` breaks the rules above. |
+| 400 | `invalid-github` | `github` is not `true`, `false` or an object; `private` is `false` or not a boolean `true`; `owner` is empty or not a string. |
+| 400 | `gh-unavailable` | `github` was asked for, but `gh` is missing, not signed in, or returned no login. |
+| 403 | `gh-owner` | `github.owner` is not the account `gh` is signed in as. |
+| 409 | `gone` | A repeat, but the recorded folder no longer exists. |
+| 409 | `exists` | A folder with that name is already in the projects folder (and it is not this `externalRef`'s project). |
+| 500 | `io` | The folder, `git init`, the empty commit, the operations root or the ledger write failed. The folder is removed. A missing git identity adds a hint to set `user.name` / `user.email`. |
+
+A body that is not JSON is answered 400 `{ ok: false, error: 'invalid JSON body' }`. The two scope
+refusals (`refused:projectRoot`, `refused:parentDir`) are 403 `{ ok: false, error }` from the desktop
+before the route runs.
+
+**After a create.** A fresh create opens the folder as a dormant tab in the app, and
+`feedback_list_projects` lists it at once. The usual flow:
+
+1. `project_create` `{ name, externalRef, github: { private: true } }` → `cwd`.
+2. `feedback_open_session` with `toCwd` = that `cwd`, `tag: 'feature'` and an `externalRef` of your own for
+   the session (§2 A).
+3. Follow it with `epic_get` (`cwd`, `externalRef`) and `events_read` (§3, §4).
 
 ### The Node bridge: `service pair` and `service mcp`
 

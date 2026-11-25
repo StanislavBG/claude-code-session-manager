@@ -577,10 +577,14 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   // caller didn't already give an explicit dependsOn (that already fixes
   // its position in some chain) — joining an Epic whose sourcePromptId this
   // PRD shares. See prdDisposition.cjs's header for the full contract.
+  // Slugs this pre-lock read saw: the in-lock same-Epic re-check refuses only rows
+  // written since (null = no pre-lock read, every same-Epic row counts as new).
+  let seenBeforeLock = null;
   if (input.sourcePromptId && (!input.dependsOn || input.dependsOn.length === 0)) {
     let epicRows = [];
     try {
       const listing = await remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
+      seenBeforeLock = new Set((listing?.prds ?? []).map((r) => r?.slug));
       epicRows = (listing?.prds ?? []).filter((p) => p.sourcePromptId === input.sourcePromptId);
     } catch (e) {
       console.warn(`[prdCreate] disposition resolution skipped (listPrds failed): ${e?.message ?? e}`);
@@ -841,229 +845,264 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     }
   }
 
-  // One full listing (slug/epicId/status per live + archived PRD) serves both the
-  // cross-Epic duplicate guard below and the dependsOn FK check after NN allocation.
-  // A read failure is skipped-with-a-warning, never a write outage.
-  const needCrossEpicGuard = opts.internalMint !== true;
-  let listing = null;
-  const hasFixes = input.fixes !== undefined && input.fixes !== null;
-  if (needCrossEpicGuard || hasFixes || (input.dependsOn && input.dependsOn.length) || (filesList && filesList.length)) {
-    try {
-      listing = opts.listingCache
-        ? await (opts.listingCache.promise ??= remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER }))
-        : await remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
-    } catch (e) {
-      console.warn(`[prdCreate] listPrds failed (cross-Epic duplicate + dependsOn checks skipped): ${e?.message ?? e}`);
-      listing = null;
-    }
-  }
-
-  // Cross-Epic duplicate guard: refused before NN allocation so it burns no number.
+  // Everything from the listing read through remote.writePrd runs as one phase.
+  // A real create runs it inside the per-project create lock on a FRESH listing
+  // (2026-11-24 Bilko 2001/2005: a create read its listing, awaited NN
+  // allocation, and wrote while another Epic's create wrote the same bare slug).
+  // A dry run (createPrdBatch's validate pass) takes no lock; the batch re-checks
+  // inside the lock itself. The phase returns an early-refusal / dry-run result,
+  // or null once the file is written (writeResult, nn, filenameSlug,
+  // duplicateAllowed and input are set on the closure).
   let duplicateAllowed = null;
-  if (needCrossEpicGuard && listing) {
-    const dups = findCrossEpicDuplicates(slug, input.sourcePromptId ?? null, listing.prds ?? []);
-    if (dups.length) {
-      const allowed = new Set(Array.isArray(input.allowDuplicateOf) ? input.allowDuplicateOf : []);
-      if (!dups.every((r) => allowed.has(r.slug))) {
-        return { ok: false, applied: false, status: 409, error: crossEpicDuplicateError(slug, dups) };
+  let nn;
+  let filenameSlug;
+  let writeResult;
+  const createPhase = async () => {
+    // One full listing (slug/epicId/status per live + archived PRD) serves both the
+    // cross-Epic duplicate guard below and the dependsOn FK check after NN allocation.
+    // A read failure is skipped-with-a-warning, never a write outage.
+    const needCrossEpicGuard = opts.internalMint !== true;
+    let listing = null;
+    const hasFixes = input.fixes !== undefined && input.fixes !== null;
+    if (needCrossEpicGuard || hasFixes || (input.dependsOn && input.dependsOn.length) || (filesList && filesList.length)) {
+      try {
+        const q = { cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER };
+        if (!opts.dryRun) listing = await remote.listPrds({ ...q, fresh: true });
+        else if (opts.listingCache) listing = await (opts.listingCache.promise ??= remote.listPrds(q));
+        else listing = await remote.listPrds(q);
+      } catch (e) {
+        console.warn(`[prdCreate] listPrds failed (cross-Epic duplicate + dependsOn checks skipped): ${e?.message ?? e}`);
+        listing = null;
       }
-      duplicateAllowed = dups.map((r) => ({ slug: r.slug, epicId: r.epicId, status: r.status ?? null }));
     }
-  }
 
-  // Cross-Epic files-overlap advisory: a warning, never a refusal.
-  // Skipped on a dry run: createPrdBatch re-runs it on a fresh listing inside the
-  // create lock, so the batch never reports a warning twice.
-  if (!opts.dryRun && listing && filesList && filesList.length) {
-    extraWarnings.push(...await crossEpicFilesOverlapWarnings(filesList, input.sourcePromptId ?? null, listing.prds ?? [], remote, input.cwd));
-  }
-
-  // fixes: shape-checked and resolved to full NN slugs before NN allocation, so a
-  // refusal burns no number. Fail-closed when the listing could not be read — an
-  // unresolved fixes link would miscount escapes.
-  if (hasFixes) {
-    const shapeErrors = validateFixesShape(input.fixes, slug);
-    if (shapeErrors.length) {
-      return { ok: false, applied: false, status: 400, error: shapeErrors.join('; ') };
-    }
-    if (!listing) {
-      return { ok: false, applied: false, status: 503, error: 'fixes could not be checked: the PRD listing for this project could not be read — retry' };
-    }
-    const r = resolveFixes(input.fixes, listing.prds ?? [], { epicId: input.sourcePromptId ?? null });
-    if (r.errors.length) return { ok: false, applied: false, status: 400, error: r.errors.join('; ') };
-    extraWarnings.push(...r.warnings);
-    input = { ...input, fixes: r.fixes };
-  }
-
-  // Dry run burns no number: a placeholder keeps the filename-shaped guards below meaningful.
-  const nn = opts.dryRun ? 9999999 : await remote.allocateParallelGroup(input.cwd);
-  const filenameSlug = `${nn}-${slug}`;
-
-  // Fix-chain depth guard (PRD 1113): refuse a fix-of-a-fix before it's ever
-  // written. depth >= 2 means the base job has already failed to close via
-  // at least one prior fix attempt for reasons a repeat attempt won't
-  // resolve — checked first so this distinct, human-escalation error still
-  // wins over the more general fix-plan-slug guard below for that shape.
-  const chainDepth = fixChainDepthOf(filenameSlug);
-  if (chainDepth > FIX_CHAIN_DEPTH_CAP) {
-    const base = baseSlugOf(filenameSlug);
-    return {
-      ok: false, applied: false,
-      status: 409,
-      error: `Fix-chain depth cap exceeded: "${base}" has already failed to close ${chainDepth} time(s) for ` +
-        `infrastructure reasons (refusing to write "${filenameSlug}.md" at depth ${chainDepth}). Authoring a ` +
-        'deeper fix PRD is not the correct response — stop and surface this to a human instead of retrying again.',
-    };
-  }
-
-  // Fix-plan-slug collision guard (PRD 1131): a caller-supplied or
-  // title-derived slug that happens to start with "fix-" collides with the
-  // scheduler's own NN-fix-... naming convention for fix plans it authors
-  // itself (spawnInvestigation) — and that shape carries real special-case
-  // semantics (depth-capped auto-investigation eligibility,
-  // commitGuardVerdict's zero-edit exemption) that a PRD authored through
-  // this API never asked for. Refused outright, not silently renamed, same
-  // fail-closed posture as the SLUG_HAS_NN_PREFIX_RE check above (PRD 1126:
-  // "126-fix-plan-death-reopens-parent" was wrongly stamped
-  // investigationDepth before it ever ran and had to be withdrawn). This
-  // subsumes the depth-1 case the chain-depth guard above deliberately let
-  // through (MAX_INVESTIGATION_DEPTH=1 means a first fix-plan is legitimate
-  // — but only when spawnInvestigation authors it, never through this API).
-  if (isFixPlanSlug(filenameSlug)) {
-    return {
-      ok: false, applied: false,
-      status: 400,
-      error: `slug "${filenameSlug}" collides with the reserved NN-fix-... fix-plan naming convention ` +
-        '(reserved for PRDs the scheduler\'s own investigation loop authors itself). Reword the title/slug ' +
-        'so it does not start with "fix-" — e.g. "resolve-x" or "repair-x" instead of "fix-x".',
-    };
-  }
-
-  // An explicit `parallelGroup` bypasses allocateParallelGroup()'s
-  // collision-proof reservation, so re-check for an existing file at
-  // this exact destination before writing — remote.writePrd itself has
-  // no existence guard (by design, it doubles as the edit-in-place
-  // path for Scheduler UI PRD edits), so "create" must not silently
-  // clobber an existing job's PRD.
-  const existing = opts.dryRun ? null : await remote.readPrd(filenameSlug, input.cwd);
-  if (existing?.ok) {
-    return { ok: false, applied: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
-  }
-
-  // Write-time FK check (throw on write, report on read — see
-  // prdAgentType.cjs's header): a caller-supplied agentType that doesn't
-  // resolve to a readable persona file is rejected before anything is
-  // written, naming the available personas. A no-op when agentType is
-  // omitted — buildPrdBody fills in DEFAULT_PRD_AGENT_TYPE for that case,
-  // and the default persona is trusted without a lookup.
-  if (input.agentType) {
-    try {
-      await assertAgentTypeWritable(input.cwd, input.agentType);
-    } catch (e) {
-      return { ok: false, applied: false, status: 400, error: e?.message ?? 'invalid agentType' };
-    }
-  }
-
-  // Write-time FK check for dependsOn (report on read / throw on write — see
-  // prdAgentType.cjs's header): every entry must resolve to a PRD that
-  // actually exists in this project, using the SAME resolution rule
-  // schedulerBatch.cjs's findBlockingDep applies at run time (exact slug,
-  // else bare-name after stripping one leading `NN-`) — a dep that
-  // validates here is guaranteed to be a dep findBlockingDep can actually
-  // see later. A listPrds() read failure is skipped-with-a-warning, never a
-  // write outage: an I/O hiccup on the read side must not block every PRD
-  // write in the project.
-  let depRows = null;
-  if (input.dependsOn && input.dependsOn.length) {
-    if (listing) {
-      depRows = listing.prds ?? [];
-      const candidateSlugs = [...depRows.map((p) => p.slug), ...(opts.extraDepSlugs ?? [])];
-      for (const dep of input.dependsOn) {
-        if (resolveDepSlug(dep, candidateSlugs).length > 0) continue;
-        const near = findNearMatches(dep, candidateSlugs);
-        const suggestion = near.length ? ` Closest existing slug(s): ${near.join(', ')}.` : '';
+    // Same-Epic re-check on the fresh listing, inside the lock: a same-Epic create
+    // that wrote this bare slug since the pre-lock reads is refused here,
+    // before NN allocation, with the directory scan's own wording.
+    if (!opts.dryRun && listing && input.sourcePromptId && !isFixPlanSlug(`0-${slug}`)) {
+      const target = bareSlug(slug);
+      const same = (listing.prds ?? []).find((r) => r && typeof r.slug === 'string'
+        && r.epicId === input.sourcePromptId && !(seenBeforeLock && seenBeforeLock.has(r.slug))
+        && bareSlug(r.slug) === target);
+      if (same) {
         return {
           ok: false, applied: false,
-          status: 400,
-          error: `dependsOn entry "${dep}" does not resolve to any existing PRD in this project.${suggestion} ` +
-            'Pass the bare name (preferred) or the exact NN-prefixed slug of an existing PRD.',
+          status: 409,
+          error: `A PRD with slug "${slug}" already exists in this Epic as "${same.slug}.md". Its work may already have landed. ` +
+            'Use scheduler_update_prd / scheduler_reset_job on it, or pick a distinct slug.',
         };
       }
     }
-  }
 
-  // Store every dependsOn entry as the full NN slug it resolved to (queue rows keep
-  // dependsOn verbatim, so a bare name would silently re-point at a later same-name
-  // PRD). Batch siblings stay bare here — createPrdBatch rewrites them to the
-  // sibling's allocated slug once NNs exist — and are excluded from planId
-  // inheritance (they share the batch's planId).
-  const batchSiblingDeps = new Set();
-  if (input.dependsOn && input.dependsOn.length && depRows) {
-    const resolvedDeps = resolveDependsOnToFullSlugs(input.dependsOn, depRows, {
-      epicId: input.sourcePromptId ?? null,
-      siblingSlugs: opts.extraDepSlugs ?? [],
-    });
-    for (const d of resolvedDeps.siblingDeps) batchSiblingDeps.add(d);
-    extraWarnings.push(...resolvedDeps.warnings);
-    input = { ...input, dependsOn: resolvedDeps.dependsOn };
-  }
-
-  // planId is API-owned: any caller-supplied value is discarded. Inherited from the
-  // resolved dependencies (append terminals or explicit dependsOn) using the FK-check
-  // listing above; otherwise (first-ever / new-head / legacy deps) freshly minted.
-  let planId = null;
-  if (input.dependsOn && input.dependsOn.length && depRows) {
-    const inherited = resolveInheritedPlanId(
-      input.dependsOn.filter((d) => !batchSiblingDeps.has(d)),
-      depRows,
-      // Scoped only when this PRD has an Epic: an Epic-less PRD has no plan boundary to protect.
-      input.sourcePromptId ? { epicId: input.sourcePromptId } : {},
-    );
-    planId = inherited.planId;
-    if (inherited.diverged) {
-      console.warn(`[prdCreate] dependsOn spans plans ${inherited.diverged.join(', ')} — inheriting ${planId} (lowest-numbered dependency)`);
+    // Cross-Epic duplicate guard: refused before NN allocation so it burns no number.
+    if (needCrossEpicGuard && listing) {
+      const dups = findCrossEpicDuplicates(slug, input.sourcePromptId ?? null, listing.prds ?? []);
+      if (dups.length) {
+        const allowed = new Set(Array.isArray(input.allowDuplicateOf) ? input.allowDuplicateOf : []);
+        if (!dups.every((r) => allowed.has(r.slug))) {
+          return { ok: false, applied: false, status: 409, error: crossEpicDuplicateError(slug, dups) };
+        }
+        duplicateAllowed = dups.map((r) => ({ slug: r.slug, epicId: r.epicId, status: r.status ?? null }));
+      }
     }
-  }
-  const inheritedPlanId = planId;
-  if (!planId) planId = mintPlanId();
 
-  const body = buildPrdBody({ ...input, planId, gate: gateCommands, files: filesList });
+    // Cross-Epic files-overlap advisory: a warning, never a refusal.
+    // Skipped on a dry run: createPrdBatch re-runs it on a fresh listing inside the
+    // create lock, so the batch never reports a warning twice.
+    if (!opts.dryRun && listing && filesList && filesList.length) {
+      extraWarnings.push(...await crossEpicFilesOverlapWarnings(filesList, input.sourcePromptId ?? null, listing.prds ?? [], remote, input.cwd));
+    }
 
-  // Read-back check (gate-and-files-in-PRD-body unit): the whole point of a
-  // declared gate is that the scheduler's own reader (resolveGate/parseChain
-  // in definitionOfDone.cjs) gets back exactly what was declared. A stray
-  // ```gate fence elsewhere in the body (goal/notes/criteria/out-of-scope)
-  // would otherwise win — readExplicitGate takes the FIRST fence in the
-  // text — and the scheduler would silently re-run the wrong gate. Caught
-  // here, before the write, rather than discovered later from a job log.
-  if (gateCommands) {
-    const expectedSource = gateCommands.length === 1 && isNoneGate(gateCommands[0]) ? 'none' : 'explicit';
-    const expectedSequence = expectedSource === 'none' ? [] : gateCommands.flatMap(parseChain);
-    const resolved = resolveGate(body);
-    const matches = resolved.source === expectedSource
-      && JSON.stringify(resolved.sequence) === JSON.stringify(expectedSequence);
-    if (!matches) {
+    // fixes: shape-checked and resolved to full NN slugs before NN allocation, so a
+    // refusal burns no number. Fail-closed when the listing could not be read — an
+    // unresolved fixes link would miscount escapes.
+    if (hasFixes) {
+      const shapeErrors = validateFixesShape(input.fixes, slug);
+      if (shapeErrors.length) {
+        return { ok: false, applied: false, status: 400, error: shapeErrors.join('; ') };
+      }
+      if (!listing) {
+        return { ok: false, applied: false, status: 503, error: 'fixes could not be checked: the PRD listing for this project could not be read — retry' };
+      }
+      const r = resolveFixes(input.fixes, listing.prds ?? [], { epicId: input.sourcePromptId ?? null });
+      if (r.errors.length) return { ok: false, applied: false, status: 400, error: r.errors.join('; ') };
+      extraWarnings.push(...r.warnings);
+      input = { ...input, fixes: r.fixes };
+    }
+
+    // Dry run burns no number: a placeholder keeps the filename-shaped guards below meaningful.
+    nn = opts.dryRun ? 9999999 : await remote.allocateParallelGroup(input.cwd);
+    filenameSlug = `${nn}-${slug}`;
+
+    // Fix-chain depth guard (PRD 1113): refuse a fix-of-a-fix before it's ever
+    // written. depth >= 2 means the base job has already failed to close via
+    // at least one prior fix attempt for reasons a repeat attempt won't
+    // resolve — checked first so this distinct, human-escalation error still
+    // wins over the more general fix-plan-slug guard below for that shape.
+    const chainDepth = fixChainDepthOf(filenameSlug);
+    if (chainDepth > FIX_CHAIN_DEPTH_CAP) {
+      const base = baseSlugOf(filenameSlug);
+      return {
+        ok: false, applied: false,
+        status: 409,
+        error: `Fix-chain depth cap exceeded: "${base}" has already failed to close ${chainDepth} time(s) for ` +
+          `infrastructure reasons (refusing to write "${filenameSlug}.md" at depth ${chainDepth}). Authoring a ` +
+          'deeper fix PRD is not the correct response — stop and surface this to a human instead of retrying again.',
+      };
+    }
+
+    // Fix-plan-slug collision guard (PRD 1131): a caller-supplied or
+    // title-derived slug that happens to start with "fix-" collides with the
+    // scheduler's own NN-fix-... naming convention for fix plans it authors
+    // itself (spawnInvestigation) — and that shape carries real special-case
+    // semantics (depth-capped auto-investigation eligibility,
+    // commitGuardVerdict's zero-edit exemption) that a PRD authored through
+    // this API never asked for. Refused outright, not silently renamed, same
+    // fail-closed posture as the SLUG_HAS_NN_PREFIX_RE check above (PRD 1126:
+    // "126-fix-plan-death-reopens-parent" was wrongly stamped
+    // investigationDepth before it ever ran and had to be withdrawn). This
+    // subsumes the depth-1 case the chain-depth guard above deliberately let
+    // through (MAX_INVESTIGATION_DEPTH=1 means a first fix-plan is legitimate
+    // — but only when spawnInvestigation authors it, never through this API).
+    if (isFixPlanSlug(filenameSlug)) {
       return {
         ok: false, applied: false,
         status: 400,
-        error: 'The PRD text already holds a gate fence (three backticks + gate), so the scheduler would read '
-          + 'the wrong gate. Remove it from the goal, implementation notes, acceptance criteria, out of scope '
-          + 'or files, and call again.',
+        error: `slug "${filenameSlug}" collides with the reserved NN-fix-... fix-plan naming convention ` +
+          '(reserved for PRDs the scheduler\'s own investigation loop authors itself). Reword the title/slug ' +
+          'so it does not start with "fix-" — e.g. "resolve-x" or "repair-x" instead of "fix-x".',
       };
     }
-  }
 
-  if (opts.dryRun) {
-    return {
-      ok: true, dryRun: true, slug, input, gateCommands, filesList,
-      inheritedPlanId, duplicateAllowed, warnings: [...extraWarnings, ...sizingWarnings(input)],
-    };
-  }
+    // An explicit `parallelGroup` bypasses allocateParallelGroup()'s
+    // collision-proof reservation, so re-check for an existing file at
+    // this exact destination before writing — remote.writePrd itself has
+    // no existence guard (by design, it doubles as the edit-in-place
+    // path for Scheduler UI PRD edits), so "create" must not silently
+    // clobber an existing job's PRD.
+    const existing = opts.dryRun ? null : await remote.readPrd(filenameSlug, input.cwd);
+    if (existing?.ok) {
+      return { ok: false, applied: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
+    }
 
-  const writeResult = await remote.writePrd(filenameSlug, body, input.cwd);
-  if (!writeResult?.ok) {
-    return { ok: false, applied: false, status: 500, error: writeResult?.error ?? 'write failed' };
-  }
+    // Write-time FK check (throw on write, report on read — see
+    // prdAgentType.cjs's header): a caller-supplied agentType that doesn't
+    // resolve to a readable persona file is rejected before anything is
+    // written, naming the available personas. A no-op when agentType is
+    // omitted — buildPrdBody fills in DEFAULT_PRD_AGENT_TYPE for that case,
+    // and the default persona is trusted without a lookup.
+    if (input.agentType) {
+      try {
+        await assertAgentTypeWritable(input.cwd, input.agentType);
+      } catch (e) {
+        return { ok: false, applied: false, status: 400, error: e?.message ?? 'invalid agentType' };
+      }
+    }
+
+    // Write-time FK check for dependsOn (report on read / throw on write — see
+    // prdAgentType.cjs's header): every entry must resolve to a PRD that
+    // actually exists in this project, using the SAME resolution rule
+    // schedulerBatch.cjs's findBlockingDep applies at run time (exact slug,
+    // else bare-name after stripping one leading `NN-`) — a dep that
+    // validates here is guaranteed to be a dep findBlockingDep can actually
+    // see later. A listPrds() read failure is skipped-with-a-warning, never a
+    // write outage: an I/O hiccup on the read side must not block every PRD
+    // write in the project.
+    let depRows = null;
+    if (input.dependsOn && input.dependsOn.length) {
+      if (listing) {
+        depRows = listing.prds ?? [];
+        const candidateSlugs = [...depRows.map((p) => p.slug), ...(opts.extraDepSlugs ?? [])];
+        for (const dep of input.dependsOn) {
+          if (resolveDepSlug(dep, candidateSlugs).length > 0) continue;
+          const near = findNearMatches(dep, candidateSlugs);
+          const suggestion = near.length ? ` Closest existing slug(s): ${near.join(', ')}.` : '';
+          return {
+            ok: false, applied: false,
+            status: 400,
+            error: `dependsOn entry "${dep}" does not resolve to any existing PRD in this project.${suggestion} ` +
+              'Pass the bare name (preferred) or the exact NN-prefixed slug of an existing PRD.',
+          };
+        }
+      }
+    }
+
+    // Store every dependsOn entry as the full NN slug it resolved to (queue rows keep
+    // dependsOn verbatim, so a bare name would silently re-point at a later same-name
+    // PRD). Batch siblings stay bare here — createPrdBatch rewrites them to the
+    // sibling's allocated slug once NNs exist — and are excluded from planId
+    // inheritance (they share the batch's planId).
+    const batchSiblingDeps = new Set();
+    if (input.dependsOn && input.dependsOn.length && depRows) {
+      const resolvedDeps = resolveDependsOnToFullSlugs(input.dependsOn, depRows, {
+        epicId: input.sourcePromptId ?? null,
+        siblingSlugs: opts.extraDepSlugs ?? [],
+      });
+      for (const d of resolvedDeps.siblingDeps) batchSiblingDeps.add(d);
+      extraWarnings.push(...resolvedDeps.warnings);
+      input = { ...input, dependsOn: resolvedDeps.dependsOn };
+    }
+
+    // planId is API-owned: any caller-supplied value is discarded. Inherited from the
+    // resolved dependencies (append terminals or explicit dependsOn) using the FK-check
+    // listing above; otherwise (first-ever / new-head / legacy deps) freshly minted.
+    let planId = null;
+    if (input.dependsOn && input.dependsOn.length && depRows) {
+      const inherited = resolveInheritedPlanId(
+        input.dependsOn.filter((d) => !batchSiblingDeps.has(d)),
+        depRows,
+        // Scoped only when this PRD has an Epic: an Epic-less PRD has no plan boundary to protect.
+        input.sourcePromptId ? { epicId: input.sourcePromptId } : {},
+      );
+      planId = inherited.planId;
+      if (inherited.diverged) {
+        console.warn(`[prdCreate] dependsOn spans plans ${inherited.diverged.join(', ')} — inheriting ${planId} (lowest-numbered dependency)`);
+      }
+    }
+    const inheritedPlanId = planId;
+    if (!planId) planId = mintPlanId();
+
+    const body = buildPrdBody({ ...input, planId, gate: gateCommands, files: filesList });
+
+    // Read-back check (gate-and-files-in-PRD-body unit): the whole point of a
+    // declared gate is that the scheduler's own reader (resolveGate/parseChain
+    // in definitionOfDone.cjs) gets back exactly what was declared. A stray
+    // ```gate fence elsewhere in the body (goal/notes/criteria/out-of-scope)
+    // would otherwise win — readExplicitGate takes the FIRST fence in the
+    // text — and the scheduler would silently re-run the wrong gate. Caught
+    // here, before the write, rather than discovered later from a job log.
+    if (gateCommands) {
+      const expectedSource = gateCommands.length === 1 && isNoneGate(gateCommands[0]) ? 'none' : 'explicit';
+      const expectedSequence = expectedSource === 'none' ? [] : gateCommands.flatMap(parseChain);
+      const resolved = resolveGate(body);
+      const matches = resolved.source === expectedSource
+        && JSON.stringify(resolved.sequence) === JSON.stringify(expectedSequence);
+      if (!matches) {
+        return {
+          ok: false, applied: false,
+          status: 400,
+          error: 'The PRD text already holds a gate fence (three backticks + gate), so the scheduler would read '
+            + 'the wrong gate. Remove it from the goal, implementation notes, acceptance criteria, out of scope '
+            + 'or files, and call again.',
+        };
+      }
+    }
+
+    if (opts.dryRun) {
+      return {
+        ok: true, dryRun: true, slug, input, gateCommands, filesList,
+        inheritedPlanId, duplicateAllowed, warnings: [...extraWarnings, ...sizingWarnings(input)],
+      };
+    }
+
+    writeResult = await remote.writePrd(filenameSlug, body, input.cwd);
+    if (!writeResult?.ok) {
+      return { ok: false, applied: false, status: 500, error: writeResult?.error ?? 'write failed' };
+    }
+    return null;
+  };
+  const early = opts.dryRun ? await createPhase() : await withProjectCreateLock(cwd, createPhase);
+  if (early) return early;
 
   // Trace-back point for "who/what created this PRD" (auditLog.cjs) — every
   // PRD write, whether from the admin/MCP route or the renderer's chat:create-prd

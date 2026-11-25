@@ -37,8 +37,9 @@ afterAll(() => {
 
 afterEach(() => { billing.fetchUsage = originalFetchUsage; });
 
-// Relative to now: a reset in the past no longer holds.
-const RESET = new Date(Date.now() + 3 * 86_400_000).toISOString();
+// Relative to now: a reset in the past no longer holds. Past one week out the
+// pro-rated threshold (utilizationHold.proRatedThreshold) stays at the 90 base.
+const RESET = new Date(Date.now() + 7 * 86_400_000 + 3_600_000).toISOString();
 const SESSION_RESET = new Date(Date.now() + 2 * 3_600_000).toISOString();
 function usageWith(weeklyPct) {
   return {

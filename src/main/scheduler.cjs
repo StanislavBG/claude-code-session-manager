@@ -1089,12 +1089,93 @@ function loadSchedulerState() {
       ? s.cachedUtilizationKnown
       : typeof cachedUtilization === 'number';
     restoredUsageWindows = isValidUsageWindowList(s.usageWindows) ? s.usageWindows : null;
+    openAutoDispatchHold = restoreOpenAutoDispatchHold(s.openAutoDispatchHold);
   } catch { /* first boot or corrupt — start fresh */ }
 }
 
 /** Test-only seam: the module-level fields loadSchedulerState() restores that have no other exported reader. */
 function getSchedulerStateSnapshot() {
   return { lastPollOk, lastFailureKind, backoffNextAt, cachedUtilization, cachedBindingWindowName };
+}
+
+/** A persisted open hold is trusted only with a string holdKey and a parseable startedAt; restored ones are marked. */
+function restoreOpenAutoDispatchHold(v) {
+  if (!v || typeof v !== 'object' || typeof v.holdKey !== 'string') return null;
+  if (typeof v.startedAt !== 'string' || !Number.isFinite(Date.parse(v.startedAt))) return null;
+  return {
+    holdKey: v.holdKey,
+    reason: typeof v.reason === 'string' ? v.reason : null,
+    window: typeof v.window === 'string' ? v.window : null,
+    threshold: Number.isFinite(v.threshold) ? v.threshold : null,
+    resetsAt: typeof v.resetsAt === 'string' ? v.resetsAt : null,
+    startedAt: v.startedAt,
+    maxPercent: Number.isFinite(v.maxPercent) ? v.maxPercent : null,
+    heldTicks: Number.isFinite(v.heldTicks) ? v.heldTicks : 0,
+    restored: true,
+  };
+}
+
+/** Test-only seam: the open audit hold, and a reset that drops it from memory (a simulated process exit). */
+function _getOpenAutoDispatchHoldForTests() { return openAutoDispatchHold; }
+function _forgetOpenAutoDispatchHoldForTests() { openAutoDispatchHold = null; }
+
+/**
+ * Track the auto-dispatch hold in audit-log.jsonl: one started event when a
+ * hold opens, one ended event when it lifts or its identity changes. Never
+ * throws (an audit failure must not break the tick).
+ * @param {object | null} hold currentAutoDispatchHold() result
+ * @param {number} pending pending-row count for the started event
+ */
+function trackAutoDispatchHoldAudit(hold, pending) {
+  try {
+    const identity = hold ? autoDispatchHold.holdIdentityKey(hold) : null;
+    const open = openAutoDispatchHold;
+    if (open && open.holdKey === identity) {
+      if (Number.isFinite(hold.percent) && (open.maxPercent == null || hold.percent > open.maxPercent)) open.maxPercent = hold.percent;
+      open.heldTicks += 1;
+      return;
+    }
+    if (open) {
+      appendAuditEvent('auto_dispatch_hold_ended', {
+        reason: open.reason,
+        window: open.window,
+        threshold: open.threshold,
+        resetsAt: open.resetsAt,
+        holdKey: open.holdKey,
+        startedAt: open.startedAt,
+        endedAt: new Date().toISOString(),
+        maxPercent: open.maxPercent,
+        heldTicks: open.heldTicks,
+        ...(open.restored ? { endedAcrossRestart: true } : {}),
+      });
+      openAutoDispatchHold = null;
+    }
+    if (hold) {
+      appendAuditEvent('auto_dispatch_hold_started', {
+        reason: hold.reason,
+        window: hold.window ?? null,
+        percent: hold.percent ?? null,
+        threshold: hold.threshold ?? null,
+        resetsAt: hold.resetsAt ?? null,
+        holdKey: identity,
+        pending,
+        version: SCHEDULER_BUILD_IDENTITY.version,
+      });
+      openAutoDispatchHold = {
+        holdKey: identity,
+        reason: hold.reason,
+        window: hold.window ?? null,
+        threshold: hold.threshold ?? null,
+        resetsAt: hold.resetsAt ?? null,
+        startedAt: new Date().toISOString(),
+        maxPercent: Number.isFinite(hold.percent) ? hold.percent : null,
+        heldTicks: 1,
+      };
+    }
+    persistSchedulerState();
+  } catch (e) {
+    console.warn('[scheduler] auto-dispatch hold audit failed', e?.message);
+  }
 }
 
 /** A persisted usageWindows list is trusted only if every entry names a window with a finite percent. */
@@ -1144,6 +1225,18 @@ function persistSchedulerState() {
       // the binding session window.
       cachedUtilizationKnown,
       usageWindows: utilizationReading().windows,
+      openAutoDispatchHold: openAutoDispatchHold
+        ? {
+          holdKey: openAutoDispatchHold.holdKey,
+          reason: openAutoDispatchHold.reason,
+          window: openAutoDispatchHold.window,
+          threshold: openAutoDispatchHold.threshold,
+          resetsAt: openAutoDispatchHold.resetsAt,
+          startedAt: openAutoDispatchHold.startedAt,
+          maxPercent: openAutoDispatchHold.maxPercent,
+          heldTicks: openAutoDispatchHold.heldTicks,
+        }
+        : null,
     });
   } catch (e) {
     console.warn('[scheduler] failed to persist scheduler state', e?.message);
@@ -2662,6 +2755,13 @@ let utilizationHold = null;
 // `${reason}|${window}|${percent}` of the hold last logged — the hold line is
 // written when the hold starts or changes, not on every 30 s tick.
 let lastAutoDispatchHoldKey = null;
+// The auto-dispatch hold currently open in audit-log.jsonl (one
+// auto_dispatch_hold_started written, its _ended not yet): { holdKey, reason,
+// window, threshold, resetsAt, startedAt, maxPercent, heldTicks, restored? },
+// keyed by utilizationHold.holdIdentityKey so percent changes and reset jitter
+// write nothing. Persisted in scheduler-state.json so a restart neither
+// re-opens nor loses it (the heartbeat log keeps only ~18-37 h).
+let openAutoDispatchHold = null;
 // ms timestamp of the last FRESH reset observation (see recordObservedReset)
 // — distinct from Date.now(), so persistSchedulerState never re-stamps a
 // stale cachedNextReset as "just observed" on every poll cycle.
@@ -10150,8 +10250,11 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
       const holdChanged = holdKey !== lastAutoDispatchHoldKey;
       utilizationHold = nextHold;
       lastAutoDispatchHoldKey = holdKey;
+      const pendingCount = hold || openAutoDispatchHold
+        ? state.jobs.filter((j) => j.status === 'pending' && !runningSet.has(j.slug)).length
+        : 0;
+      if (hold || openAutoDispatchHold) trackAutoDispatchHoldAudit(hold, pendingCount);
       if (hold) {
-        const pendingCount = state.jobs.filter((j) => j.status === 'pending' && !runningSet.has(j.slug)).length;
         if (human) {
           console.log(`[scheduler] ${hold.reason}: ${hold.detail} — human run bypassed the hold`);
         } else {
@@ -14962,6 +15065,8 @@ module.exports = {
   loadSchedulerState,
   persistSchedulerState,
   getSchedulerStateSnapshot,
+  _getOpenAutoDispatchHoldForTests,
+  _forgetOpenAutoDispatchHoldForTests,
   computeDegradedBudget,
   utilizationReading,
   usageHoldThreshold,

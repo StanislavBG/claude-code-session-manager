@@ -65,7 +65,9 @@ function okUsage(limits) {
   };
 }
 
-function weekly(pct, resetIn = 3 * DAY) {
+// Resets past one week out keep the pro-rated threshold at the configured base (utilizationHold.proRatedThreshold).
+const FULL_WINDOW = 7 * DAY + HOUR;
+function weekly(pct, resetIn = FULL_WINDOW) {
   return okUsage([
     { kind: 'session', percent: 10, resets_at: iso(2 * HOUR), scope: null },
     { kind: 'weekly_all', percent: pct, resets_at: iso(resetIn), scope: null },
@@ -204,7 +206,7 @@ test('(f) the starvation watchdog forces no tick and warns nothing while the hol
 });
 
 test("(g) Self's outage: the session window reset, weekly_all at 92% still holds", async () => {
-  const weeklyReset = iso(3 * DAY);
+  const weeklyReset = iso(FULL_WINDOW);
   billing.usageCircuit.recordSuccess({});
   billing.fetchUsage = async () => okUsage([
     { kind: 'session', percent: 97, resets_at: iso(-60_000), scope: null },

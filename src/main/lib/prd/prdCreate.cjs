@@ -23,7 +23,7 @@ const { kebabCase } = require('../util/kebabCase.cjs');
 const config = require('../../config.cjs');
 const { expandHome } = require('../util/expandHome.cjs');
 const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
-const { readActiveIndex } = require('../epic/epicMint.cjs');
+const { readActiveIndex, withPathLock } = require('../epic/epicMint.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { fixChainDepthOf, baseSlugOf } = require('../scheduler/fixChainDepth.cjs');
@@ -872,7 +872,9 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
   }
 
   // Cross-Epic files-overlap advisory: a warning, never a refusal.
-  if (listing && filesList && filesList.length) {
+  // Skipped on a dry run: createPrdBatch re-runs it on a fresh listing inside the
+  // create lock, so the batch never reports a warning twice.
+  if (!opts.dryRun && listing && filesList && filesList.length) {
     extraWarnings.push(...await crossEpicFilesOverlapWarnings(filesList, input.sourcePromptId ?? null, listing.prds ?? [], remote, input.cwd));
   }
 
@@ -1149,6 +1151,19 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
 const PRD_BATCH_MAX = 40;
 
 /**
+ * Per-project PRD-create lock (2026-11-24 Bilko 2001/2005: two Epics' batches
+ * validated against listings read before either wrote, then both wrote the same
+ * bare slug). Every PRD create runs in the app's main process (admin routes,
+ * chat:create-prd IPC, in-process mints), so an in-process lock serializes them
+ * all. Keyed by the resolved project cwd (p.input.cwd, already normalized from a
+ * worktree path to the main checkout). Never activeIndexPath(cwd): remote.writePrd
+ * -> ensureEpic takes that lock, so sharing it would deadlock.
+ */
+function withProjectCreateLock(cwd, task) {
+  return withPathLock(`${cwd}\u0000prd-create`, task);
+}
+
+/**
  * Create several PRDs all-or-nothing. Every entry goes through createPrd's own
  * validation (dry run: no NN, no file); `dependsOn` may also name other entries
  * of the batch by bare slug, earlier or later. Only when every entry validates
@@ -1234,37 +1249,98 @@ async function createPrdBatch(inputs, remote, opts = {}) {
       } catch (e) { console.warn(`[prdCreate] batch rollback could not remove ${w.filenameSlug}: ${e?.message ?? e}`); }
     }
   };
-  // Allocate every NN before writing anything, so a dep on a LATER sibling can be
-  // rewritten to that sibling's full `${nn}-${slug}` too. Burned numbers on an
-  // allocation failure leave a gap, never an inconsistency.
-  const nns = [];
-  try {
-    for (const p of prepared) nns.push(await remote.allocateParallelGroup(p.input.cwd));
-  } catch (e) {
-    return fail([{ index: nns.length, slug: prepared[nns.length]?.slug ?? null, error: `NN allocation failed: ${e?.message ?? e}` }]);
-  }
-  const fullDeps = (deps) => (deps && deps.length
-    ? Array.from(new Set(deps.map((d) => (firstIndex.has(d) ? `${nns[firstIndex.get(d)]}-${d}` : d))))
-    : deps);
-  for (let i = 0; i < prepared.length; i++) {
-    const p = prepared[i];
-    let nn; let filenameSlug;
+  const projectCwd = prepared[0].input.cwd;
+  const committed = await withProjectCreateLock(projectCwd, async () => {
+    // Commit-time re-check on a FRESH listing, inside the lock: the validation pass
+    // read its listing 15-25 s ago on a busy machine, and another Epic's create may
+    // have written the same bare slug since. A read failure skips the re-check
+    // (never a write outage).
+    let freshListing = null;
     try {
-      nn = nns[i];
-      filenameSlug = `${nn}-${p.slug}`;
-      const body = buildPrdBody({ ...p.input, dependsOn: fullDeps(p.input.dependsOn), planId, gate: p.gateCommands, files: p.filesList });
-      // A validated preflight must reach the file (PRD 3805 ran unheld when one
-      // was lost); a body without the line rolls the whole batch back.
-      if (p.input.preflight && !/^preflight: /m.test(body)) throw new Error('preflight was not written to the PRD frontmatter');
-      const w = await remote.writePrd(filenameSlug, body, p.input.cwd);
-      if (!w?.ok) throw new Error(w?.error ?? 'write failed');
-      written.push({ filenameSlug, path: w.path ?? null, cwd: p.input.cwd });
-      results.push({ slug: p.slug, nn, filename: `${filenameSlug}.md`, preflight: p.input.preflight || null, warnings: p.warnings });
+      freshListing = await remote.listPrds({ cwd: projectCwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER, fresh: true });
     } catch (e) {
-      await rollback();
-      return fail([{ index: i, slug: p.slug, error: `write failed (batch rolled back): ${e?.message ?? e}` }]);
+      console.warn(`[prdCreate] batch fresh listPrds failed (commit-time duplicate + files-overlap re-checks skipped): ${e?.message ?? e}`);
+      freshListing = null;
     }
-  }
+    const overlapWarnings = prepared.map(() => []);
+    if (freshListing) {
+      const freshRows = freshListing.prds ?? [];
+      // Same-Epic rows already in the validation snapshot were judged by the
+      // validation pass's own-Epic directory scan; only rows written since then
+      // (a concurrent create in this Epic) are refused here.
+      let seenAtValidation = new Set();
+      try {
+        const v = listingCache.promise ? await listingCache.promise : null;
+        seenAtValidation = new Set((v?.prds ?? []).map((r) => r?.slug));
+      } catch { /* validation read failed — every same-Epic row counts as new */ }
+      const refused = [];
+      for (let i = 0; i < prepared.length; i++) {
+        const p = prepared[i];
+        const epicId = p.input.sourcePromptId ?? null;
+        if (opts.internalMint !== true) {
+          const dups = findCrossEpicDuplicates(p.slug, epicId, freshRows);
+          if (dups.length) {
+            const allowed = new Set(Array.isArray(p.input.allowDuplicateOf) ? p.input.allowDuplicateOf : []);
+            if (!dups.every((r) => allowed.has(r.slug))) {
+              refused.push({ index: i, slug: p.slug, error: crossEpicDuplicateError(p.slug, dups), status: 409 });
+              continue;
+            }
+            p.duplicateAllowed = dups.map((r) => ({ slug: r.slug, epicId: r.epicId, status: r.status ?? null }));
+          } else {
+            p.duplicateAllowed = null;
+          }
+        }
+        if (epicId != null && !isFixPlanSlug(`0-${p.slug}`)) {
+          const target = bareSlug(p.slug);
+          const same = freshRows.find((r) => r && typeof r.slug === 'string' && r.epicId === epicId
+            && !seenAtValidation.has(r.slug) && bareSlug(r.slug) === target);
+          if (same) {
+            refused.push({ index: i, slug: p.slug, error: `slug "${p.slug}" already exists in this Epic as "${same.slug}"`, status: 409 });
+            continue;
+          }
+        }
+        if (p.filesList && p.filesList.length) {
+          overlapWarnings[i] = await crossEpicFilesOverlapWarnings(p.filesList, epicId, freshRows, remote, projectCwd);
+        }
+      }
+      if (refused.length) return { failed: fail(refused) };
+    }
+    // Allocate every NN before writing anything, so a dep on a LATER sibling can be
+    // rewritten to that sibling's full `${nn}-${slug}` too. Burned numbers on an
+    // allocation failure leave a gap, never an inconsistency.
+    const nns = [];
+    try {
+      for (const p of prepared) nns.push(await remote.allocateParallelGroup(p.input.cwd));
+    } catch (e) {
+      return { failed: fail([{ index: nns.length, slug: prepared[nns.length]?.slug ?? null, error: `NN allocation failed: ${e?.message ?? e}` }]) };
+    }
+    const fullDeps = (deps) => (deps && deps.length
+      ? Array.from(new Set(deps.map((d) => (firstIndex.has(d) ? `${nns[firstIndex.get(d)]}-${d}` : d))))
+      : deps);
+    for (let i = 0; i < prepared.length; i++) {
+      const p = prepared[i];
+      let nn; let filenameSlug;
+      try {
+        nn = nns[i];
+        filenameSlug = `${nn}-${p.slug}`;
+        const body = buildPrdBody({ ...p.input, dependsOn: fullDeps(p.input.dependsOn), planId, gate: p.gateCommands, files: p.filesList });
+        // A validated preflight must reach the file (PRD 3805 ran unheld when one
+        // was lost); a body without the line rolls the whole batch back.
+        if (p.input.preflight && !/^preflight: /m.test(body)) throw new Error('preflight was not written to the PRD frontmatter');
+        const w = await remote.writePrd(filenameSlug, body, p.input.cwd);
+        if (!w?.ok) throw new Error(w?.error ?? 'write failed');
+        written.push({ filenameSlug, path: w.path ?? null, cwd: p.input.cwd });
+        results.push({ slug: p.slug, nn, filename: `${filenameSlug}.md`, preflight: p.input.preflight || null, warnings: [...p.warnings, ...overlapWarnings[i]] });
+      } catch (e) {
+        await rollback();
+        return { failed: fail([{ index: i, slug: p.slug, error: `write failed (batch rolled back): ${e?.message ?? e}` }]) };
+      }
+    }
+    return { failed: null };
+  });
+  // Audit rows, telemetry and the bounded reconcile wait run after the lock is
+  // released, so a 2 s reconcile never holds other creates.
+  if (committed.failed) return committed.failed;
 
   for (let i = 0; i < prepared.length; i++) {
     const p = prepared[i];

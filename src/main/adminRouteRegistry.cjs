@@ -21,6 +21,12 @@ function registerAppAdminRoutes(adminHttp, deps = {}) {
   require('./lib/project-pages/voiceAdminRoutes.cjs').registerAdminRoute(adminHttp);
   // POST /admin/project-home/videos/script-switch — 'Scripts may run Demo Video', only on the human's verified words.
   require('./lib/project-pages/videoScriptSwitchRoute.cjs').registerVideoScriptSwitchRoute(adminHttp);
+  // POST /admin/project-home/videos/run — a project's own script presses Demo Video, only while that switch is on.
+  require('./lib/project-pages/videoScriptRunRoute.cjs').registerAdminRoute(adminHttp, {
+    startExternalNewSession: chatRunner.startExternalNewSession,
+    isTabBusy: chatRunner.isTabBusy,
+    listJobRows: () => scheduler.remote.listJobRows(),
+  });
   require('./lib/feedback-remote/macroAdminRoutes.cjs').registerAdminRoute(adminHttp, {
     onChanged: deps.onMacrosChanged,
     startExternalNewSession: chatRunner.startExternalNewSession,

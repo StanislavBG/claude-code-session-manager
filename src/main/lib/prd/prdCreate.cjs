@@ -440,16 +440,22 @@ function crossEpicDuplicateError(slug, dups) {
  * Cross-Epic files-overlap advisory (2026-11-22 Self stall: 1047 and 1056 also
  * declared the same files). Dispatch already serializes overlapping files, so
  * this only WARNS — never refuses. Candidates: listing rows of another Epic
- * whose status is pending/running/investigating. A row's `files` is used when
+ * whose status is pending/running/investigating, plus live (not archived) rows
+ * whose status is null — a PRD file written moments ago has no queue row until
+ * the next reconcile pass, so the listing gives it status null (2026-11-24
+ * Bilko: 2005 named the same files as 2001, unreconciled, and got no warning).
+ * Archived, completed and cancelled rows never warn. A row's `files` is used when
  * present, else its `# Files` section is read via remote.readPrd + the shared
  * parseFilesSection. Overlap uses the scheduler's own filesOverlap rule.
  */
 const OVERLAP_ACTIVE_STATUSES = new Set(['pending', 'running', 'investigating']);
+const isOverlapCandidate = (r) => OVERLAP_ACTIVE_STATUSES.has(r.status)
+  || (r.status == null && r.archived !== true);
 async function crossEpicFilesOverlapWarnings(newFiles, epicId, rows, remote, cwd) {
   if (!Array.isArray(newFiles) || !newFiles.length || !Array.isArray(rows)) return [];
   const warnings = [];
   for (const r of rows) {
-    if (!r || typeof r.slug !== 'string' || !OVERLAP_ACTIVE_STATUSES.has(r.status)) continue;
+    if (!r || typeof r.slug !== 'string' || !isOverlapCandidate(r)) continue;
     if (r.epicId == null || r.epicId === '' || r.epicId === (epicId ?? null)) continue;
     let otherFiles = Array.isArray(r.files) ? r.files : null;
     if (!otherFiles) {

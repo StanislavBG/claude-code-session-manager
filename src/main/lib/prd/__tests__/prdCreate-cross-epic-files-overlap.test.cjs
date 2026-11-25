@@ -129,3 +129,23 @@ test('batch path carries the warning on the overlapping entry only', async () =>
   expect(w[0]).toContain('1000-sm-contract-client');
   expect(w[0]).toContain(EPIC_A);
 });
+
+// 2026-11-24 Bilko: PRD 2005 named the same files as 2001, written moments
+// before by another Epic and not yet reconciled — its listing row has status
+// null, and the advisory skipped it.
+test('a live, never-reconciled row (status null) of another Epic warns', async () => {
+  rows = [{ slug: '2001-sync-drop-record-push', epicId: EPIC_A, status: null, archived: false, files: ['scripts/sync-local-main.sh'] }];
+  const b = await createPrd(entry('sync-push-guard', { cwd, sourcePromptId: EPIC_B, files: ['scripts/sync-local-main.sh'] }), remote);
+  expect(b.ok).toBe(true);
+  const w = overlapWarnings(b);
+  expect(w).toHaveLength(1);
+  expect(w[0]).toContain('2001-sync-drop-record-push');
+  expect(w[0]).toContain(EPIC_A);
+});
+
+test('an archived status-null row does not warn', async () => {
+  rows = [{ slug: '2001-sync-drop-record-push', epicId: EPIC_A, status: null, archived: true, files: ['scripts/sync-local-main.sh'] }];
+  const b = await createPrd(entry('sync-push-guard', { cwd, sourcePromptId: EPIC_B, files: ['scripts/sync-local-main.sh'] }), remote);
+  expect(b.ok).toBe(true);
+  expect(overlapWarnings(b)).toEqual([]);
+});

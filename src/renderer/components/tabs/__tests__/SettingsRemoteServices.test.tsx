@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { SettingsRemoteServices, SERVICE_TOOLS } from '../SettingsRemoteServices'
+import { SettingsRemoteServices, SERVICE_TOOLS, DEFAULT_SCOPE } from '../SettingsRemoteServices'
 import { useToast } from '../../../state/toast'
 import { useSessions } from '../../../state/sessions'
 import type { WebRemoteServicesListResult } from '../../../../preload/api'
@@ -15,12 +15,12 @@ let api: Record<string, ReturnType<typeof vi.fn>>
 let clipboard: ReturnType<typeof vi.fn>
 
 const service = {
-  serviceId: 'svc-1', name: 'Kiln', homeCwd: '/home/u/Self', scope: [...SERVICE_TOOLS],
-  projectRoot: null, relayClientId: 'rc-1', pairedAt: 1_700_000_000_000, lastSeenAt: 1_700_000_000_000,
+  serviceId: 'svc-1', name: 'Kiln', homeCwd: '/home/u/Self', scope: [...DEFAULT_SCOPE],
+  projectRoot: null as string | null, relayClientId: 'rc-1', pairedAt: 1_700_000_000_000, lastSeenAt: 1_700_000_000_000,
 }
 const pendingEntry = {
-  pairingId: 'pair-1', name: 'Kiln', homeCwd: '/home/u/Self', scope: [...SERVICE_TOOLS],
-  projectRoot: null, createdAt: Date.now(), expiresAt: Date.now() + 300_000,
+  pairingId: 'pair-1', name: 'Kiln', homeCwd: '/home/u/Self', scope: [...DEFAULT_SCOPE],
+  projectRoot: null as string | null, createdAt: Date.now(), expiresAt: Date.now() + 300_000,
 }
 
 async function flush() {
@@ -79,7 +79,11 @@ beforeEach(() => {
     }),
   }
   clipboard = vi.fn(async () => ({ ok: true }))
-  ;(window as unknown as { api: unknown }).api = { webRemote: api, clipboard: { writeText: clipboard } }
+  ;(window as unknown as { api: unknown }).api = {
+    webRemote: api,
+    clipboard: { writeText: clipboard },
+    app: { homeDir: vi.fn(async () => '/home/u/') },
+  }
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
   useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/u/Self' }, { id: 't2', cwd: '/home/u/Other' }] as never })
 })
@@ -100,23 +104,74 @@ describe('SettingsRemoteServices', () => {
     expect(q('remote-service-code')).toBeNull()
   })
 
-  it('opens a form with a 64-char name, a home project picker and all six tools ticked', async () => {
+  it('opens a form with a 64-char name, a home project picker and every tool but project_create ticked', async () => {
     await mount()
     await click(q('remote-service-pair'))
     expect(q('remote-service-form')).not.toBeNull()
     expect((q('remote-service-name') as HTMLInputElement).maxLength).toBe(64)
     const select = q('remote-service-home') as HTMLSelectElement
     expect(Array.from(select.options).map((o) => o.value)).toEqual(['/home/u/Self', '/home/u/Other'])
-    expect(SERVICE_TOOLS).toHaveLength(6)
+    expect(SERVICE_TOOLS).toHaveLength(7)
+    expect(DEFAULT_SCOPE).toEqual(SERVICE_TOOLS.filter((t) => t !== 'project_create'))
     for (const tool of SERVICE_TOOLS) {
-      expect((q(`remote-service-scope-${tool}`) as HTMLInputElement).checked).toBe(true)
+      expect((q(`remote-service-scope-${tool}`) as HTMLInputElement).checked).toBe(tool !== 'project_create')
     }
+    expect(q('remote-service-scope-project_create')!.parentElement!.textContent).toContain('Create projects')
+    expect(q('remote-service-project-root')).toBeNull()
     await click(q('remote-service-scope-macro_run'))
     await type(q('remote-service-name'), 'Kiln')
     await click(q('remote-service-start'))
     expect(api.servicePairStart).toHaveBeenCalledWith({
-      name: 'Kiln', homeCwd: '/home/u/Self', scope: SERVICE_TOOLS.filter((t) => t !== 'macro_run'),
+      name: 'Kiln', homeCwd: '/home/u/Self', scope: DEFAULT_SCOPE.filter((t) => t !== 'macro_run'),
     })
+  })
+
+  it('ticking project_create shows a prefilled New projects go in field; unticking hides it', async () => {
+    await mount()
+    await click(q('remote-service-pair'))
+    await click(q('remote-service-scope-project_create'))
+    const field = q('remote-service-project-root') as HTMLInputElement
+    expect(field).not.toBeNull()
+    expect(field.value).toBe('/home/u/Projects')
+    expect(field.closest('label')!.textContent).toContain('New projects go in')
+    await click(q('remote-service-scope-project_create'))
+    expect(q('remote-service-project-root')).toBeNull()
+  })
+
+  it('sends the trimmed projectRoot only with project_create, and keeps Start disabled on an empty field', async () => {
+    await mount()
+    await click(q('remote-service-pair'))
+    await type(q('remote-service-name'), 'Kiln')
+    await click(q('remote-service-scope-project_create'))
+    await type(q('remote-service-project-root'), '   ')
+    expect((q('remote-service-start') as HTMLButtonElement).disabled).toBe(true)
+    await type(q('remote-service-project-root'), '  /home/u/Builds  ')
+    expect((q('remote-service-start') as HTMLButtonElement).disabled).toBe(false)
+    await click(q('remote-service-start'))
+    expect(api.servicePairStart).toHaveBeenCalledWith({
+      name: 'Kiln', homeCwd: '/home/u/Self', scope: SERVICE_TOOLS, projectRoot: '/home/u/Builds',
+    })
+  })
+
+  it('omits projectRoot when project_create is not ticked', async () => {
+    await mount()
+    await openFormAndStart()
+    const input = api.servicePairStart.mock.calls[0][0] as Record<string, unknown>
+    expect(input).not.toHaveProperty('projectRoot')
+    expect(input.scope).toEqual(DEFAULT_SCOPE)
+  })
+
+  it('shows the projects folder on paired and pending rows that have one', async () => {
+    list = {
+      ok: true,
+      services: [{ ...service, scope: [...SERVICE_TOOLS], projectRoot: '/home/u/Projects' }, { ...service, serviceId: 'svc-2' }],
+      pending: [{ ...pendingEntry, projectRoot: '/home/u/Builds' }],
+      relayOrphans: [],
+    }
+    await mount()
+    expect(q('remote-service-project-root-svc-1')?.textContent).toContain('/home/u/Projects')
+    expect(q('remote-service-project-root-svc-2')).toBeNull()
+    expect(q('remote-service-project-root-pair-1')?.textContent).toContain('/home/u/Builds')
   })
 
   it('shows the code with a 5-minute countdown and copies the pair command', async () => {

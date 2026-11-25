@@ -18,7 +18,25 @@ export const SERVICE_TOOLS: WebRemoteServiceTool[] = [
   'macro_run',
   'epic_get',
   'events_read',
+  'project_create',
 ]
+
+/** Tools that create things outside the home project; never ticked by default. */
+const OPT_IN_TOOLS: WebRemoteServiceTool[] = ['project_create']
+
+/** The scope a new pairing starts with: every tool except the opt-in ones. */
+export const DEFAULT_SCOPE: WebRemoteServiceTool[] = SERVICE_TOOLS.filter((t) => !OPT_IN_TOOLS.includes(t))
+
+/** Plain-English labels for tools whose name alone does not say what they do. */
+const TOOL_LABELS: Partial<Record<WebRemoteServiceTool, string>> = {
+  project_create: 'Create projects',
+}
+
+/** `<home>/Projects`, the default folder project_create creates into. */
+export function defaultProjectRoot(home: string): string {
+  const base = home.replace(/[/\\]+$/, '')
+  return base ? `${base}/Projects` : ''
+}
 
 export const SERVICE_NAME_MAX = 64
 
@@ -90,6 +108,11 @@ function PendingRow({
           Deny
         </PillButton>
       </div>
+      {pending.projectRoot && (
+        <div data-testid={`remote-service-project-root-${pending.pairingId}`} className="text-[12px] text-fg-faint mt-2">
+          New projects go in <span className="font-mono">{pending.projectRoot}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -117,7 +140,8 @@ export function SettingsRemoteServices({
   const [formOpen, setFormOpen] = useState(false)
   const [name, setName] = useState('')
   const [homeCwd, setHomeCwd] = useState('')
-  const [scope, setScope] = useState<WebRemoteServiceTool[]>(SERVICE_TOOLS)
+  const [scope, setScope] = useState<WebRemoteServiceTool[]>(DEFAULT_SCOPE)
+  const [projectRoot, setProjectRoot] = useState('')
   const [starting, setStarting] = useState(false)
   const [relayError, setRelayError] = useState<string | null>(null)
   const [active, setActive] = useState<ActiveCode | null>(null)
@@ -148,6 +172,14 @@ export function SettingsRemoteServices({
   }, [projects, homeCwd])
 
   useEffect(() => {
+    let cancelled = false
+    window.api.app.homeDir()
+      .then((home) => { if (!cancelled) setProjectRoot((cur) => cur || defaultProjectRoot(home)) })
+      .catch((e) => showToast('error', `Home folder: ${errMsg(e)}`))
+    return () => { cancelled = true }
+  }, [showToast])
+
+  useEffect(() => {
     if (!active) return
     setNow(Date.now())
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -157,7 +189,7 @@ export function SettingsRemoteServices({
   const resetForm = () => {
     setFormOpen(false)
     setName('')
-    setScope(SERVICE_TOOLS)
+    setScope(DEFAULT_SCOPE)
     setRelayError(null)
     setActive(null)
   }
@@ -167,11 +199,15 @@ export function SettingsRemoteServices({
 
   const handleStart = async () => {
     const trimmed = name.trim()
-    if (!trimmed || !homeCwd || scope.length === 0) return
+    const wantsProjects = scope.includes('project_create')
+    const root = projectRoot.trim()
+    if (!trimmed || !homeCwd || scope.length === 0 || (wantsProjects && !root)) return
     setStarting(true)
     setRelayError(null)
     try {
-      const r = await window.api.webRemote.servicePairStart({ name: trimmed, homeCwd, scope })
+      const r = await window.api.webRemote.servicePairStart(
+        wantsProjects ? { name: trimmed, homeCwd, scope, projectRoot: root } : { name: trimmed, homeCwd, scope },
+      )
       if (!r.ok) {
         const known = RELAY_ERROR_TEXT[r.error]
         if (known) setRelayError(known)
@@ -275,7 +311,9 @@ export function SettingsRemoteServices({
     )
 
   const msLeft = active ? active.codeExpiresAt - now : 0
+  const wantsProjects = scope.includes('project_create')
   const canStart = !starting && name.trim().length > 0 && !!homeCwd && scope.length > 0
+    && (!wantsProjects || projectRoot.trim().length > 0)
 
   return (
     <div data-testid="remote-services">
@@ -349,11 +387,26 @@ export function SettingsRemoteServices({
                     checked={scope.includes(tool)}
                     onChange={() => toggleTool(tool)}
                   />
-                  {tool}
+                  {TOOL_LABELS[tool] ? (
+                    <span className="font-sans">{TOOL_LABELS[tool]} <span className="font-mono text-fg-faint">({tool})</span></span>
+                  ) : tool}
                 </label>
               ))}
             </div>
           </fieldset>
+          {wantsProjects && (
+            <label className="block">
+              <span className="block text-[12px] font-semibold text-fg-dim mb-1">New projects go in</span>
+              <input
+                data-testid="remote-service-project-root"
+                value={projectRoot}
+                onChange={(e) => setProjectRoot(e.target.value)}
+                placeholder="~/Projects"
+                className="w-full bg-bg border border-line rounded-lg px-3 py-1.5 text-[13px] text-fg font-mono"
+              />
+              <span className="block text-[11.5px] text-fg-faint mt-1">The service can create new folders and private GitHub repos here.</span>
+            </label>
+          )}
           {relayError && (
             <div data-testid="remote-service-error" className="text-[12.5px] text-accent">{relayError}</div>
           )}
@@ -386,6 +439,11 @@ export function SettingsRemoteServices({
                   subtitle={`${s.homeCwd} · ${s.scope.length} of ${SERVICE_TOOLS.length} tools · paired ${new Date(s.pairedAt).toLocaleDateString()}`}
                   action={revokeAction(s.serviceId, 'remote-service-revoke', () => handleRevokeService(s.serviceId))}
                 />
+                {s.projectRoot && (
+                  <div data-testid={`remote-service-project-root-${s.serviceId}`} className="text-[12px] text-fg-faint mt-1 px-[18px]">
+                    New projects go in <span className="font-mono">{s.projectRoot}</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -28,6 +28,7 @@ Classes: **LAW-RATIONALE** (the why behind a root `CLAUDE.md` law) · **REFERENC
 | [model-mitigations.md](model-mitigations.md) | registry of model-behavior workarounds: behavior, model, date, location + needle (lint:docs-checked) | REFERENCE |
 | [tasks.md](tasks.md) | Task admin contract for outside callers: routes, errors, statuses, argv, env, fallback | REFERENCE |
 | [external-contract.md](external-contract.md) | what outside apps may rely on: discovery, handoff, Epic reads, events, version rule | REFERENCE |
+| [mcp-tools.md](mcp-tools.md) | generated MCP tool table (name, group, required args, summary); `npm run readme:build` writes it | REFERENCE |
 | [application-menu.md](application-menu.md) | Electron application menu structure | REFERENCE |
 | [heap-snapshot-diagnostics.md](heap-snapshot-diagnostics.md) | renderer heap-snapshot procedure | RUNBOOK |
 | [build-target.json](build-target.json) | **live runtime config** read by `src/main/lib/buildTarget.cjs`, `.claude/agents/builder.md` and the builder plugin skill — never move it | — |

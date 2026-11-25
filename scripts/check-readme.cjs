@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 'use strict'
 
-// Fills README.md's generated regions from the code, so the npm page's
-// agent-facing facts (MCP tool table, recipes, counts, Node floor) can't go
-// stale. One diagnostic line per failure.
+// Fills generated regions from the code, so agent-facing facts can't go
+// stale. One diagnostic line per failure. Two target files (TARGETS):
+// README.md holds the recipes, counts and Node floor; the MCP tool table lives
+// in session-manager-operations/architecture/mcp-tools.md (README.md has a
+// 24000-byte budget, so the table was split out rather than raising it).
 //
 //   node scripts/check-readme.cjs          check; exit 1 if any region is stale
 //   node scripts/check-readme.cjs --write  rewrite regions in place (idempotent)
@@ -32,7 +34,13 @@ const MAX_SECTION_GRADE = 8.0
 const MAX_BYTES = 24000
 const REPO_URL = 'https://github.com/StanislavBG/claude-code-session-manager'
 
-const GEN_NAMES = ['mcp-tools', 'mcp-recipes', 'mcp-tool-count', 'skill-count', 'node-floor']
+const MCP_TOOLS_DOC = 'session-manager-operations/architecture/mcp-tools.md'
+// Each file and the gen regions it must hold. renderRegions renders them all.
+const TARGETS = [
+  { file: 'README.md', regions: ['mcp-recipes', 'mcp-tool-count', 'skill-count', 'node-floor'] },
+  { file: MCP_TOOLS_DOC, regions: ['mcp-tools'] },
+]
+const README_REGIONS = TARGETS[0].regions
 const MARKER_RE = /<!-- (\/?)gen:([A-Za-z0-9_-]+) -->/g
 
 function loadSources(repoRoot) {
@@ -83,7 +91,7 @@ function aloneOnLine(text, from, to) {
   return text.slice(start, from).trim() === '' && text.slice(to, end).trim() === ''
 }
 
-function applyRegions(text, rendered) {
+function applyRegions(text, rendered, file = 'README.md') {
   const errors = []
   const stale = []
   const seen = new Set()
@@ -93,28 +101,28 @@ function applyRegions(text, rendered) {
   const edits = [] // { from, to, value }
   for (let i = 0; i < markers.length; i++) {
     const open = markers[i]
-    if (open.close) { errors.push(`README.md: closing marker for region ${open.name} has no matching opening marker`); continue }
+    if (open.close) { errors.push(`${file}: closing marker for region ${open.name} has no matching opening marker`); continue }
     const close = markers[i + 1]
     if (!close || !close.close || close.name !== open.name) {
-      errors.push(`README.md: unclosed region ${open.name} (no <!-- /gen:${open.name} --> before the next marker)`)
+      errors.push(`${file}: unclosed region ${open.name} (no <!-- /gen:${open.name} --> before the next marker)`)
       continue
     }
     i++
-    if (seen.has(open.name)) { errors.push(`README.md: duplicate region ${open.name}`); continue }
+    if (seen.has(open.name)) { errors.push(`${file}: duplicate region ${open.name}`); continue }
     seen.add(open.name)
     if (!Object.prototype.hasOwnProperty.call(rendered, open.name)) {
-      errors.push(`README.md: unknown region ${open.name}`)
+      errors.push(`${file}: unknown region ${open.name}`)
       continue
     }
     const sameLine = lineBounds(text, open.from).start === lineBounds(text, close.from).start
     if (sameLine) {
       const value = rendered[open.name]
-      if (value.includes('\n')) { errors.push(`README.md: region ${open.name} is multi-line; use block markers on their own lines`); continue }
+      if (value.includes('\n')) { errors.push(`${file}: region ${open.name} is multi-line; use block markers on their own lines`); continue }
       if (text.slice(open.to, close.from) !== value) { stale.push(open.name); edits.push({ from: open.to, to: close.from, value }) }
       continue
     }
     if (!aloneOnLine(text, open.from, open.to) || !aloneOnLine(text, close.from, close.to)) {
-      errors.push(`README.md: region ${open.name} spans lines, so both markers must be on their own lines`)
+      errors.push(`${file}: region ${open.name} spans lines, so both markers must be on their own lines`)
       continue
     }
     const openEnd = lineBounds(text, open.from).end // index of '\n' after the opening marker
@@ -131,12 +139,33 @@ function applyRegions(text, rendered) {
 }
 
 // Pure decision for main(): what to print, what to write, which exit code.
-function run(text, rendered, write) {
-  const res = applyRegions(text, rendered)
+function run(text, rendered, write, file = 'README.md') {
+  const res = applyRegions(text, rendered, file)
   if (res.errors.length) return { code: 1, messages: res.errors, text }
   if (write) return { code: 0, messages: [], text: res.text, changed: res.text !== text }
-  const messages = res.stale.map((n) => `README.md region ${n} is out of date. Run: npm run readme:build, then commit README.md.`)
+  const messages = res.stale.map((n) => `${file} region ${n} is out of date. Run: npm run readme:build, then commit ${file}.`)
   return { code: messages.length ? 1 : 0, messages, text }
+}
+
+const pick = (obj, names) => Object.fromEntries(names.filter((n) => n in obj).map((n) => [n, obj[n]]))
+
+// run() per TARGETS file: texts = { [file]: text | null }; a file only gets
+// its own regions (a region in the wrong file is an unknown region). A
+// missing required region is one line naming the file (null = file absent).
+// README.md's own required-region check stays in runRules (check mode).
+function runTargets(texts, rendered, write, targets = TARGETS) {
+  const messages = []
+  const files = []
+  let code = 0
+  for (const t of targets) {
+    const text = texts[t.file] == null ? '' : texts[t.file]
+    const res = run(text, pick(rendered, t.regions), write, t.file)
+    const missing = t.file === 'README.md' ? [] : checkRequiredRegions(text, t.regions, [], t.file)
+    messages.push(...res.messages, ...missing)
+    if (res.code || missing.length) code = 1
+    files.push({ file: t.file, text: res.text, changed: !!res.changed })
+  }
+  return { code, messages, files }
 }
 
 // ── Agent-friendly rules: pure, (text, injected inputs) → diagnostic lines ──
@@ -261,13 +290,13 @@ function checkSize(text) {
 const LIST_NAMES = ['skills', 'packs', 'personas']
 
 // Deleting a region must not pass silently: every gen and list region must exist.
-function checkRequiredRegions(text) {
+function checkRequiredRegions(text, genNames = README_REGIONS, listNames = LIST_NAMES, file = 'README.md') {
   const out = []
-  for (const name of GEN_NAMES) {
-    if (!text.includes(`<!-- gen:${name} -->`)) out.push(`README.md: required gen region ${name} is missing (<!-- gen:${name} -->)`)
+  for (const name of genNames) {
+    if (!text.includes(`<!-- gen:${name} -->`)) out.push(`${file}: required gen region ${name} is missing (<!-- gen:${name} -->)`)
   }
-  for (const name of LIST_NAMES) {
-    if (!text.includes(`<!-- list:${name} -->`)) out.push(`README.md: required list region ${name} is missing (<!-- list:${name} -->)`)
+  for (const name of listNames) {
+    if (!text.includes(`<!-- list:${name} -->`)) out.push(`${file}: required list region ${name} is missing (<!-- list:${name} -->)`)
   }
   return out
 }
@@ -329,13 +358,19 @@ function runRules(text, inputs) {
 
 async function main() {
   const repoRoot = path.join(__dirname, '..')
-  const readmePath = path.join(repoRoot, 'README.md')
   const write = process.argv.includes('--write')
-  const text = fs.readFileSync(readmePath, 'utf8')
-  const res = run(text, renderRegions(loadSources(repoRoot)), write)
+  const texts = {}
+  for (const t of TARGETS) {
+    const p = path.join(repoRoot, t.file)
+    texts[t.file] = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null
+  }
+  const text = texts['README.md'] || ''
+  const res = runTargets(texts, renderRegions(loadSources(repoRoot)), write)
   for (const m of res.messages) console.error(m)
   if (write) {
-    if (res.code === 0 && res.changed) fs.writeFileSync(readmePath, res.text)
+    if (res.code === 0) {
+      for (const f of res.files) if (f.changed) fs.writeFileSync(path.join(repoRoot, f.file), f.text)
+    }
     process.exit(res.code)
   }
   const trackedFiles = listKnownPaths(repoRoot)
@@ -346,7 +381,7 @@ async function main() {
 }
 
 module.exports = {
-  loadSources, renderRegions, applyRegions, run,
+  loadSources, renderRegions, applyRegions, run, runTargets, TARGETS, MCP_TOOLS_DOC,
   checkGrade, checkLinks, checkRepoLinks, checkSize, checkLists, checkRequiredRegions, loadListNames, runRules,
   listKnownPaths, MAX_GRADE, MAX_SECTION_GRADE, MAX_BYTES,
 }

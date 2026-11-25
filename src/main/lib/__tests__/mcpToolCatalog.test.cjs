@@ -346,8 +346,8 @@ test('project_demo_video_write whenToUse advertises 5-60 seconds', () => {
 });
 
 // ── summary field (readme-mcp-tool-summaries) ─────────────────────────────
-// `summary` is the one plain-language line the npm README's generated MCP
-// tool table shows. It must stay out of the live description.
+// `summary` is the one plain-language line the generated MCP tool table in
+// session-manager-operations/architecture/mcp-tools.md shows. It must stay out of the live description.
 
 const BANNED_SUMMARY_PHRASES = ['admin API', 'THE ONLY', 'session-manager app'];
 

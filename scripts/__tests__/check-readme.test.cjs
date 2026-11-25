@@ -12,7 +12,7 @@ const path = require('node:path');
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const {
-  loadSources, renderRegions, applyRegions, run,
+  loadSources, renderRegions, applyRegions, run, runTargets, TARGETS, MCP_TOOLS_DOC,
   checkGrade, checkLinks, checkRepoLinks, checkSize, checkLists, MAX_GRADE, MAX_BYTES,
   checkRequiredRegions, loadListNames, listKnownPaths, runRules, MAX_SECTION_GRADE,
 } = require('../check-readme.cjs');
@@ -122,6 +122,64 @@ test('unknown, unclosed and duplicate markers are errors naming the region', () 
   const res = run('<!-- gen:bogus -->x<!-- /gen:bogus -->\n', rendered, true);
   expect(res.code).toBe(1);
   expect(res.messages.join('\n')).toMatch(/bogus/);
+});
+
+// ── mcp-tools lives in its own reference doc (README.md byte budget) ──────
+
+const DOC = 'session-manager-operations/architecture/mcp-tools.md';
+const README_OK = '<!-- gen:mcp-tool-count -->2<!-- /gen:mcp-tool-count --> <!-- gen:skill-count -->3<!-- /gen:skill-count --> <!-- gen:node-floor -->22.12.0<!-- /gen:node-floor -->\n<!-- gen:mcp-recipes -->\n- `r-one` — Recipe one\n- `r-two` — Recipe two\n<!-- /gen:mcp-recipes -->\n';
+const docWith = (body) => `# MCP tools\n\nGenerated.\n\n<!-- gen:mcp-tools -->\n${body}\n<!-- /gen:mcp-tools -->\n`;
+
+test('TARGETS: the doc holds mcp-tools; README.md holds the rest', () => {
+  expect(MCP_TOOLS_DOC).toBe(DOC);
+  expect(TARGETS).toEqual([
+    { file: 'README.md', regions: ['mcp-recipes', 'mcp-tool-count', 'skill-count', 'node-floor'] },
+    { file: DOC, regions: ['mcp-tools'] },
+  ]);
+});
+
+test('mcp-tools region is rendered into the doc', () => {
+  const rendered = renderRegions(fakeSources());
+  const res = runTargets({ 'README.md': README_OK, [DOC]: docWith('old') }, rendered, true);
+  expect(res.code).toBe(0);
+  const doc = res.files.find((f) => f.file === DOC);
+  expect(doc.changed).toBe(true);
+  expect(doc.text).toBe(docWith(rendered['mcp-tools']));
+  expect(res.files.find((f) => f.file === 'README.md').changed).toBe(false);
+});
+
+test('a stale doc region fails check mode with one line naming the doc', () => {
+  const res = runTargets({ 'README.md': README_OK, [DOC]: docWith('old') }, renderRegions(fakeSources()), false);
+  expect(res.code).toBe(1);
+  expect(res.messages).toEqual([`${DOC} region mcp-tools is out of date. Run: npm run readme:build, then commit ${DOC}.`]);
+});
+
+test('a doc without its mcp-tools region (or no doc) fails with one line naming the doc', () => {
+  for (const docText of ['# MCP tools\n', null]) {
+    const res = runTargets({ 'README.md': README_OK, [DOC]: docText }, renderRegions(fakeSources()), false);
+    expect(res.code).toBe(1);
+    expect(res.messages).toEqual([`${DOC}: required gen region mcp-tools is missing (<!-- gen:mcp-tools -->)`]);
+  }
+});
+
+test('a README.md without a gen:mcp-tools region passes; one with it is an unknown region', () => {
+  const rendered = renderRegions(fakeSources());
+  const ok = runTargets({ 'README.md': README_OK, [DOC]: docWith(rendered['mcp-tools']) }, rendered, false);
+  expect(ok).toMatchObject({ code: 0, messages: [] });
+  expect(checkRequiredRegions(ALL_REGIONS)).toEqual([]);
+  const bad = runTargets({ 'README.md': README_OK + '<!-- gen:mcp-tools -->\nx\n<!-- /gen:mcp-tools -->\n', [DOC]: docWith(rendered['mcp-tools']) }, rendered, false);
+  expect(bad.code).toBe(1);
+  expect(bad.messages.join('\n')).toMatch(/README\.md: unknown region mcp-tools/);
+});
+
+test('--write rewrites both files', () => {
+  const rendered = renderRegions(fakeSources());
+  const staleReadme = README_OK.replace('-->3<', '-->1<');
+  const res = runTargets({ 'README.md': staleReadme, [DOC]: docWith('old') }, rendered, true);
+  expect(res.code).toBe(0);
+  expect(res.files.map((f) => [f.file, f.changed])).toEqual([['README.md', true], [DOC, true]]);
+  expect(res.files[0].text).toBe(README_OK);
+  expect(res.files[1].text).toBe(docWith(rendered['mcp-tools']));
 });
 
 test('real sources: mcp-tools has exactly MCP_TOOL_CATALOG.length data rows', () => {
@@ -261,7 +319,6 @@ test('section grade rule: a ## line inside fenced code is not a section heading'
 });
 
 const ALL_REGIONS = [
-  '<!-- gen:mcp-tools -->', 'x', '<!-- /gen:mcp-tools -->',
   '<!-- gen:mcp-recipes -->', 'x', '<!-- /gen:mcp-recipes -->',
   'n <!-- gen:mcp-tool-count -->1<!-- /gen:mcp-tool-count --> s <!-- gen:skill-count -->1<!-- /gen:skill-count --> v <!-- gen:node-floor -->1<!-- /gen:node-floor -->',
   '<!-- list:skills -->', '<!-- /list:skills -->',
@@ -274,13 +331,13 @@ test('region rule: a README with every gen and list region passes', () => {
 });
 
 test('region rule: each missing gen or list region is named', () => {
-  const md = ALL_REGIONS.replace(/<!-- \/?gen:skill-count -->/g, '').replace(/<!-- \/?list:packs -->/g, '').replace(/<!-- \/?gen:mcp-tools -->/g, '');
+  const md = ALL_REGIONS.replace(/<!-- \/?gen:skill-count -->/g, '').replace(/<!-- \/?list:packs -->/g, '').replace(/<!-- \/?gen:node-floor -->/g, '');
   const out = checkRequiredRegions(md);
   expect(out).toHaveLength(3);
   expect(out.join('\n')).toMatch(/gen region skill-count is missing/);
-  expect(out.join('\n')).toMatch(/gen region mcp-tools is missing/);
+  expect(out.join('\n')).toMatch(/gen region node-floor is missing/);
   expect(out.join('\n')).toMatch(/list region packs is missing/);
-  expect(checkRequiredRegions('# empty\n')).toHaveLength(8);
+  expect(checkRequiredRegions('# empty\n')).toHaveLength(7);
 });
 
 test('region rule: runRules reports a deleted region (exit 1 in main)', async () => {

@@ -29,14 +29,13 @@ const { sendJson } = require('../feedback-remote/localAdminHttp.cjs');
  */
 
 /**
- * The hold's one outside shape, shared by GET /admin/usage-hold and every
- * 429 usage_held answer. baseThreshold (the saved 'pause above' before
- * pro-rating) is forwarded only when it is a finite number.
- * @param {AutoDispatchHold | null | undefined} hold
- * @returns {PublicHold | null}
+ * Builds the hold's one outside shape from a real hold. baseThreshold (the
+ * saved 'pause above' before pro-rating) is forwarded only when it is a
+ * finite number.
+ * @param {AutoDispatchHold} hold
+ * @returns {PublicHold}
  */
-function publicHold(hold) {
-  if (hold == null) return null;
+function toPublicHold(hold) {
   /** @type {PublicHold} */
   const out = {
     reason: hold.reason ?? null,
@@ -53,18 +52,24 @@ function publicHold(hold) {
 }
 
 /**
+ * The hold's one outside shape, shared by GET /admin/usage-hold and every
+ * 429 usage_held answer; null when nothing is held.
+ * @param {AutoDispatchHold | null | undefined} hold
+ * @returns {PublicHold | null}
+ */
+function publicHold(hold) {
+  return hold == null ? null : toPublicHold(hold);
+}
+
+/**
  * The 429 usage_held body: the public hold minus detail, with detail and the
- * caller's hint at the top level.
- * A missing hold answers the all-null public shape (what publicHold of an
- * empty object gave before this module was typed).
+ * caller's hint at the top level. A 429 usage_held always carries a real hold.
  * @param {AutoDispatchHold} hold
  * @param {string} hint
  */
 function usageHeldBody(hold, hint) {
-  /** @type {PublicHold} */
-  const empty = { reason: null, window: null, percent: null, threshold: null, resetsAt: null, detail: null };
-  const { detail, ...rest } = (hold == null ? empty : publicHold(hold)) || empty;
-  return { ok: false, error: 'usage_held', hold: rest, detail: detail ?? null, hint };
+  const { detail, ...rest } = toPublicHold(hold);
+  return { ok: false, error: 'usage_held', hold: rest, detail, hint };
 }
 
 /**

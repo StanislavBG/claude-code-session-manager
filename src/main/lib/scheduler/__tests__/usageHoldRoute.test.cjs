@@ -82,10 +82,6 @@ test('publicHold: null in gives null out', () => {
   expect(publicHold(undefined)).toBeNull();
 });
 
-test('usageHeldBody: null hold still answers the usage_held envelope', () => {
-  expect(usageHeldBody(null, 'h')).toEqual({ ok: false, error: 'usage_held', hold: { reason: null, window: null, percent: null, threshold: null, resetsAt: null }, detail: null, hint: 'h' });
-});
-
 test('publicHold: missing fields become null; no baseThreshold key without one', () => {
   const out = publicHold({ reason: 'manual-fire-policy' });
   expect(out).toEqual({ reason: 'manual-fire-policy', window: null, percent: null, threshold: null, resetsAt: null, detail: null });

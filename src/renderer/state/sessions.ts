@@ -40,6 +40,8 @@ interface SessionsState {
     label?: string
     /** Create the tab dormant (Chat view, no PTY spawn) instead of spawning. */
     dormant?: boolean
+    /** Make the tab active (default true); false leaves activeTabId unchanged. */
+    activate?: boolean
   }) => string
   setTabRunning: (id: string, pid: number) => void
   setTabExited: (id: string, exitCode: number) => void
@@ -141,14 +143,14 @@ export const useSessions = create<SessionsState>((set, get) => ({
     })
     return cmd
   },
-  addTab: ({ id: providedId, cwd, startupCommand, presetId = null, label, dormant = false }) => {
+  addTab: ({ id: providedId, cwd, startupCommand, presetId = null, label, dormant = false, activate = true }) => {
     const id = providedId ?? crypto.randomUUID()
     // Guard against double-add: callers occasionally retry (HMR remounts, race
     // between auto-spawn + user click). Returning the existing id keeps the
     // caller's flow intact instead of colliding on tab keys + PTY spawns.
     const existing = get().tabs.find((t) => t.id === id)
     if (existing) {
-      set({ activeTabId: id })
+      if (activate) set({ activeTabId: id })
       return id
     }
     if (dormant && startupCommand) {
@@ -166,7 +168,7 @@ export const useSessions = create<SessionsState>((set, get) => ({
       presetId,
       generation: 0,
     }
-    set({ tabs: [...get().tabs, tab], activeTabId: id })
+    set(activate ? { tabs: [...get().tabs, tab], activeTabId: id } : { tabs: [...get().tabs, tab] })
     return id
   },
   setTabRunning: (id, pid) =>

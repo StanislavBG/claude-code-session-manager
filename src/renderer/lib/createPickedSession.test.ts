@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useSessions } from '../state/sessions'
-import { openProjectAt, startNewProject } from './createPickedSession'
+import { openProjectAt, openProjectQuietly, startNewProject } from './createPickedSession'
 
 const createProjectFolder = vi.fn()
 
@@ -18,6 +18,30 @@ describe('openProjectAt', () => {
     expect(b).toBe(a)
     expect(useSessions.getState().tabs).toHaveLength(1)
     expect(useSessions.getState().activeTabId).toBe(a)
+  })
+})
+
+describe('openProjectQuietly', () => {
+  it('adds a dormant tab without activating it', () => {
+    const current = openProjectAt('/tmp/current')
+    const id = openProjectQuietly('/tmp/created')
+    const tabs = useSessions.getState().tabs
+    expect(tabs).toHaveLength(2)
+    const tab = tabs.find((t) => t.id === id)!
+    expect(tab.cwd).toBe('/tmp/created')
+    expect(tab.status).toBe('dormant')
+    expect(tab.presetId).toBe('pick-dangerous')
+    expect(useSessions.getState().activeTabId).toBe(current)
+  })
+
+  it('is a no-op for an existing tab', () => {
+    const existing = openProjectAt('/tmp/created')
+    const current = openProjectAt('/tmp/current')
+    const before = useSessions.getState().tabs
+    const id = openProjectQuietly('/tmp/created')
+    expect(id).toBe(existing)
+    expect(useSessions.getState().tabs).toBe(before)
+    expect(useSessions.getState().activeTabId).toBe(current)
   })
 })
 

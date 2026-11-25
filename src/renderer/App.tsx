@@ -27,7 +27,7 @@ import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
 import { startSchedulePolling } from './state/scheduleState'
 import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd } from './lib/presets'
-import { createPickedSession } from './lib/createPickedSession'
+import { createPickedSession, openProjectQuietly } from './lib/createPickedSession'
 import { openFreeHour } from './lib/freeHour'
 import { StartProjectDialog } from './components/StartProjectDialog'
 import { useVoiceTTS } from './lib/useVoiceTTS'
@@ -167,6 +167,17 @@ export function App() {
     window.addEventListener('sm:navigate', h)
     return () => window.removeEventListener('sm:navigate', h)
   }, [navigate])
+
+  // A project created outside the app UI (e.g. a paired service's
+  // project_create) opens as a dormant background TAB — same as in-app New
+  // Project, but without stealing focus from the owner's current tab.
+  useEffect(() => {
+    const sub = window.api?.app?.onProjectCreated
+    if (typeof sub !== 'function') return
+    return sub((payload) => {
+      if (payload?.cwd) openProjectQuietly(payload.cwd)
+    })
+  }, [])
   const activeTabId = useSessions((s) => s.activeTabId)
   const tabs = useSessions((s) => s.tabs)
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null

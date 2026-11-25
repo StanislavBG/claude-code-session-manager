@@ -114,6 +114,21 @@ describe('sessions.ts addTab()', () => {
     expect(after).toEqual(before)
     expect(useSessions.getState().tabs.filter((t) => t.id === id)).toHaveLength(1)
   })
+
+  it('activate:false keeps the active tab for a new tab and for an existing id', async () => {
+    installWindowApiMock()
+    const { useSessions } = await import('../sessions')
+
+    const first = useSessions.getState().addTab({ cwd: '/a', startupCommand: null, dormant: true })
+    const second = useSessions.getState().addTab({ cwd: '/b', startupCommand: null, dormant: true, activate: false })
+    expect(second).not.toBe(first)
+    expect(useSessions.getState().tabs).toHaveLength(2)
+    expect(useSessions.getState().activeTabId).toBe(first)
+
+    const again = useSessions.getState().addTab({ id: second, cwd: '/b', startupCommand: null, activate: false })
+    expect(again).toBe(second)
+    expect(useSessions.getState().activeTabId).toBe(first)
+  })
 })
 
 describe('sessions.ts newSession()', () => {

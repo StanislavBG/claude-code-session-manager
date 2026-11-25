@@ -39,6 +39,19 @@ export function openProjectAt(cwd: string): string {
 }
 
 /**
+ * Open `cwd` as the project's TAB WITHOUT changing the active tab: an existing
+ * tab for that folder is left as it is, else a dormant one is added in the
+ * background. Used when main reports a project created outside the app UI
+ * (`projects:created`), so the owner never loses their current tab.
+ */
+export function openProjectQuietly(cwd: string): string {
+  const s = useSessions.getState()
+  const existing = s.tabs.find((t) => t.cwd === cwd)
+  if (existing) return existing.id
+  return s.addTab({ cwd, startupCommand: null, presetId: 'pick-dangerous', dormant: true, activate: false })
+}
+
+/**
  * "Open / Start Project" (2026-07-31 domain model): TAB = project folder,
  * exactly one tab per project — work inside a project is managed via Epics,
  * not extra tabs. Browse to an existing folder to OPEN it (the native picker's

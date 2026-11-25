@@ -189,3 +189,21 @@ describe('runEpicSettle findings collection', () => {
     expect(await runEpicSettle({ cwd: '/c', epicId: EPIC }, d)).toEqual({ action: 'digest-sent' });
   });
 });
+
+describe('buildSettledDigest held PRDs', () => {
+  it('names held PRDs in the first line block', () => {
+    const digest = buildSettledDigest({
+      verified: ['0001-a'],
+      held: [{ slug: '0002-release-check', reason: 'waiting on precondition: app > 0.142.0' }, { slug: '0003-validate', reason: 'waiting on 0002-release-check' }],
+    }, { epicId: 'e' });
+    const lines = digest.split('\n');
+    expect(lines[0]).toBe('PLAN SETTLED — nothing of this session is running; 2 PRD(s) are held on a precondition and will run on their own:');
+    expect(lines[1]).toBe('- 0002-release-check — waiting on precondition: app > 0.142.0');
+    expect(lines[2]).toBe('- 0003-validate — waiting on 0002-release-check');
+  });
+
+  it('keeps the existing first line with no held rows', () => {
+    const digest = buildSettledDigest({ verified: ['0001-a'], held: [] }, { epicId: 'e' });
+    expect(digest.split('\n')[0]).toBe('PLAN SETTLED — no PRD of this session is pending or running. This is ONE digest, not a per-PRD request.');
+  });
+});

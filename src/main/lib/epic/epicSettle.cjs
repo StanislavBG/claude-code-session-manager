@@ -4,7 +4,8 @@
  * epicSettle.cjs — pure settle evaluator for one Epic.
  *
  * Given the Epic's event chain and the scheduler queue rows, says whether the
- * Epic has settled (no pending/running PRD) and which finished PRDs no
+ * Epic has settled (no running PRD, and no pending PRD other than ones held
+ * on a preflight precondition or waiting only on such held rows) and which finished PRDs no
  * validator has checked yet. No fs; only the pure lib/scheduler/cancelledRow
  * predicate, never the scheduler itself.
  */
@@ -35,7 +36,50 @@ function evaluateEpicSettle({ epicId, cwd, events, jobs, now, horizonMs } = {}) 
   const epicRows = rows.filter(
     (r) => r && (r.epicId === epicId || r.sourcePromptId === epicId) && (r.cwd == null || cwd == null || r.cwd === cwd),
   );
-  const settled = !epicRows.some((r) => r.status === 'pending' || r.status === 'running');
+  // A pending row is held when its preflight parked it, or when every one of its
+  // unfinished dependencies is itself held. Held rows run on their own later, so
+  // they do not hold back the settle digest; the digest names them instead.
+  const byBare = new Map();
+  for (const r of epicRows) if (r && r.slug != null) byBare.set(bareSlug(String(r.slug)), r);
+  const isFinished = (r) => r.status === 'completed' || r.status === 'skipped';
+  const heldMemo = new Map(); // row -> reason string | null
+  /** @returns {string|null} the held reason, or null when the row is not held */
+  const heldReasonOf = (row, seen) => {
+    if (!row || row.status !== 'pending') return null;
+    if (heldMemo.has(row)) return heldMemo.get(row);
+    if (row.preflightHold) {
+      const reason = typeof row.heldReason === 'string' && row.heldReason ? row.heldReason : 'waiting on precondition';
+      heldMemo.set(row, reason);
+      return reason;
+    }
+    if (seen.has(row)) return null;
+    seen.add(row);
+    const deps = Array.isArray(row.dependsOn) ? row.dependsOn : [];
+    let firstHeld = null;
+    let result = null;
+    let anyUnfinished = false;
+    let allHeld = true;
+    for (const d of deps) {
+      const dep = byBare.get(bareSlug(String(d)));
+      if (!dep || isFinished(dep)) continue;
+      anyUnfinished = true;
+      if (heldReasonOf(dep, seen) == null) { allHeld = false; break; }
+      if (firstHeld == null) firstHeld = String(dep.slug);
+    }
+    if (anyUnfinished && allHeld) result = `waiting on ${firstHeld}`;
+    seen.delete(row);
+    heldMemo.set(row, result);
+    return result;
+  };
+  const held = epicRows
+    .filter((r) => r.status === 'pending')
+    .map((r) => ({ slug: String(r.slug), reason: heldReasonOf(r, new Set()) }))
+    .filter((h) => h.reason != null)
+    .sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+  const heldSet = new Set(held.map((h) => h.slug));
+  const settled = !epicRows.some(
+    (r) => r.status === 'running' || (r.status === 'pending' && !heldSet.has(String(r.slug))),
+  );
   const cancelled = epicRows
     .filter(isCancelledRow)
     .map((r) => String(r.slug))
@@ -101,12 +145,12 @@ function evaluateEpicSettle({ epicId, cwd, events, jobs, now, horizonMs } = {}) 
   failed.sort();
 
   const digestKey = createHash('sha1')
-    .update(JSON.stringify({ verified, refuted, failed, parked, cancelled, uncovered: uncovered.map((u) => u.slug) }))
+    .update(JSON.stringify({ verified, refuted, failed, parked, cancelled, uncovered: uncovered.map((u) => u.slug), held: held.map((h) => h.slug) }))
     .digest('hex')
     .slice(0, 16);
   const hasContent = [uncovered, verified, refuted, failed, parked, cancelled].some((l) => l.length > 0);
 
-  return { settled, uncovered, verified, refuted, failed, parked, cancelled, digestKey, hasContent };
+  return { settled, held, uncovered, verified, refuted, failed, parked, cancelled, digestKey, hasContent };
 }
 
 module.exports = { evaluateEpicSettle, DEFAULT_SETTLE_HORIZON_MS };

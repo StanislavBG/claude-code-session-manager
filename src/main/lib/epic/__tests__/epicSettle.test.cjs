@@ -105,3 +105,48 @@ test('digestKey is 16 hex chars and stable under reordering', () => {
 test('never throws on bad input', () => {
   expect(() => evaluateEpicSettle({ epicId: 'e1', events: null, jobs: 'x' })).not.toThrow();
 });
+
+test('a preflight-held release check and its waiting validator do not block settling; both are listed', () => {
+  const hold = { nextAt: '2026-10-15T13:00:00.000Z' };
+  const jobs = [
+    { slug: '1-done', status: 'completed', epicId: 'e1' },
+    { slug: '2-release-check', status: 'pending', epicId: 'e1', preflightHold: hold, heldReason: 'waiting on precondition: app > 0.142.0' },
+    { slug: '3-validate-release-check', status: 'pending', epicId: 'e1', dependsOn: ['release-check', 'done', 'missing-dep'] },
+  ];
+  const r = run([], jobs);
+  expect(r.settled).toBe(true);
+  expect(r.held).toEqual([
+    { slug: '2-release-check', reason: 'waiting on precondition: app > 0.142.0' },
+    { slug: '3-validate-release-check', reason: 'waiting on 2-release-check' },
+  ]);
+  const r2 = run([], jobs.slice(0, 2));
+  expect(r2.digestKey).not.toBe(r.digestKey);
+});
+
+test('a pending row with no preflightHold does not settle', () => {
+  const r = run([], [{ slug: '1-a', status: 'pending', epicId: 'e1' }]);
+  expect(r.settled).toBe(false);
+  expect(r.held).toEqual([]);
+});
+
+test('a dependent of a non-held pending row does not settle', () => {
+  const jobs = [
+    { slug: '1-held', status: 'pending', epicId: 'e1', preflightHold: { nextAt: 'x' }, heldReason: 'waiting on precondition: x' },
+    { slug: '2-plain', status: 'pending', epicId: 'e1' },
+    { slug: '3-dep', status: 'pending', epicId: 'e1', dependsOn: ['held', 'plain'] },
+    { slug: '4-chain', status: 'pending', epicId: 'e1', dependsOn: ['1-held'] },
+    { slug: '5-chain2', status: 'pending', epicId: 'e1', dependsOn: ['chain'] },
+  ];
+  const r = run([], jobs);
+  expect(r.settled).toBe(false);
+  expect(r.held.map((h) => h.slug)).toEqual(['1-held', '4-chain', '5-chain2']);
+  expect(r.held[2].reason).toBe('waiting on 4-chain');
+});
+
+test('dependency cycles among pending rows are not held', () => {
+  const jobs = [
+    { slug: '1-a', status: 'pending', epicId: 'e1', dependsOn: ['b'] },
+    { slug: '2-b', status: 'pending', epicId: 'e1', dependsOn: ['a'] },
+  ];
+  expect(run([], jobs).settled).toBe(false);
+});

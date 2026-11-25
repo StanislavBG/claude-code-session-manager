@@ -143,8 +143,16 @@ function buildSettledDigest(settle, { epicId, notValidatedReason, cwd, findings 
   const parked = s.parked || [];
   const cancelled = s.cancelled || [];
   const notValidated = (s.uncovered || []).map((u) => (typeof u === 'string' ? u : u.slug));
+  const held = Array.isArray(s.held) ? s.held : [];
+  const head = held.length
+    ? [
+      `PLAN SETTLED — nothing of this session is running; ${held.length} PRD(s) are held on a precondition and will run on their own:`,
+      ...held.map((h) => `- ${h.slug}${h.reason ? ` — ${h.reason}` : ''}`),
+      'This is ONE digest, not a per-PRD request.',
+    ]
+    : [`PLAN SETTLED — no PRD of this session is pending or running. This is ONE digest, not a per-PRD request.`];
   const lines = [
-    `PLAN SETTLED — no PRD of this session is pending or running. This is ONE digest, not a per-PRD request.`,
+    ...head,
     ...recordFolderLines(cwd, epicId),
     'Do NOT re-verify VERIFIED PRDs — a validator already checked them.',
   ];

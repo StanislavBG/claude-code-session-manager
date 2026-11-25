@@ -246,7 +246,7 @@ scheduler saves it as `session-manager-operations/plan-records/<epic-id>/<valida
 `GET /admin/epic` serves it as `verdicts`. Queue the validate PRD in the same `scheduler_create_prds` call as the plan (its `dependsOn` may name that call's entries); with single creates it goes last: in a single `scheduler_create_prd`, `dependsOn` accepts only slugs that already exist. The
 scheduler sends no per-PRD validation prompt. When the Epic has no pending or running PRD for
 `SM_EPIC_SETTLE_SECONDS` (default 120), it queues one `validate-sweep-*` validator for completed
-PRDs no validator checked (a large sweep becomes several sweeps in turn), then sends one PLAN SETTLED digest. Several validators in one Epic
+PRDs no validator checked (a large sweep becomes several sweeps in turn), then sends one PLAN SETTLED digest. PRDs held on a precondition, and validators waiting only on them, do not hold back the digest, which lists them. Several validators in one Epic
 are fine: each runs headless.
 
 If the API rejects `agentType: "validator"`, the persona is not installed: keep the plan

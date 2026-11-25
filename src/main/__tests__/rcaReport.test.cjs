@@ -151,6 +151,78 @@ test('writeRcaReport: works for a job whose PRD cannot be read (no acceptance cr
   expect(fs.readFileSync(res.path, 'utf8')).toContain('acceptance criteria not found');
 });
 
+// ─── PRD lookup: Epic prds/, Epic prds-archived/, fallback ───────────────────
+
+function writeEpicPrd(cwd, epicId, sub, slug, acBody) {
+  const dir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId, sub);
+  fs.mkdirSync(dir, { recursive: true });
+  const body = ['---', `title: ${slug}`, '---', '', '# Goal', '', 'Do it.', '', '# Acceptance criteria', '', acBody, '', '# Out of scope', '', '- N/A'].join('\n');
+  fs.writeFileSync(path.join(dir, `${slug}.md`), body);
+}
+
+test('writeRcaReport: quotes criteria from the job\'s own Epic prds/ dir', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writeEpicPrd(cwd, 'epic-abc', 'prds', 'testslug', '- [ ] ac-1: epic live criterion');
+
+  const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd, epicId: 'epic-abc' }), runDir, verdict: 'transcript_errors' });
+
+  const body = fs.readFileSync(res.path, 'utf8');
+  const section = body.split("# The PRD's acceptance criteria")[1] ?? '';
+  expect(section).toContain('epic live criterion');
+  expect(body).not.toContain('acceptance criteria not found');
+});
+
+test('writeRcaReport: finds a PRD in another Epic prds/ dir of the project when epicId is absent', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writeEpicPrd(cwd, 'other-epic', 'prds', 'testslug', '- [ ] ac-1: sibling epic criterion');
+
+  const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd }), runDir, verdict: 'transcript_errors' });
+
+  expect(fs.readFileSync(res.path, 'utf8')).toContain('sibling epic criterion');
+});
+
+test('writeRcaReport: quotes criteria from an Epic prds-archived/ twin', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writeEpicPrd(cwd, 'epic-abc', 'prds-archived', 'testslug', '- [ ] ac-1: archived criterion');
+
+  const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd, epicId: 'epic-abc' }), runDir, verdict: 'transcript_errors' });
+
+  const body = fs.readFileSync(res.path, 'utf8');
+  expect(body).toContain('archived criterion');
+  expect(body).not.toContain('acceptance criteria not found');
+});
+
+test('writeRcaReport: a PRD found nowhere (Epic dirs exist) still gets the not-found fallback', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writeEpicPrd(cwd, 'epic-abc', 'prds', 'otherslug', '- [ ] ac-1: unrelated');
+
+  const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd, epicId: 'epic-abc' }), runDir, verdict: 'transcript_errors' });
+
+  const body = fs.readFileSync(res.path, 'utf8');
+  expect(body).toContain('acceptance criteria not found');
+  expect(body).not.toContain('unrelated');
+});
+
+test('writeRcaReport: an unsafe epicId is skipped and the lookup continues with the Epic prds/ dirs', async () => {
+  const cwd = makeProject();
+  const runDir = path.join(tmpHome, 'run1');
+  writeRun(runDir, 'testslug');
+  writeEpicPrd(cwd, 'real-epic', 'prds', 'testslug', '- [ ] ac-1: found despite bad epicId');
+
+  const res = await rcaReport.writeRcaReport({ job: baseJob({ cwd, epicId: '../x' }), runDir, verdict: 'transcript_errors' });
+
+  expect(res.filed).toBe(true);
+  expect(fs.readFileSync(res.path, 'utf8')).toContain('found despite bad epicId');
+});
+
 // ─── skip paths ──────────────────────────────────────────────────────────────
 
 test('writeRcaReport: rejects a slug containing path-traversal segments', async () => {

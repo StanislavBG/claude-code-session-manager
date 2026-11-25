@@ -34,7 +34,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { splitFrontmatter } = require('../prd/prdFrontmatter.cjs');
 const { readTail } = require('../util/fileTail.cjs');
-const { resolvePrdWriteDir } = require('../prd/prdLocations.cjs');
+const {
+  resolvePrdWriteDir,
+  resolveEpicPrdWriteDir,
+  listEpicPrdDirs,
+  listArchivedPrdDirs,
+  isSafeEpicId,
+} = require('../prd/prdLocations.cjs');
 const atomicFs = require('../util/atomicFs.cjs');
 
 // ─── VERDICT_LABELS — deliberate duplicate ──────────────────────────────────
@@ -317,14 +323,31 @@ function readRunMeta(runDir, slug) {
   }
 }
 
-function readPrdBody(cwd, slug) {
-  if (!cwd) return '';
-  try {
-    const raw = fs.readFileSync(path.join(resolvePrdWriteDir(cwd), `${slug}.md`), 'utf8');
-    return splitFrontmatter(raw).body;
-  } catch {
-    return '';
+/**
+ * Read the parked job's PRD body (frontmatter stripped). Looks where PRDs
+ * really live, in order: the job's own Epic prds/, every Epic prds/ of the
+ * project, every prds-archived/ twin, then the retired flat dir. Scoped to
+ * job.cwd only — never a machine-wide scan. Returns '' when not found; never
+ * throws.
+ */
+function readPrdBody(job) {
+  const cwd = job?.cwd;
+  const slug = job?.slug;
+  if (!cwd || typeof cwd !== 'string' || !slug) return '';
+  const candidates = [];
+  const add = (dir) => { if (dir && !candidates.includes(dir)) candidates.push(dir); };
+  if (isSafeEpicId(job.epicId)) {
+    try { add(resolveEpicPrdWriteDir(cwd, job.epicId)); } catch { /* skip */ }
   }
+  try { for (const d of listEpicPrdDirs(cwd)) add(d); } catch { /* skip */ }
+  try { for (const d of listArchivedPrdDirs(cwd)) add(d); } catch { /* skip */ }
+  try { add(resolvePrdWriteDir(cwd)); } catch { /* skip */ }
+  for (const dir of candidates) {
+    let raw;
+    try { raw = fs.readFileSync(path.join(dir, `${slug}.md`), 'utf8'); } catch { continue; }
+    try { return splitFrontmatter(raw).body; } catch { return ''; }
+  }
+  return '';
 }
 
 /**
@@ -412,7 +435,7 @@ async function writeRcaReport({ job, runDir, verdict, annotations, investigation
     const meta = readRunMeta(runDir, job.slug);
     const logPath = runDir ? path.join(runDir, `${job.slug}.log`) : null;
     const logTail = logPath ? readTail(logPath, 64 * 1024) : '';
-    const acText = extractAcceptanceCriteria(readPrdBody(job.cwd, job.slug));
+    const acText = extractAcceptanceCriteria(readPrdBody(job));
     const failureClass = classifyFailure({ verdict, logTail });
 
     const markdown = buildRcaMarkdown({

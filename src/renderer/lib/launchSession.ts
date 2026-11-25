@@ -108,13 +108,13 @@ export async function launchSession(input: LaunchSessionInput): Promise<LaunchSe
     const res = await window.api.macros.dispatchJob({ cwd, macroId, epicId: session.id, extraInstructions, ...(effort ? { effort } : {}), ...(inputValues ? { inputValues } : {}), ...(reviewStage ? { reviewStage: true } : {}), ...(voiceId ? { voiceId } : {}) })
     if (!res.ok) throw new Error(`"${title}" session was created but its build was not queued: ${res.error} — press it again to retry.`)
     // main's dispatch-job also returns entryId + stage for a Video tool / Demo Video build.
-    const extra = res as { entryId?: unknown; stage?: unknown }
-    const stage = extra.stage === 'review' || extra.stage === 'final' || extra.stage === null ? extra.stage : undefined
+    const { entryId } = res
+    const stage = res.stage === 'review' || res.stage === 'final' || res.stage === null ? res.stage : undefined
     return {
       epicId: session.id,
       claudeSessionId: session.claudeSessionId,
       ...(typeof res.slug === 'string' && res.slug ? { slug: res.slug } : {}),
-      ...(typeof extra.entryId === 'string' && extra.entryId ? { entryId: extra.entryId } : {}),
+      ...(typeof entryId === 'string' && entryId ? { entryId } : {}),
       ...(stage !== undefined ? { stage } : {}),
     }
   }

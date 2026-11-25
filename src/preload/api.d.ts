@@ -369,7 +369,7 @@ export interface MacroJobDispatchInput {
 }
 
 export type MacroJobDispatchResult =
-  | { ok: true; slug: string; epicId: string }
+  | { ok: true; slug: string; epicId: string; entryId: string | null; stage: 'review' | 'final' | null }
   | { ok: false; error: string; activeSlug?: string };
 
 export type MacroJobState = 'queued' | 'running' | 'done' | 'failed';

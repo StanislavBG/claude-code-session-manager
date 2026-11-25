@@ -186,6 +186,13 @@ describe('launchSession', () => {
     expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1', slug: 's', stage: null })
   })
 
+  it("run 'job': a built-in without an entry (entryId null) returns no entryId", async () => {
+    dispatchJob.mockResolvedValue({ ok: true, slug: 'b-1', epicId: 'e1', entryId: null, stage: null })
+    const out = await launchSession({ ...input, macroId: 'm9', run: 'job' })
+    expect(out).not.toHaveProperty('entryId')
+    expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1', slug: 'b-1', stage: null })
+  })
+
   it("run 'job': an { ok: false } result throws its error text", async () => {
     dispatchJob.mockResolvedValue({ ok: false, error: 'already building' })
     const err = await launchSession({ ...input, macroId: 'm9', run: 'job' }).catch((e: Error) => e)

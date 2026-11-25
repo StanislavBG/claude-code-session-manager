@@ -97,6 +97,28 @@ describe('isSessionManagerRepo', () => {
     expect(isSessionManagerRepo(undefined)).toBe(false);
     expect(isSessionManagerRepo(path.join(dir, 'nope'))).toBe(false);
   });
+  test('malformed package.json is false, never throws', () => {
+    const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-replyclaims-bad-'));
+    try {
+      fs.writeFileSync(path.join(bad, 'package.json'), '{"name": "claude-code-session-manager",');
+      expect(() => isSessionManagerRepo(bad)).not.toThrow();
+      expect(isSessionManagerRepo(bad)).toBe(false);
+      fs.writeFileSync(path.join(bad, 'package.json'), '');
+      expect(isSessionManagerRepo(bad)).toBe(false);
+      fs.writeFileSync(path.join(bad, 'package.json'), '"claude-code-session-manager"');
+      expect(isSessionManagerRepo(bad)).toBe(false);
+      expect(isSessionManagerRepo(42)).toBe(false);
+      expect(isSessionManagerRepo('')).toBe(false);
+    } finally {
+      fs.rmSync(bad, { recursive: true, force: true });
+    }
+  });
+  test('reads package.json through atomicFs readJsonOrSync, not a hand-rolled JSON.parse', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'replyClaims.cjs'), 'utf8');
+    expect(src).not.toMatch(/JSON\.parse\(\s*fs\.readFileSync/);
+    expect(src).toMatch(/require\('\.\.\/util\/atomicFs\.cjs'\)/);
+    expect(src).toMatch(/readJsonOrSync\(path\.join\(cwd, 'package\.json'\), null\)/);
+  });
 });
 
 describe('checkReleaseContains', () => {

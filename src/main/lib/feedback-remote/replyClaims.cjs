@@ -4,7 +4,8 @@
  *
  * Used by crossProjectReply.cjs (the app route) and
  * scripts/scheduler-mcp-server.cjs (the MCP server), so it must load outside
- * Electron: requires only node built-ins and ../git/gitExec.cjs.
+ * Electron: requires only node built-ins, ../util/atomicFs.cjs and
+ * ../git/gitExec.cjs.
  *
  * - findUnfilledPlaceholders: version-ish template tokens left in a message
  *   ('{version}', '{{appVersion}}', '${release}', '<semver>', ...).
@@ -16,8 +17,8 @@
  */
 'use strict';
 
-const fs = require('node:fs');
 const path = require('node:path');
+const { readJsonOrSync } = require('../util/atomicFs.cjs');
 
 const SM_PACKAGE_NAME = 'claude-code-session-manager';
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
@@ -98,13 +99,14 @@ function normalizeReleaseClaim(raw) {
 }
 
 function isSessionManagerRepo(cwd) {
+  if (typeof cwd !== 'string' || !cwd) return false;
+  let pkg;
   try {
-    if (typeof cwd !== 'string' || !cwd) return false;
-    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
-    return !!pkg && typeof pkg === 'object' && pkg.name === SM_PACKAGE_NAME;
+    pkg = readJsonOrSync(path.join(cwd, 'package.json'), null);
   } catch {
     return false;
   }
+  return !!pkg && typeof pkg === 'object' && !Array.isArray(pkg) && pkg.name === SM_PACKAGE_NAME;
 }
 
 function defaultRunGit(cwd, args) {

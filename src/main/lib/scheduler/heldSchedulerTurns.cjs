@@ -7,7 +7,13 @@
  * durably until the hold ends.
  *
  * Store: schedulerPaths.heldSchedulerTurnsPath() — { version: 1, entries: [] }.
- * Each entry: { id, tabId, kind, prompt, sessionId, cwd, heldAt, holdReason, holdDetail }.
+ * Each entry: { id, tabId, kind, prompt, sessionId, cwd, heldAt, holdReason, holdDetail, lastAttempt? }.
+ *
+ * An 'unconfirmed' send that carries a requestId (the renderer ack timed out) stamps
+ * its entries with lastAttempt { requestId, at } and drain skips them for
+ * LAST_ATTEMPT_GRACE_MS: the renderer may still have run the turn. A late ack
+ * (chatRunner → confirmLateDelivery(requestId)) removes them; no ack → resent once
+ * after the grace.
  *
  * drain() delivers each tab's held messages ONCE, oldest first, as one coalesced
  * prompt; entries are removed only after the send resolved a disposition that
@@ -25,6 +31,7 @@ const KINDS = Object.freeze(['settle-digest', 'job-notice', 'auto-start-follow-u
 // 'held': the hold returned between the drain check and the send. The batch is not
 // re-deferred (heldBatch), so the originals must stay or they are lost.
 const NOT_ACCEPTED = new Set(['refused', 'unconfirmed', 'held']);
+const LAST_ATTEMPT_GRACE_MS = 10 * 60 * 1000;
 
 /** @type {null | (() => any)} */
 let holdProvider = null;
@@ -110,8 +117,41 @@ function buildCoalescedPrompt(entries) {
   return parts.join('\n\n');
 }
 
-async function drainOnce({ send, isStillNeeded }) {
+/** True while an entry's last unconfirmed attempt may still be acked late. */
+function inAttemptGrace(e, now) {
+  const a = e.lastAttempt;
+  if (!a || typeof a !== 'object' || typeof a.requestId !== 'string') return false;
+  const at = Date.parse(a.at);
+  return Number.isFinite(at) && now - at < LAST_ATTEMPT_GRACE_MS;
+}
+
+/** Stamp the given entry ids with lastAttempt (one atomic write). */
+function stampAttempt(ids, requestId) {
+  const at = new Date().toISOString();
   const entries = readEntries();
+  let changed = false;
+  for (const e of entries) {
+    if (ids.has(e.id)) { e.lastAttempt = { requestId, at }; changed = true; }
+  }
+  if (changed) writeEntries(entries);
+}
+
+/**
+ * The renderer acked a timed-out send late (a run was produced): remove exactly
+ * the entries stamped with that requestId, in one atomic write. Returns the count.
+ */
+function confirmLateDelivery(requestId) {
+  if (typeof requestId !== 'string' || !requestId) return 0;
+  const entries = readEntries();
+  const left = entries.filter((e) => !(e.lastAttempt && e.lastAttempt.requestId === requestId));
+  const removed = entries.length - left.length;
+  if (removed > 0) writeEntries(left);
+  return removed;
+}
+
+async function drainOnce({ send, isStillNeeded }) {
+  const now = Date.now();
+  const entries = readEntries().filter((e) => !inAttemptGrace(e, now));
   if (entries.length === 0) return [];
   /** @type {Map<string, any[]>} */
   const groups = new Map();
@@ -137,6 +177,7 @@ async function drainOnce({ send, isStillNeeded }) {
       const head = keep.find((e) => e.sessionId) ?? keep[0];
       const withCwd = keep.find((e) => e.cwd) ?? keep[0];
       let disposition = 'unconfirmed';
+      let requestId = null;
       try {
         const res = await send(tabId, buildCoalescedPrompt(keep), {
           origin: 'scheduler',
@@ -145,8 +186,14 @@ async function drainOnce({ send, isStillNeeded }) {
           cwd: withCwd.cwd ?? undefined,
         });
         disposition = res && typeof res.disposition === 'string' ? res.disposition : 'unconfirmed';
+        requestId = res && typeof res.requestId === 'string' && res.requestId ? res.requestId : null;
       } catch {
         disposition = 'unconfirmed';
+      }
+      // Stamp right away (synchronously after the send resolved) so a late ack
+      // arriving while other tabs are still sending finds its entries.
+      if (disposition === 'unconfirmed' && requestId) {
+        stampAttempt(new Set(keep.map((e) => e.id)), requestId);
       }
       if (!NOT_ACCEPTED.has(disposition)) {
         delivered = keep.length;
@@ -182,4 +229,6 @@ module.exports = {
   summary,
   buildCoalescedPrompt,
   drain,
+  confirmLateDelivery,
+  LAST_ATTEMPT_GRACE_MS,
 };

@@ -360,7 +360,7 @@ test('a timed-out relayed send leaves no note; a later untagged external send lo
     const p = cr.enqueueExternalPrompt(EPIC, 'lost', { relay: 'web-remote' });
     expect(cr.__relayNoteCount(EPIC, 'lost')).toBe(1);
     vi.advanceTimersByTime(cr.EXTERNAL_SEND_ACK_TIMEOUT_MS);
-    await expect(p).resolves.toEqual({ disposition: 'unconfirmed', reason: 'timeout' });
+    await expect(p).resolves.toEqual({ disposition: 'unconfirmed', reason: 'timeout', requestId: expect.any(String) });
     expect(cr.__relayNoteCount(EPIC, 'lost')).toBe(0);
   } finally {
     vi.useRealTimers();

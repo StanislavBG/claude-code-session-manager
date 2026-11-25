@@ -53,7 +53,7 @@ test('broadcast carries a requestId and the report resolves the promise', async 
 test('timeout yields unconfirmed/timeout', async () => {
   const p = cr.enqueueExternalPrompt('tab-1', 'hi');
   await vi.advanceTimersByTimeAsync(cr.EXTERNAL_SEND_ACK_TIMEOUT_MS + 1);
-  await expect(p).resolves.toEqual({ disposition: 'unconfirmed', reason: 'timeout' });
+  await expect(p).resolves.toEqual({ disposition: 'unconfirmed', reason: 'timeout', requestId: expect.any(String) });
 });
 
 test('no window yields unconfirmed/no-window without broadcasting', async () => {
@@ -69,5 +69,5 @@ test('unknown requestId and invalid payload are ignored', async () => {
   expect(() => report({ requestId, disposition: 'bogus' })).toThrow();
   expect(() => report({ disposition: 'sent' })).toThrow();
   await vi.advanceTimersByTimeAsync(cr.EXTERNAL_SEND_ACK_TIMEOUT_MS + 1);
-  await expect(p).resolves.toEqual({ disposition: 'unconfirmed', reason: 'timeout' });
+  await expect(p).resolves.toEqual({ disposition: 'unconfirmed', reason: 'timeout', requestId: expect.any(String) });
 });

@@ -205,4 +205,54 @@ describe('buildCoalescedPrompt / drain', () => {
     const left = JSON.parse(fs.readFileSync(storeFile(), 'utf8')).entries;
     assert.deepEqual(left.map((e) => e.prompt), ['p2-late']);
   });
+
+  it('timeout then late ack: entries stamped, skipped, confirmLateDelivery removes exactly them', async () => {
+    const m = freshModule();
+    m.defer({ tabId: 't1', prompt: 'a', kind: 'job-notice', hold: HOLD });
+    m.defer({ tabId: 't2', prompt: 'b', kind: 'job-notice', hold: HOLD });
+    let n = 0;
+    const calls = [];
+    const send = async (tabId) => {
+      calls.push(tabId);
+      n += 1;
+      return tabId === 't1' ? { disposition: 'unconfirmed', reason: 'timeout', requestId: `rq-${n}` } : { disposition: 'unconfirmed', reason: 'no-window' };
+    };
+    await m.drain({ send });
+    const file = JSON.parse(fs.readFileSync(storeFile(), 'utf8')).entries;
+    const a = file.find((e) => e.prompt === 'a');
+    const b = file.find((e) => e.prompt === 'b');
+    assert.equal(a.lastAttempt.requestId, 'rq-1');
+    assert.ok(!Number.isNaN(Date.parse(a.lastAttempt.at)));
+    assert.equal(b.lastAttempt, undefined);
+    assert.equal(m.confirmLateDelivery('rq-unknown'), 0);
+    assert.equal(m.confirmLateDelivery('rq-1'), 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(storeFile(), 'utf8')).entries.map((e) => e.prompt), ['b']);
+    calls.length = 0;
+    await m.drain({ send: async (tabId) => { calls.push(tabId); return { disposition: 'queued' }; } });
+    assert.deepEqual(calls, ['t2']);
+  });
+
+  it('timeout and no ack: skipped during the grace, resent once after it', async () => {
+    const m = freshModule();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-24T10:00:00Z'));
+      m.defer({ tabId: 't1', prompt: 'a', kind: 'job-notice', hold: HOLD });
+      const calls = [];
+      const lost = async (tabId) => { calls.push(tabId); return { disposition: 'unconfirmed', reason: 'timeout', requestId: 'rq-x' }; };
+      await m.drain({ send: lost });
+      assert.equal(calls.length, 1);
+      vi.advanceTimersByTime(m.LAST_ATTEMPT_GRACE_MS - 1000);
+      assert.deepEqual(await m.drain({ send: lost }), []);
+      assert.equal(calls.length, 1);
+      vi.advanceTimersByTime(2000);
+      const ok = async (tabId) => { calls.push(tabId); return { disposition: 'queued' }; };
+      assert.deepEqual(await m.drain({ send: ok }), [{ tabId: 't1', delivered: 1, dropped: 0 }]);
+      assert.equal(calls.length, 2);
+      assert.deepEqual(await m.drain({ send: ok }), []);
+      assert.equal(calls.length, 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

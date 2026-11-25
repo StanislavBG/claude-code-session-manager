@@ -1391,6 +1391,16 @@ function cancel(tabId) {
 // than duplicating it here.
 
 const pendingExternalSends = new Map(); // requestId -> { resolve, timer }
+// requestId -> expiry timer. A send that timed out may still be acked by the
+// renderer; a late ack that produced a run confirms the held-turn entries it carried.
+const timedOutExternalSends = new Map();
+const TIMED_OUT_SEND_TTL_MS = 10 * 60 * 1000;
+
+function rememberTimedOutSend(requestId) {
+  const t = setTimeout(() => { timedOutExternalSends.delete(requestId); }, TIMED_OUT_SEND_TTL_MS);
+  t.unref?.();
+  timedOutExternalSends.set(requestId, t);
+}
 
 function hasLiveWindow() {
   try {
@@ -1400,7 +1410,8 @@ function hasLiveWindow() {
 
 /**
  * Resolves { disposition, reason? } once the renderer reports what it did, or
- * { disposition: 'unconfirmed', reason: 'timeout' | 'no-window' }. Never rejects.
+ * { disposition: 'unconfirmed', reason: 'no-window' } / { disposition: 'unconfirmed',
+ * reason: 'timeout', requestId } (a late ack may still confirm a held batch). Never rejects.
  */
 // tabId -> identity key of the usage hold last audited for it (one audit per tab per hold).
 const heldTurnAuditKeys = new Map();
@@ -1464,7 +1475,8 @@ function enqueueExternalPrompt(tabId, prompt, extra = {}) {
     };
     const timer = setTimeout(() => {
       pendingExternalSends.delete(requestId);
-      resolve({ disposition: 'unconfirmed', reason: 'timeout' });
+      rememberTimedOutSend(requestId);
+      resolve({ disposition: 'unconfirmed', reason: 'timeout', requestId });
     }, EXTERNAL_SEND_ACK_TIMEOUT_MS);
     timer.unref?.();
     pendingExternalSends.set(requestId, { resolve, timer });
@@ -1480,7 +1492,20 @@ function enqueueExternalPrompt(tabId, prompt, extra = {}) {
 
 function settleExternalSend({ requestId, disposition, reason }) {
   const entry = pendingExternalSends.get(requestId);
-  if (!entry) return;
+  if (!entry) {
+    const late = timedOutExternalSends.get(requestId);
+    if (late === undefined) return;
+    clearTimeout(late);
+    timedOutExternalSends.delete(requestId);
+    if (disposition !== 'refused' && disposition !== 'unconfirmed') {
+      try {
+        require('./lib/scheduler/heldSchedulerTurns.cjs').confirmLateDelivery(requestId);
+      } catch (err) {
+        console.error('[chatRunner] confirmLateDelivery failed:', err);
+      }
+    }
+    return;
+  }
   clearTimeout(entry.timer);
   pendingExternalSends.delete(requestId);
   entry.resolve({ disposition, ...(reason !== undefined ? { reason } : {}) });

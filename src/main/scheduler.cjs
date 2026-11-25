@@ -12488,7 +12488,13 @@ async function runGateShadow(job) {
         try { await execGitAt(job.cwd, ['worktree', 'prune'], { timeout: 30_000 }); } catch { /* best-effort */ }
       }
     }
-    baselineDecision = decideBaselineAuthority({ job, headOutcome: outcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable });
+    // The run's recorded FAIL reason (read-only; runVerify owns the sidecar).
+    const reasonRunId = job.runId || reviewLadder.resolveRunId(job);
+    const sidecar = reasonRunId
+      ? readJsonOrSync(path.join(schedulerPaths.runsDir(), reasonRunId, `${job.slug}.verdicts.json`), null)
+      : null;
+    const failReason = sidecar && typeof sidecar.reason === 'string' ? sidecar.reason : '';
+    baselineDecision = decideBaselineAuthority({ job, headOutcome: outcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable, failReason });
     gateShadow.baseline = { head: headBefore, base: job.guardHeadBefore, outcome: baseOutcome, setup: baseSetup, ...baselineDecision };
   }
 

@@ -84,7 +84,32 @@ function failingStep(outcome) {
 }
 
 /**
- * decideBaselineAuthority({ job, headOutcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable, env })
+ * The file part of a failing-test id: before ' > ' (vitest), '::' (pytest) or
+ * ':TS' (tsc); the whole id otherwise.
+ * @param {string} id
+ * @returns {string}
+ */
+function idFilePart(id) {
+  for (const sep of [' > ', '::', ':TS']) {
+    const i = id.indexOf(sep);
+    if (i > 0) return id.slice(0, i).trim();
+  }
+  return id;
+}
+
+/**
+ * True when `text` names at least one failing id, or that id's file part.
+ * @param {unknown} text
+ * @param {string[]} ids
+ * @returns {boolean}
+ */
+function reasonNamesFailure(text, ids) {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  return ids.some((id) => text.includes(id) || text.includes(idFilePart(id)));
+}
+
+/**
+ * decideBaselineAuthority({ job, headOutcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable, failReason, env })
  *   → { complete, reason, preexisting }
  *
  * Checks run in a fixed order; the first failed check is the reason.
@@ -97,10 +122,13 @@ function failingStep(outcome) {
  * @param {boolean} params.ancestorOk - landedCommit is an ancestor of (or equal to) the pre-gate HEAD.
  * @param {boolean} params.cleanOk - tree clean before and after the gate.
  * @param {boolean} params.headStable - HEAD unmoved across the gate.
+ * @param {string} [params.failReason] - the run's recorded FAIL reason (verdicts sidecar `reason`).
+ *   Checked LAST: it must name a HEAD failing id or its file part, else 'fail-not-about-gate' —
+ *   a FAIL on an outside blocker over an already-red suite is not a success.
  * @param {object} [params.env] - defaults to process.env.
  * @returns {{complete: boolean, reason: string, preexisting: string[]}}
  */
-function decideBaselineAuthority({ job, headOutcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable, env = process.env } = {}) {
+function decideBaselineAuthority({ job, headOutcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable, failReason, env = process.env } = {}) {
   const no = (reason) => ({ complete: false, reason, preexisting: [] });
   if (env?.SM_BASELINE_GATE_AUTHORITY_DISABLE === '1') return no('kill-switch');
   if (!job || job.status !== 'needs_review' || job.verifierVerdict !== 'sentinel_fail') {
@@ -122,6 +150,7 @@ function decideBaselineAuthority({ job, headOutcome, baseOutcome, evidenceOk, an
   if (!headIds || !baseIds) return no('unparseable-output');
   const baseSet = new Set(baseIds);
   if (headIds.some((id) => !baseSet.has(id))) return no('new-failures');
+  if (!reasonNamesFailure(failReason, headIds)) return no('fail-not-about-gate');
   return { complete: true, reason: 'baseline-identical', preexisting: headIds };
 }
 

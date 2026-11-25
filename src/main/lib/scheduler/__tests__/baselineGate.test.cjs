@@ -30,7 +30,10 @@ describe('parseFailingTests', () => {
 });
 
 describe('decideBaselineAuthority', () => {
-  const ok = { job, ...proofs, headOutcome: red('x', PY), baseOutcome: red('y', PY + 'FAILED c.py::z\n'), env: {} };
+  const ok = {
+    job, ...proofs, headOutcome: red('x', PY), baseOutcome: red('y', PY + 'FAILED c.py::z\n'), env: {},
+    failReason: 'gate red: 2 pre-existing failures in tests/a.py, identical on base',
+  };
   const reason = (over) => decideBaselineAuthority({ ...ok, ...over }).reason;
 
   it('completes when HEAD failures are a subset of base', () => {
@@ -56,5 +59,42 @@ describe('decideBaselineAuthority', () => {
     assert.equal(reason({ headOutcome: red('x', 'boom') }), 'unparseable-output');
     assert.equal(reason({ baseOutcome: red('y', 'boom') }), 'unparseable-output');
     assert.equal(reason({ headOutcome: red('x', PY + 'FAILED new.py::n\n') }), 'new-failures');
+  });
+  it("refuses an already-red gate when the FAIL reason is about something else", () => {
+    const VT = ' FAIL  src/a.test.ts > suite > does it 5ms\n FAIL  src/b.test.ts\n   × other thing 3ms\n';
+    const r = decideBaselineAuthority({
+      ...ok,
+      headOutcome: red('x', VT),
+      baseOutcome: red('y', VT),
+      failReason: 'executor reported SCHEDULER_VERDICT: FAIL: HUMAN_ACTION_REQUIRED: owner must complete App Store Connect compliance forms SECURITYASF395E, AIGENERATEFD1DE',
+    });
+    assert.deepEqual(r, { complete: false, reason: 'fail-not-about-gate', preexisting: [] });
+  });
+  it('completes when the FAIL reason names a failing test file', () => {
+    const VT = ' FAIL  src/a.test.ts > suite > does it 5ms\n FAIL  src/b.test.ts\n   × other thing 3ms\n';
+    const r = decideBaselineAuthority({
+      ...ok,
+      headOutcome: red('x', VT),
+      baseOutcome: red('y', VT),
+      failReason: 'gate red: 2 pre-existing failures in src/b.test.ts, identical on base',
+    });
+    assert.deepEqual(r, {
+      complete: true,
+      reason: 'baseline-identical',
+      preexisting: ['src/a.test.ts > suite > does it', 'src/b.test.ts > other thing'],
+    });
+  });
+  it('refuses when failReason is omitted or empty', () => {
+    const { failReason: _omit, ...noReason } = ok;
+    assert.equal(decideBaselineAuthority(noReason).reason, 'fail-not-about-gate');
+    assert.equal(reason({ failReason: '' }), 'fail-not-about-gate');
+  });
+  it('matches a pytest id by its path part and a tsc id by its file part', () => {
+    assert.equal(reason({ failReason: 'red: tests/b.py fails on base too' }), 'baseline-identical');
+    const TS = 'src/x.ts(10,5): error TS2322: bad\n';
+    assert.equal(
+      reason({ headOutcome: red('x', TS), baseOutcome: red('y', TS), failReason: 'typecheck red in src/x.ts, pre-existing' }),
+      'baseline-identical',
+    );
   });
 });

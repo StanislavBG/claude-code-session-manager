@@ -232,7 +232,9 @@ complete when the gate was already red before the job (`decideBaselineAuthority`
 linked via `linkDependencyDirs`, removed afterwards, memoized per HEAD on `gateShadow.baseline`). The scratch also runs the project's `worktreeSetup`; its outcome is recorded on `gateShadow.baseline.setup`, and a base whose declared setup did not pass is unavailable (`base-setup-<reason>`).
 Failing-id subset rule: both runs must fail the same gate step, and every failing test id at HEAD
 (`parseFailingTests`) must also fail at base — one new failing id, an unparseable output, or a green
-base refuses. The landed-commit evidence, on-HEAD, clean-tree and HEAD-stable checks are the same as
+base refuses. Last, the run's recorded FAIL reason (the verdicts sidecar `reason`) must name one of
+the excused failures (an id or its file part); otherwise it refuses `fail-not-about-gate`, so a FAIL
+on an outside blocker over an already-red suite stays parked. The landed-commit evidence, on-HEAD, clean-tree and HEAD-stable checks are the same as
 above. Success completes the row with verdict `pass_preexisting_gate_red` (ids in
 `preexistingGateFailures`, named in the completion notice); the decision and its `reason` are
 recorded at `gateShadow.baseline`. Kill switch `SM_BASELINE_GATE_AUTHORITY_DISABLE=1`.

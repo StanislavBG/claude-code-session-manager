@@ -15,15 +15,16 @@ const DAY = 86_400_000;
 
 beforeEach(() => mc._resetForTests());
 
-function harness({ switchOn = true, lastStartedAt = null, overBudget = false } = {}) {
+function harness({ switchOn = true, lastStartedAt = null, lastStatus = 'ok', overBudget = false } = {}) {
   const posts = [];
   const listCalls = [];
   const deps = {
+    usageHold: () => null,
     isTaskSwitchOn: () => switchOn,
     listTasks: async (cwd, o) => {
       listCalls.push({ cwd, o });
       const inWindow = lastStartedAt && Date.parse(lastStartedAt) >= Date.parse(o.since);
-      return { tasks: inWindow ? [{ startedAt: lastStartedAt, caller: { pipeline: o.pipeline } }] : [] };
+      return { tasks: inWindow ? [{ startedAt: lastStartedAt, status: lastStatus, caller: { pipeline: o.pipeline } }] : [] };
     },
     measureBudget: () => ({ dir: '/tmp/mem', bytes: overBudget ? 30000 : 1000, lines: overBudget ? 250 : 10, maxBytes: 25600, maxLines: 200, overBudget }),
     staleCandidates: async () => [{ name: 'old_note.md', ageDays: 120, inboundLinks: 0, reasons: ['90+ days old with no inbound links'], deadRefs: [] }],
@@ -117,4 +118,41 @@ test('a failed Task posts nothing to Needs you', async () => {
   const out = await r.done;
   expect(out.ok).toBe(false);
   expect(h.posts.map((p) => p.path)).toEqual(['/admin/tasks']);
+});
+
+test('usage hold: nothing starts or posts; with the hold cleared the same call starts the Task', async () => {
+  const h = harness();
+  const hold = { reason: 'usage_hold', pct: 97 };
+  h.deps.usageHold = () => hold;
+  const r = await mc.maybeStartConsolidation({ cwd: CWD, now: NOW, deps: h.deps });
+  expect(r).toEqual({ started: false, reason: 'usage_held', hold });
+  expect(h.posts).toEqual([]);
+
+  h.deps.usageHold = () => null;
+  const ok = await mc.maybeStartConsolidation({ cwd: CWD, now: NOW, deps: h.deps });
+  expect(ok.started).toBe(true);
+  await ok.done;
+  expect(h.posts[0].path).toBe('/admin/tasks');
+});
+
+test('a usageHold throw ends in reason error and starts nothing', async () => {
+  const h = harness();
+  h.deps.usageHold = () => { throw new Error('boom'); };
+  const r = await mc.maybeStartConsolidation({ cwd: CWD, now: NOW, deps: h.deps });
+  expect(r).toMatchObject({ started: false, reason: 'error' });
+  expect(h.posts).toEqual([]);
+});
+
+test('NOT_RUN_STATUSES is frozen and lists the never-ran statuses', () => {
+  expect(mc.NOT_RUN_STATUSES).toEqual(['usage_held', 'slot_timeout', 'too_many_waiting']);
+  expect(Object.isFrozen(mc.NOT_RUN_STATUSES)).toBe(true);
+});
+
+test.each(['usage_held', 'slot_timeout'])('a week whose only Task has status %s is still due', async (status) => {
+  const h = harness({ lastStartedAt: new Date(NOW - 2 * DAY).toISOString(), lastStatus: status });
+  const r = await mc.maybeStartConsolidation({ cwd: CWD, now: NOW, deps: h.deps });
+  expect(r.started).toBe(true);
+  expect(r.reason).toBe('weekly');
+  await r.done;
+  expect(h.listCalls[0].o.limit).toBeGreaterThan(1);
 });

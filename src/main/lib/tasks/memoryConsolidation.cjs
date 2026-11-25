@@ -141,8 +141,16 @@ function adminPosterFor(adminHttp) {
   });
 }
 
+/**
+ * Task statuses (or POST /admin/tasks error codes) for a Task that never ran:
+ * refused by the usage hold, or never given a slot. Such a Task does not use
+ * up a cadence window.
+ */
+const NOT_RUN_STATUSES = Object.freeze(['usage_held', 'slot_timeout', 'too_many_waiting']);
+
 function defaultDeps() {
   return {
+    usageHold: () => require('../../scheduler.cjs').currentUsageHold(),
     isTaskSwitchOn: (/** @type {string} */ cwd) => require('./taskSwitch.cjs').isTaskSwitchOn(cwd),
     listTasks: (/** @type {string} */ cwd, /** @type {any} */ o) => require('./taskLedger.cjs').listTasks(cwd, o),
     measureBudget: (/** @type {string} */ cwd) => {
@@ -162,8 +170,8 @@ function defaultDeps() {
 
 /** Last consolidation start (ms) within the window, else null. */
 async function lastStartMs(listTasks, cwd, sinceMs) {
-  const { tasks } = await listTasks(cwd, { pipeline: PIPELINE, since: new Date(sinceMs).toISOString(), limit: 1 });
-  const t = tasks && tasks[0];
+  const { tasks } = await listTasks(cwd, { pipeline: PIPELINE, since: new Date(sinceMs).toISOString(), limit: 50 });
+  const t = (Array.isArray(tasks) ? tasks : []).find((x) => x && !NOT_RUN_STATUSES.includes(x.status));
   const ms = t ? Date.parse(t.startedAt) : NaN;
   return Number.isFinite(ms) ? ms : null;
 }
@@ -174,6 +182,7 @@ async function lastStartMs(listTasks, cwd, sinceMs) {
  * `done` settles after the Task ran and its Needs you item was posted. Never throws.
  *
  * @param {{ cwd: string, now?: number, deps?: {
+ *   usageHold?: () => any,
  *   isTaskSwitchOn?: (cwd: string) => boolean,
  *   listTasks?: (cwd: string, o: any) => Promise<{ tasks: any[] }>,
  *   measureBudget?: (cwd: string) => any,
@@ -189,6 +198,8 @@ async function maybeStartConsolidation({ cwd, now = Date.now(), deps = {} } = /*
     if (!d.isTaskSwitchOn(key)) return { started: false, reason: 'switch_off' };
     if (inFlight.has(key)) return { started: false, reason: 'in_flight' };
     if (typeof d.adminPost !== 'function') return { started: false, reason: 'no_admin_server' };
+    const hold = d.usageHold();
+    if (hold) return { started: false, reason: 'usage_held', hold };
 
     let budget = null;
     try { budget = d.measureBudget(key); } catch { budget = null; }
@@ -296,5 +307,6 @@ module.exports = {
   PIPELINE,
   NO_DELETE_RULE,
   READ_ONLY_TOOLS,
+  NOT_RUN_STATUSES,
   _resetForTests,
 };

@@ -32,7 +32,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { adminPosterFor, extractProposal } = require('./memoryConsolidation.cjs');
+const { adminPosterFor, extractProposal, NOT_RUN_STATUSES } = require('./memoryConsolidation.cjs');
 const { OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 
 const PIPELINE = 'mitigation-review';
@@ -146,6 +146,7 @@ function stateFile() {
 
 function defaultDeps() {
   return {
+    usageHold: () => require('../../scheduler.cjs').currentUsageHold(),
     isTaskSwitchOn: (/** @type {string} */ cwd) => require('./taskSwitch.cjs').isTaskSwitchOn(cwd),
     readRegistry: (/** @type {string} */ cwd) => {
       try { return fs.readFileSync(path.join(cwd, REGISTRY_REL), 'utf8'); } catch { return null; }
@@ -184,6 +185,9 @@ async function maybeStartMitigationReview({ cwd, now = Date.now(), deps = {} } =
     if (inFlight.has(key)) return { started: false, reason: 'in_flight' };
     const registry = d.readRegistry(key);
     if (typeof registry !== 'string') return { started: false, reason: 'no_registry' };
+    // Before resolving the model: resolveModelCatalog can run claude -p probes.
+    const hold = d.usageHold();
+    if (hold) return { started: false, reason: 'usage_held', hold };
     const to = await d.resolveDefaultExecutorModel(key);
     if (typeof to !== 'string' || !to) return { started: false, reason: 'model_unresolved' };
 
@@ -192,6 +196,7 @@ async function maybeStartMitigationReview({ cwd, now = Date.now(), deps = {} } =
     if (prev === to) return { started: false, reason: 'unchanged' };
     if (prev != null && typeof d.adminPost !== 'function') return { started: false, reason: 'no_admin_server' };
 
+    const prevEntry = state[key];
     d.writeState({ ...state, [key]: { model: to, seenAt: new Date(now).toISOString() } });
     if (prev == null) return { started: false, reason: 'first_seen', to };
 
@@ -202,6 +207,21 @@ async function maybeStartMitigationReview({ cwd, now = Date.now(), deps = {} } =
     inFlight.add(key);
     const done = runAndPost({ cwd: key, now, prompt, from: prev, to, adminPost: d.adminPost })
       .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+      .then((out) => {
+        // A review that never ran (held, or no slot) must not use up this change.
+        if (out && NOT_RUN_STATUSES.includes(out.error)) {
+          try {
+            const cur = d.readState() || {};
+            if (cur[key] && cur[key].model === to) {
+              const next = { ...cur };
+              if (prevEntry === undefined) delete next[key];
+              else next[key] = prevEntry;
+              d.writeState(next);
+            }
+          } catch { /* best effort: the next change still reviews */ }
+        }
+        return out;
+      })
       .finally(() => { inFlight.delete(key); });
     return { started: true, reason: 'model_changed', from: prev, to, done };
   } catch (e) {

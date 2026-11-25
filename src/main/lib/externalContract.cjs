@@ -60,6 +60,7 @@ const CONTRACT = deepFreeze({
     { method: 'GET', path: '/__admin/health' },
     { method: 'POST', path: '/admin/feedback/open-session' },
     { method: 'POST', path: '/admin/macros/run' },
+    { method: 'POST', path: '/admin/projects/create' },
     { method: 'GET', path: '/admin/epics' },
     { method: 'GET', path: '/admin/epic' },
     // GET /admin/events: no epicId → audit-log rows { events, next, more, gap } (eventKinds below);
@@ -165,6 +166,7 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
   // back to the v1 shape 0.141.0 served; 0.142.0 served lifecycle words only, after C6 909f6e47 narrowed it).
   // then GET /admin/usage-hold (scheduler/usageHoldRoute.cjs): the 'pause above' hold POST /admin/tasks refuses on.
   // then usage_hold_get: the MCP tool over GET /admin/usage-hold (scheduler-mcp-server.cjs).
+  // then POST /admin/projects/create (feedback-remote/projectCreate.cjs); no tool entry, mirroring macro_run.
   1: Object.freeze([
     '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
     '7383ff32c80561b1b2c505a78a1e8313ae2851bdc6e8fce6c6a88e1ab119bf5a',
@@ -175,6 +177,7 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
     '4f4ee647977bb670c71db57c6fdfa8dc5db89ce789a1f05dbf23f9468dcff30b',
     '2c87717d95b8b7dceb8a2138affcd3fc990f762072691de7a433b2874fe89d4d',
     '9490d3b89b9468f20666553747b3d4be3558e78ffcb5b79d63397cfa4ddd5235',
+    '799f062f9dd858b81afa20cf2153357e8fc7a3be2c748573d0f4c12b430d6683',
   ]),
 });
 

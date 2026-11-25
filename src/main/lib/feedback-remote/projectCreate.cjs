@@ -362,4 +362,54 @@ async function answerExisting(d, cwd, externalRef, login) {
   return answer;
 }
 
-module.exports = { createServiceProject, SERVICE_PROJECT_NAME_RE, parseGithubRemote };
+/**
+ * Tell every renderer window a project was freshly created, so the app can
+ * open it as a dormant tab. Electron is required lazily so unit tests never
+ * need it. Never throws. Mirrors crossProjectFeedback.cjs defaultNotifyRenderer.
+ * @param {{ cwd: string }} payload
+ */
+function defaultNotifyRenderer(payload) {
+  try {
+    const { BrowserWindow } = require('electron');
+    const { sendIfAlive } = require('../sendToRenderer.cjs');
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        sendIfAlive(win, 'projects:created', payload);
+      } catch { /* window going away */ }
+    }
+  } catch { /* not running under Electron */ }
+}
+
+/**
+ * @typedef {{
+ *   registerRoute: (method: string, path: string, handler: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>) => void,
+ * }} AdminHttp
+ */
+
+/**
+ * Registers POST /admin/projects/create on the injected loopback admin
+ * transport (auth is the transport's job). Only a fresh create notifies.
+ * @param {AdminHttp} adminHttp
+ * @param {{ notify?: (payload: { cwd: string }) => void, deps?: Deps }} [opts]
+ */
+function registerAdminRoute(adminHttp, { notify = defaultNotifyRenderer, deps } = {}) {
+  const { readBody, sendJson } = require('./localAdminHttp.cjs');
+  adminHttp.registerRoute('POST', '/admin/projects/create', async (req, res) => {
+    const raw = await readBody(req);
+    /** @type {Input} */
+    let parsed;
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    const result = await createServiceProject(parsed, deps);
+    if (result.ok && result.status === 'created') {
+      try { notify({ cwd: result.cwd }); } catch { /* a notify failure never fails the create */ }
+    }
+    sendJson(res, result.ok ? 200 : result.status, result);
+  });
+}
+
+module.exports = { createServiceProject, SERVICE_PROJECT_NAME_RE, parseGithubRemote, registerAdminRoute, defaultNotifyRenderer };

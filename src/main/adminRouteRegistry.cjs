@@ -43,6 +43,8 @@ function registerAppAdminRoutes(adminHttp, deps = {}) {
   // several projects' operations roots open, so it performs the cross-folder
   // write (lib/feedback-remote/crossProjectFeedback.cjs).
   require('./lib/feedback-remote/crossProjectFeedback.cjs').registerAdminRoute(adminHttp);
+  // POST /admin/projects/create — a paired service's new local (+ private GitHub) project; broadcasts `projects:created`.
+  require('./lib/feedback-remote/projectCreate.cjs').registerAdminRoute(adminHttp);
   // Its return leg: the receiving session answers INTO the Epic that asked
   // (lib/feedback-remote/crossProjectReply.cjs).
   require('./lib/feedback-remote/crossProjectReply.cjs').registerAdminRoute(adminHttp);

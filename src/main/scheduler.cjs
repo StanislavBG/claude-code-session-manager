@@ -4270,6 +4270,13 @@ async function readStoredCriteriaChecks(cwd, epicId, slug) {
  * only bodyPath/bodyBytes/truncated. Fresh rows replace stored ones by id;
  * the exact-slug outcome record (when one exists) is updated in place.
  * Falls back to `stored` on any error. Never rejects.
+ * @param {string} cwd
+ * @param {string} epicId
+ * @param {string} slug
+ * @param {Record<string, unknown>[]} criteria
+ * @param {Record<string, unknown>[]} stored
+ * @param {{ httpRetry?: import('./lib/scheduler/criteriaChecks.cjs').HttpRetry }} [opts]
+ * @returns {Promise<Record<string, unknown>[]>}
  */
 async function runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored, { httpRetry } = {}) {
   try {
@@ -4317,7 +4324,7 @@ async function runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored, { 
  * checks only: no http request, no outcome record or body file write.
  * `httpRetry` overrides the dispatch retry defaults (tests only).
  * @param {any} job
- * @param {{ runChecks?: boolean, httpRetry?: { attempts?: number, delayMs?: number } }} [opts]
+ * @param {{ runChecks?: boolean, httpRetry?: import('./lib/scheduler/criteriaChecks.cjs').HttpRetry }} [opts]
  * @returns {Promise<{ expected: Record<string, { ids: string[], failedIds: string[] }>, section: string }>}
  */
 async function loadValidatorCriteriaContext(job, { runChecks = true, httpRetry } = {}) {

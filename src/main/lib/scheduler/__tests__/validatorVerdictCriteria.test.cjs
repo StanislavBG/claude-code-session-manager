@@ -347,6 +347,48 @@ describe('scheduler loadValidatorCriteriaContext', () => {
         await new Promise((resolve) => gone.close(resolve));
       }
     });
+
+    it('forwards an injected httpRetry.sleep: an always-404 check counts two 10 s waits without real waiting', async () => {
+      const gone = http.createServer((req, res) => { res.writeHead(404); res.end('nope'); });
+      await new Promise((resolve) => gone.listen(0, '127.0.0.1', resolve));
+      try {
+        const url = `http://127.0.0.1:${gone.address().port}/missing`;
+        const epicId = 'epic-sleep404';
+        const { cwd, recPath } = fixture(epicId, '4559-gone', [{ id: 'live', statement: 'route answers', check: { kind: 'http', spec: { url } } }]);
+        /** @type {number[]} */
+        const calls = [];
+        const sleep = async (/** @type {number} */ ms) => { calls.push(ms); };
+        const t0 = Date.now();
+        await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '4560-validate', dependsOn: ['4559-gone'] }, { httpRetry: { delayMs: 10000, sleep } });
+        assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+        assert.deepEqual(calls, [10000, 10000]);
+        const row = JSON.parse(fs.readFileSync(recPath, 'utf8')).checks.find((c) => c.id === 'live');
+        assert.equal(row.ok, false);
+        assert.equal(row.attempts, 3);
+      } finally {
+        await new Promise((resolve) => gone.close(resolve));
+      }
+    });
+
+    it('an injected httpRetry.sleep is never called when the http check passes first time', async () => {
+      const ok = http.createServer((req, res) => { res.writeHead(200); res.end('ok'); });
+      await new Promise((resolve) => ok.listen(0, '127.0.0.1', resolve));
+      try {
+        const url = `http://127.0.0.1:${ok.address().port}/ok`;
+        const epicId = 'epic-sleep200';
+        const { cwd, recPath } = fixture(epicId, '4559-ok', [{ id: 'live', statement: 'route answers', check: { kind: 'http', spec: { url } } }]);
+        /** @type {number[]} */
+        const calls = [];
+        const sleep = async (/** @type {number} */ ms) => { calls.push(ms); };
+        await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '4560-validate', dependsOn: ['4559-ok'] }, { httpRetry: { delayMs: 10000, sleep } });
+        assert.deepEqual(calls, []);
+        const row = JSON.parse(fs.readFileSync(recPath, 'utf8')).checks.find((c) => c.id === 'live');
+        assert.equal(row.ok, true);
+        assert.equal(row.attempts, 1);
+      } finally {
+        await new Promise((resolve) => ok.close(resolve));
+      }
+    });
   });
 });
 

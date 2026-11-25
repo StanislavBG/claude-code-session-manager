@@ -322,6 +322,10 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
   const windowLabel = windowKindLabel(snapshot.utilizationWindow)
   const resetMs = snapshot.nextReset ? Date.parse(snapshot.nextReset) : null
   const resetsIn = resetMs ? (resetMs > now ? formatRelative(resetMs - now) : 'soon') : '—'
+  // Rounded once: the same one-decimal value decides whether the hint shows and is the text shown.
+  const effectiveCapShown = typeof snapshot.effectiveUtilizationThreshold === 'number'
+    ? Math.round(snapshot.effectiveUtilizationThreshold * 10) / 10
+    : null
 
   // Concurrency
   // One read channel: the cap comes from useSessionSlots (schedule:session-slots), never snapshot.effectiveConcurrency.
@@ -496,10 +500,9 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
                   title="Holds new dispatches when the highest of the 5-hour and weekly usage windows is at/above this percent (when-available policy only). The cap rises from this value toward 100% as the usage window's reset nears (100% in the final 2 days of the week). Not the executor rate-limit pause — click to edit"
                   onCommit={(n) => window.api.schedule.setConfig({ utilizationThreshold: n })}
                 />
-                {typeof snapshot.effectiveUtilizationThreshold === 'number'
-                  && snapshot.effectiveUtilizationThreshold !== (snapshot.config.utilizationThreshold ?? 90) && (
+                {effectiveCapShown != null && effectiveCapShown !== (snapshot.config.utilizationThreshold ?? 90) && (
                   <span data-testid="kpi-threshold-effective" title="Cap in force now — pro-rated toward 100% as the usage window's reset nears">
-                    {' · now '}{Math.round(snapshot.effectiveUtilizationThreshold * 10) / 10}%
+                    {' · now '}{effectiveCapShown}%
                   </span>
                 )}
               </span>

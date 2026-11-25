@@ -76,6 +76,18 @@ describe('SchedulerTopBands — pro-rated pause above', () => {
     expect(effective()?.textContent).toContain('now 94.3%')
   })
 
+  it('compares the rounded cap: 90.03 beside a base of 90 shows nothing extra', async () => {
+    setSnapshot(90.03)
+    await render()
+    expect(effective()).toBeNull()
+  })
+
+  it('shows the rounded cap when it differs from the base after rounding', async () => {
+    setSnapshot(90.06)
+    await render()
+    expect(effective()?.textContent).toContain('now 90.1%')
+  })
+
   it('shows nothing extra when the cap equals the base', async () => {
     setSnapshot(90)
     await render()

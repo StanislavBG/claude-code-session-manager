@@ -408,6 +408,8 @@ function runHandler(deps, libOpts) {
       return;
     }
 
+    if (refusedByUsageHold(deps, res)) return;
+
     const payload = {
       cwd,
       agentName: macro.agentName,
@@ -449,6 +451,41 @@ function runHandler(deps, libOpts) {
     });
     sendJson(res, 200, { ok: true, epicId: result.epicId, alreadyRunning: false });
   };
+}
+
+const USAGE_HOLD_HINT =
+  "Usage is above 'pause above': script presses wait until the window resets or usage drops below it. "
+  + 'Retry after hold.resetsAt. GET /admin/usage-hold reads the hold.';
+
+/** @param {any} hold → the 429 usage_held body (same shape as POST /admin/tasks). */
+function holdBody(hold) {
+  return {
+    ok: false,
+    error: 'usage_held',
+    hold: { reason: hold.reason, window: hold.window ?? null, percent: hold.percent ?? null, threshold: hold.threshold ?? null, resetsAt: hold.resetsAt ?? null },
+    detail: hold.detail ?? null,
+    hint: USAGE_HOLD_HINT,
+  };
+}
+
+/**
+ * The usage hold ('pause above') gate in front of every script-press
+ * startExternalNewSession call. Replies 429 usage_held / 503 usage_hold_error
+ * and returns true when the press must not start; false when it may.
+ * Read lazily so scheduler.cjs never loads at module load.
+ */
+function refusedByUsageHold(deps, res) {
+  const usageHold = deps.usageHold || (() => require('../../scheduler.cjs').currentUsageHold());
+  let hold;
+  try {
+    hold = usageHold();
+  } catch (e) {
+    sendJson(res, 503, { ok: false, error: 'usage_hold_error', details: e instanceof Error ? e.message : String(e) });
+    return true;
+  }
+  if (!hold) return false;
+  sendJson(res, 429, holdBody(hold));
+  return true;
 }
 
 /** 503 error text for a failed startExternalNewSession result. */
@@ -499,6 +536,8 @@ async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, exter
     } else if (recent) {
       recentRuns.delete(key);
     }
+
+    if (refusedByUsageHold(deps, res)) return;
 
     const payload = {
       cwd,
@@ -559,6 +598,7 @@ async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, exter
 /**
  * @param {{ onChanged?: () => void, startExternalNewSession?: (p: object) => Promise<any>,
  *   isTabBusy?: (tabId: string) => boolean, listPersonas?: () => Promise<Array<{name: string}>>,
+ *   usageHold?: () => any,
  *   checkProjectVideoToolRunnable?: (i: { cwd: string, agentName: string, job: object }) => Promise<{ ok: boolean, error?: string }> }} deps
  */
 function registerAdminRoute(adminHttp, deps = {}, opts = {}) {

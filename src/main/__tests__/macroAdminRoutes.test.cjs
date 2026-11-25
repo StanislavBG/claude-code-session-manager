@@ -679,7 +679,7 @@ function runEvents(macroId) {
 }
 
 let epicSeq = 0;
-function makeRunDeps({ result, busy = () => false, personas = ['builder'] } = {}) {
+function makeRunDeps({ result, busy = () => false, personas = ['builder'], usageHold = () => null } = {}) {
   const launches = [];
   return {
     launches,
@@ -693,6 +693,7 @@ function makeRunDeps({ result, busy = () => false, personas = ['builder'] } = {}
       },
       isTabBusy: busy,
       listPersonas: async () => personas.map((name) => ({ name })),
+      usageHold,
     },
   };
 }
@@ -1276,4 +1277,59 @@ test('a non-project-video save never runs the project-video check', async () => 
   const res = await adminHttp.call('POST', '/admin/macros/save', { body: { cwd, ...MAC, label: 'Plain' } });
   expect(res.status).toBe(200);
   expect(called).toBe(0);
+});
+
+// --- usage hold ('pause above') on script presses ---------------------------
+
+const HELD = { reason: 'utilization', window: 'five_hour', percent: 97, threshold: 95, resetsAt: '2026-11-24T23:00:00.000Z', detail: 'five_hour at 97% >= 95%' };
+
+test('run: a usage hold is 429 usage_held, starts no session, writes no audit row', async () => {
+  const s = await setupRun({ usageHold: () => HELD });
+  const r = await s.run({});
+  expect(r.status).toBe(429);
+  expect(r.body).toMatchObject({
+    ok: false,
+    error: 'usage_held',
+    hold: { reason: 'utilization', window: 'five_hour', percent: 97, threshold: 95, resetsAt: HELD.resetsAt },
+    detail: HELD.detail,
+  });
+  expect(s.launches).toEqual([]);
+  expect(runEvents(s.macro.id)).toEqual([]);
+});
+
+test('run+externalRef: a usage hold is 429 usage_held and records nothing', async () => {
+  const s = await setupRun({ usageHold: () => HELD });
+  const r = await s.run({ externalRef: 'held-1' });
+  expect(r.status).toBe(429);
+  expect(r.body.error).toBe('usage_held');
+  expect(s.launches).toEqual([]);
+  expect(await lookupExternalRef({ cwd: s.realCwd, externalRef: 'held-1' })).toBeNull();
+});
+
+test('run: a throwing usage-hold read is 503 usage_hold_error and starts no session', async () => {
+  const s = await setupRun({ usageHold: () => { throw new Error('boom'); } });
+  const r = await s.run({});
+  expect(r.status).toBe(503);
+  expect(r.body).toMatchObject({ ok: false, error: 'usage_hold_error' });
+  expect(s.launches).toEqual([]);
+  const t = await setupRun({ usageHold: () => { throw new Error('boom'); } });
+  const rt = await t.run({ externalRef: 'held-err' });
+  expect(rt.status).toBe(503);
+  expect(rt.body.error).toBe('usage_hold_error');
+  expect(t.launches).toEqual([]);
+});
+
+test('run: validation and consent refusals win over a hold (checked first)', async () => {
+  const s = await setupRun({ usageHold: () => HELD }, { scriptStart: false });
+  const r = await s.run({});
+  expect(r.status).toBe(400);
+  expect(s.launches).toEqual([]);
+});
+
+test('run: usageHold () => null leaves the success path unchanged', async () => {
+  const s = await setupRun({ usageHold: () => null });
+  const r = await s.run({});
+  expect(r.status).toBe(200);
+  expect(r.body.ok).toBe(true);
+  expect(s.launches).toHaveLength(1);
 });

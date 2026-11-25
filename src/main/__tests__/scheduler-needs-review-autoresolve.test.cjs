@@ -120,6 +120,28 @@ test('branch 1: a looksDone annotation resolves the row to completed', () => {
   assert.equal(job.status, 'completed');
 });
 
+test('a sentinel_fail row carrying a stale looksDone is never completed — takes the requeue path (PRD 4500)', () => {
+  const job = exhaustedJob({
+    verifierVerdict: 'sentinel_fail',
+    exhaustedResolveAttempts: 0,
+    looksDone: { commits: ['eac6e7e'], paths: ['docs/submit.md'], detectedAt: new Date().toISOString(), rule: 'landedCommit' },
+  });
+  const outcome = applyNeedsReviewAutoResolve(job);
+  assert.notEqual(outcome, 'completed');
+  assert.notEqual(job.status, 'completed');
+  assert.equal(outcome, 'requeued');
+  assert.equal(job.status, 'pending');
+});
+
+test('a non-FAIL verdict (no_verdict_sentinel) carrying looksDone still completes', () => {
+  const job = exhaustedJob({
+    verifierVerdict: 'no_verdict_sentinel',
+    exhaustedResolveAttempts: 0,
+    looksDone: { commits: ['abc1234'], paths: ['src/x.cjs'], detectedAt: new Date().toISOString(), rule: 'landedCommit' },
+  });
+  assert.equal(applyNeedsReviewAutoResolve(job), 'completed');
+});
+
 test('branch 2: no looksDone, under the cap, requeues to pending and increments the attempt counter', () => {
   const job = exhaustedJob({ exhaustedResolveAttempts: 0 });
   const outcome = applyNeedsReviewAutoResolve(job);

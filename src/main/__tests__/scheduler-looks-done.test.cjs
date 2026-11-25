@@ -574,6 +574,37 @@ test('this job\'s OWN attributable commit (landedCommit) still produces looksDon
   assert.equal(jobA.status, 'completed');
 });
 
+test('a sentinel_fail row\'s OWN landed commit on its declared paths is never looksDone evidence (PRD 4500)', async () => {
+  // starry-night-2 863-fix-ios-store-submit-review: the executor ended
+  // SCHEDULER_VERDICT: FAIL ('no VALID build') and its only commit recorded
+  // the blocker; that commit must never read as completion evidence.
+  const projectCwd = path.join(tmpHome, 'proj-4500-sentinel-fail');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-4500-sentinel-fail-slug');
+  writePrd(projectCwd, '4500-fail-row', [
+    '# Implementation notes',
+    'Edit `docs/submit.md`.',
+  ].join('\n'));
+
+  const startedAt = new Date().toISOString();
+  commitFile(projectCwd, 'docs/submit.md', 'blocked: no VALID build\n', 'docs: record blocker (4500-fail-row)', afterSecs(startedAt, 2));
+  const ownSha = git(['rev-parse', 'HEAD'], projectCwd).trim();
+
+  const base = {
+    slug: '4500-fail-row',
+    cwd: projectCwd,
+    status: 'needs_review',
+    startedAt,
+    landedCommit: ownSha,
+  };
+  const control = await computeLooksDone({ ...base, verifierVerdict: 'no_verdict_sentinel' });
+  assert.ok(control, 'control: the same commit is attributable evidence for a non-FAIL verdict');
+  assert.equal(control.rule, 'landedCommit');
+
+  const looksDone = await computeLooksDone({ ...base, verifierVerdict: 'sentinel_fail' });
+  assert.equal(looksDone, null, 'a FAIL verdict is authoritative over the run\'s own commits');
+});
+
 test('a base commit that linear landing replayed off this job\'s still-existing branch is attributed with rule \'job branch\'', async () => {
   // Linear landing (PRDs 2743, 2825) replays the branch's commits onto the
   // base with their author name/email/date and message kept, so the commit on

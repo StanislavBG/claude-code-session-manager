@@ -11804,7 +11804,8 @@ function applyNeedsReviewAutoResolve(j, jobsInProject = []) {
   if ((j.exhaustedResolveAttempts ?? 0) > reviewLadder.NEEDS_REVIEW_RESOLVE_CAP) return null;
   const originIsGuardParked = !reviewLadder.isExhaustedAutoFix(j) && reviewLadder.isGuardParkedWithoutAutoFix(j);
 
-  if (j.looksDone) {
+  // A looksDone stamped before PRD 4500 must never complete a FAIL row.
+  if (j.looksDone && j.verifierVerdict !== 'sentinel_fail') {
     const attempt = j.exhaustedResolveAttempts ?? 0;
     const reason = originIsGuardParked
       ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with landed commit and looksDone evidence (${j.looksDone.rule}) — `
@@ -12015,6 +12016,10 @@ async function attributeLandedCommits(job, pathCommits, cwd) {
  * @returns {Promise<{commits: string[], paths: string[], detectedAt: string, rule: string} | null>}
  */
 async function computeLooksDone(job, fetchedCwds) {
+  // An explicit executor FAIL is authoritative: the run said the work is not
+  // done, so its own commits (often just a record of the blocker) are never
+  // evidence that it is (PRD 4500; starry-night-2 863-fix, eac6e7e).
+  if (job?.verifierVerdict === 'sentinel_fail') return null;
   const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
   const paths = declaredPathsForPrd(prdPath);
   if (!paths.length) return null;

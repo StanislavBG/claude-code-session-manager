@@ -51,6 +51,39 @@ describe('evaluateDrain state machine', () => {
   });
 });
 
+describe('evaluateDrain bootedAt (request predates boot)', () => {
+  const full = (o) => ud.evaluateDrain({ now: T0 + 60_000, ...o });
+  test('a request written before boot aborts with request-predates-boot, drain active or not', () => {
+    const bootedAt = new Date(T0 + 18_000).toISOString();
+    for (const drainState of [null, { active: true }]) {
+      for (const queueSnapshot of [{ running: 0, investigating: 0 }, { running: 2 }]) {
+        assert.deepEqual(full({ request: req(), queueSnapshot, drainState, bootedAt }), { action: 'abort', reason: 'request-predates-boot' });
+      }
+    }
+    // Checked before the deadline branch.
+    assert.equal(ud.evaluateDrain({ request: req(), queueSnapshot: {}, drainState: { active: true }, now: T0 + ud.DEFAULT_DRAIN_DEADLINE_MS, bootedAt }).reason, 'request-predates-boot');
+  });
+  test('a request written after boot follows pause, wait, restart', () => {
+    const bootedAt = new Date(T0 - 18_000).toISOString();
+    assert.equal(full({ request: req(), queueSnapshot: { running: 1 }, drainState: null, bootedAt }).action, 'pause');
+    assert.equal(full({ request: req(), queueSnapshot: { running: 1 }, drainState: { active: true }, bootedAt }).action, 'wait');
+    assert.equal(full({ request: req(), queueSnapshot: { running: 0, investigating: 0 }, drainState: { active: true }, bootedAt }).action, 'restart');
+    // Same instant as boot is not "before" boot.
+    assert.equal(full({ request: req(), queueSnapshot: {}, drainState: null, bootedAt: new Date(T0).toISOString() }).action, 'pause');
+  });
+  test('missing or unparsable bootedAt keeps today\'s behaviour', () => {
+    for (const bootedAt of [undefined, null, '', 'not-a-date']) {
+      assert.equal(full({ request: req(), queueSnapshot: {}, drainState: null, bootedAt }).action, 'pause');
+      assert.equal(full({ request: req(), queueSnapshot: {}, drainState: { active: true }, bootedAt }).action, 'restart');
+    }
+  });
+  test('a completed request stays none even when it predates boot', () => {
+    const bootedAt = new Date(T0 + 18_000).toISOString();
+    assert.deepEqual(full({ request: req({ drainCompletedAt: 'x' }), queueSnapshot: {}, drainState: null, bootedAt }), { action: 'none', reason: 'request-complete' });
+    assert.equal(full({ request: req({ drainCompletedAt: 'x' }), queueSnapshot: {}, drainState: { active: true }, bootedAt }).action, 'none');
+  });
+});
+
 describe('request file lifecycle', () => {
   test('requestRestart writes atomically and is idempotent while pending', () => {
     const dir = tmp();

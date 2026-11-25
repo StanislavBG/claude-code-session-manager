@@ -89,19 +89,23 @@ function queueBusyCount(jobs, extraInFlight = 0) {
 }
 
 /**
- * evaluateDrain({request, queueSnapshot, drainState, now, deadlineMs}) → {action, reason}
+ * evaluateDrain({request, queueSnapshot, drainState, now, deadlineMs, bootedAt}) → {action, reason}
  *
  * queueSnapshot: { running, investigating } counts (in-memory investigations
  * already folded in by the caller). drainState: the machine `drain` field
- * (null / {active}). Pure — no IO, no clock.
+ * (null / {active}). bootedAt: this process's boot time (ISO); a missing or
+ * unparsable value skips the predates-boot rule. Pure — no IO, no clock.
  *
  *   no request, or request already completed     → none   (abort if a stale drain is still active)
+ *   pending request written before bootedAt      → abort  (the restart it asked for already
+ *                                                          happened: force reboot, manual
+ *                                                          relaunch, or a crash before the stamp)
  *   deadline passed                              → abort
  *   request pending, drain not yet active        → pause  (engage drain)
  *   drain active, anything running/investigating → wait
  *   drain active, zero busy                      → restart
  */
-function evaluateDrain({ request, queueSnapshot, drainState, now, deadlineMs = DEFAULT_DRAIN_DEADLINE_MS } = {}) {
+function evaluateDrain({ request, queueSnapshot, drainState, now, deadlineMs = DEFAULT_DRAIN_DEADLINE_MS, bootedAt } = {}) {
   const active = Boolean(drainState && drainState.active);
   if (!request || request.drainCompletedAt) {
     return active && !request
@@ -109,6 +113,10 @@ function evaluateDrain({ request, queueSnapshot, drainState, now, deadlineMs = D
       : { action: 'none', reason: request ? 'request-complete' : 'no-request' };
   }
   const requestedMs = Date.parse(request.requestedAt ?? '');
+  const bootedMs = typeof bootedAt === 'string' ? Date.parse(bootedAt) : NaN;
+  if (Number.isFinite(requestedMs) && Number.isFinite(bootedMs) && requestedMs < bootedMs) {
+    return { action: 'abort', reason: 'request-predates-boot' };
+  }
   if (Number.isFinite(requestedMs) && now - requestedMs >= deadlineMs) {
     return { action: 'abort', reason: 'deadline' };
   }

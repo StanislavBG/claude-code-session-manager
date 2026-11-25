@@ -1351,6 +1351,8 @@ async function driveUpgradeDrain(state) {
       queueSnapshot: drainSnapshot(state.jobs),
       drainState: state.drain,
       now: Date.now(),
+      // A request older than this process asked for a restart that already happened.
+      bootedAt: SCHEDULER_BOOTED_AT,
     });
     if (action === 'none' || action === 'wait') { drainActive = Boolean(state.drain?.active); return; }
     if (action === 'pause') {

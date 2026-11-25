@@ -168,7 +168,7 @@ test('the seeded validator reads full commit messages and turns Follow-up traile
   const { fm, body } = splitFrontmatter(raw);
 
   expect(raw.length).toBeLessThanOrEqual(6000);
-  expect(fm.seedVersion).toBe('12');
+  expect(fm.seedVersion).toBe('14');
   expect(body).toContain("git log --format='%h %B' <base>..HEAD");
   expect(body).not.toContain('git log --oneline');
   expect(body).toContain('Every `Follow-up:` commit trailer is a Minor finding (missKind `other`) on its PRD; quote it.');

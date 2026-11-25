@@ -26,6 +26,9 @@ const EXPECTED = [
   'GET /admin/agents',
   'POST /admin/tasks',
   'POST /admin/tasks/switch',
+  'POST /admin/project-home/videos/run',
+  'GET /admin/project-home/videos/status',
+  'POST /admin/project-home/videos/script-switch',
 ];
 
 function record(deps) {

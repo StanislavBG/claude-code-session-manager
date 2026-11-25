@@ -110,9 +110,10 @@ goes back on hold instead of into Needs review.</aside>
 limit, so your laptop never runs more agents than it can handle. You set that limit from the Home
 tab. Set it to zero and nothing new starts, while running work carries on.</p>
 
-<p>Claude Code also has a usage limit that resets every few hours. Near that limit, the Scheduler
-pauses itself rather than start work that would fail, and picks back up once the window
-resets.</p>
+<p>Claude Code also has a usage limit that resets every few hours. At your <strong>pause
+above</strong> line, 90% by default, the Scheduler stops starting automatic work. That covers work
+orders and script Tasks. Your own chats keep running, so the headroom left above the line is yours.
+Automatic work starts again once usage drops below the line or the window resets.</p>
 
 <ol class="manual-steps">
   <li><strong>Pause</strong> stops new work orders from starting. Running work keeps going.</li>
@@ -148,6 +149,11 @@ Task never creates a Session.</p>
 <p>A Task draws from the same shared limit as everything else and goes ahead of waiting work
 orders. When the limit is two or more and Tasks are on, one slot stays free for your own work. The
 Tasks view lists each run with its prompt and answer, kept for 30 days by default.</p>
+
+<p>Tasks also respect your <strong>pause above</strong> line. While that hold is on, the Scheduler
+turns a script's Task away. Tasks run again once usage drops below the line or the window resets.
+If a Task was already waiting for a slot when the hold began, the Tasks view shows it as
+<code>usage_held</code>.</p>
 
 <aside class="manual-tip"><strong>Try this:</strong> open the Scheduler tab and watch one work
 order's status. You'll see it move from Pending to Running to Completed, usually without you

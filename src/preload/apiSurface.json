@@ -200,6 +200,13 @@
   "remote": "deny"
  },
  {
+  "ns": "app",
+  "method": "onProjectCreated",
+  "channel": "projects:created",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
   "ns": "pty",
   "method": "spawn",
   "channel": "pty:spawn",

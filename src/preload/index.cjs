@@ -54,6 +54,12 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('app:open-free-hour', listener);
       return () => ipcRenderer.removeListener('app:open-free-hour', listener);
     },
+    // Fired by POST /admin/projects/create on a fresh create (projectCreate.cjs defaultNotifyRenderer).
+    onProjectCreated: (handler) => {
+      const listener = (_e, payload) => handler({ cwd: payload?.cwd });
+      ipcRenderer.on('projects:created', listener);
+      return () => ipcRenderer.removeListener('projects:created', listener);
+    },
   },
   pty: {
     spawn: (payload) => ipcRenderer.invoke('pty:spawn', payload),

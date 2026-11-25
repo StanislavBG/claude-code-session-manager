@@ -3046,6 +3046,8 @@ export interface SessionManagerAPI {
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
     onOpenFreeHour: (handler: () => void) => () => void;
+    /** Fired when POST /admin/projects/create makes a new project; `cwd` is its folder. */
+    onProjectCreated: (handler: (payload: { cwd: string }) => void) => () => void;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;
   };
   pty: {

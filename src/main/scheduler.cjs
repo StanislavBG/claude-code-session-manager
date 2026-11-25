@@ -1156,6 +1156,7 @@ function trackAutoDispatchHoldAudit(hold, pending) {
         window: hold.window ?? null,
         percent: hold.percent ?? null,
         threshold: hold.threshold ?? null,
+        baseThreshold: hold.baseThreshold ?? null,
         resetsAt: hold.resetsAt ?? null,
         holdKey: identity,
         pending,
@@ -1166,6 +1167,7 @@ function trackAutoDispatchHoldAudit(hold, pending) {
         reason: hold.reason,
         window: hold.window ?? null,
         threshold: hold.threshold ?? null,
+        baseThreshold: hold.baseThreshold ?? null,
         resetsAt: hold.resetsAt ?? null,
         startedAt: new Date().toISOString(),
         maxPercent: Number.isFinite(hold.percent) ? hold.percent : null,
@@ -9944,6 +9946,7 @@ function holdAuditFields(hold) {
     window: hold.window ?? null,
     percent: hold.percent ?? null,
     threshold: hold.threshold ?? null,
+    baseThreshold: hold.baseThreshold ?? null,
     resetsAt: hold.resetsAt ?? null,
     holdKey: autoDispatchHold.holdIdentityKey(hold),
   };
@@ -10316,7 +10319,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
     {
       const hold = currentAutoDispatchHold(state.config);
       const nextHold = hold && hold.reason === 'utilization-held'
-        ? { window: hold.window, percent: hold.percent, threshold: hold.threshold, resetsAt: hold.resetsAt }
+        ? { window: hold.window, percent: hold.percent, threshold: hold.threshold, baseThreshold: hold.baseThreshold ?? null, resetsAt: hold.resetsAt }
         : null;
       const holdKey = hold ? `${hold.reason}|${hold.window ?? ''}|${String(hold.percent)}` : null;
       const holdChanged = holdKey !== lastAutoDispatchHoldKey;
@@ -14979,7 +14982,7 @@ const remote = {
       return {
         ok: false,
         error: `usage hold in force: ${hold.detail} - continue again once it clears`,
-        hold: { reason: hold.reason, window: hold.window, percent: hold.percent, threshold: hold.threshold, resetsAt: hold.resetsAt },
+        hold: { reason: hold.reason, window: hold.window, percent: hold.percent, threshold: hold.threshold, baseThreshold: hold.baseThreshold ?? null, resetsAt: hold.resetsAt },
       };
     }
     const target = {

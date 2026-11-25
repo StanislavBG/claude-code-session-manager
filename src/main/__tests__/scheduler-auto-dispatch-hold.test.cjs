@@ -224,7 +224,7 @@ test("(g) Self's outage: the session window reset, weekly_all at 92% still holds
   expect(spawned).toEqual([]);
   // The snapshot field is the module variable the heartbeat also writes.
   expect(payloadNow().utilizationHold)
-    .toEqual({ window: 'weekly_all', percent: 92, threshold: 90, resetsAt: weeklyReset });
+    .toEqual({ window: 'weekly_all', percent: 92, threshold: 90, baseThreshold: 90, resetsAt: weeklyReset });
 });
 
 test('(h) the same outage with both resets in the past does not hold', async () => {

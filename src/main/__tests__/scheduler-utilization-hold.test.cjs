@@ -81,7 +81,7 @@ test('the tick holds and records the hold when the weekly window is over thresho
   expect(r1).toMatchObject({ fired: false, reason: 'utilization-held' });
   expect(r2).toMatchObject({ fired: false, reason: 'utilization-held' });
   const payload = scheduler.buildScheduleStatePayload(state());
-  expect(payload.utilizationHold).toEqual({ window: 'weekly_all', percent: 91, threshold: 90, resetsAt: RESET });
+  expect(payload.utilizationHold).toEqual({ window: 'weekly_all', percent: 91, threshold: 90, baseThreshold: 90, resetsAt: RESET });
   expect(payload.utilizationWindow).toBe('weekly_all');
   // Written when the hold starts, not on every tick.
   expect(logs.filter((l) => l.includes('utilization-held') && l.includes('weekly_all')).length).toBe(1);

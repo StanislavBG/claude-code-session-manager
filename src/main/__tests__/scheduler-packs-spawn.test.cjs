@@ -109,6 +109,18 @@ test('buildClaudeSpawnArgs: pluginDirArgs land before --dangerously-skip-permiss
   expect(buildClaudeSpawnArgs({ model: 'opus', sessionId: 's', resume: false })).not.toContain('--plugin-dir');
 });
 
+// The permission block's first element, as buildClaudeSpawnArgs emits it:
+// the job sandbox argv (jobSandboxPolicy buildJobSandboxSettings — it starts
+// with --permission-mode or --dangerously-skip-permissions) when present,
+// else the lone --dangerously-skip-permissions. Never -1.
+function permissionBlockStart(argv) {
+  const heads = ['--permission-mode', '--dangerously-skip-permissions']
+    .map((f) => argv.indexOf(f))
+    .filter((i) => i >= 0);
+  expect(heads.length).toBeGreaterThan(0);
+  return Math.min(...heads);
+}
+
 // ---------- findEpicById ----------
 
 test('findEpicById: returns the row by key or id, null on miss, never throws', () => {
@@ -131,7 +143,8 @@ test('executeJob: an Epic with packs adds --plugin-dir and appends laws after th
   expect(calls).toHaveLength(1);
   expect(calls[0].packIds).toEqual(['test-pack']);
   expect(pluginDirs(argv)).toEqual(['/abs/packs/test-pack']);
-  expect(argv.indexOf('--plugin-dir')).toBeLessThan(argv.indexOf('--dangerously-skip-permissions'));
+  expect(argv.indexOf('--plugin-dir')).toBeGreaterThanOrEqual(0);
+  expect(argv.indexOf('--plugin-dir')).toBeLessThan(permissionBlockStart(argv));
   expect(argv.filter((a) => a === '--append-system-prompt')).toHaveLength(1);
   expect(argv[argv.indexOf('--append-system-prompt') + 1]).toBe(`You are dev-lead.\n\n${LAWS}`);
 });

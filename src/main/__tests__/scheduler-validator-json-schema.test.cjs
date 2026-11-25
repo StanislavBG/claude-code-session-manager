@@ -79,12 +79,24 @@ function scopedTools(argv) {
   return Object.values(parsed)[0].tools;
 }
 
+// The permission block's first element, as buildClaudeSpawnArgs emits it:
+// the job sandbox argv (jobSandboxPolicy buildJobSandboxSettings — it starts
+// with --permission-mode or --dangerously-skip-permissions) when present,
+// else the lone --dangerously-skip-permissions. Never -1.
+function permissionBlockStart(argv) {
+  const heads = ['--permission-mode', '--dangerously-skip-permissions']
+    .map((f) => argv.indexOf(f))
+    .filter((i) => i >= 0);
+  expect(heads.length).toBeGreaterThan(0);
+  return Math.min(...heads);
+}
+
 function expectSchemaPlacement(argv) {
   const schemaJson = JSON.stringify(VALIDATOR_VERDICT_SCHEMA);
   expect(argv.filter((a) => a === '--json-schema')).toHaveLength(1);
   const at = argv.indexOf('--json-schema');
   expect(argv[at + 1]).toBe(schemaJson);
-  expect(at).toBeLessThan(argv.indexOf('--dangerously-skip-permissions'));
+  expect(at).toBeLessThan(permissionBlockStart(argv));
   const dis = argv.indexOf('--disallowedTools');
   expect(at).not.toBe(dis + 1);
 }

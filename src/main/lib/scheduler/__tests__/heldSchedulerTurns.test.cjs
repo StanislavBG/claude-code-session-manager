@@ -120,7 +120,7 @@ describe('buildCoalescedPrompt / drain', () => {
     const i2 = prompt.indexOf('--- 2 of 3 ---\nsecond');
     const i3 = prompt.indexOf('--- 3 of 3 ---\nthird');
     assert.ok(i1 > 0 && i2 > i1 && i3 > i2, prompt);
-    assert.deepEqual(extra, { origin: 'scheduler', sessionId: 's1', cwd: '/p' });
+    assert.deepEqual(extra, { origin: 'scheduler', heldBatch: true, sessionId: 's1', cwd: '/p' });
     assert.deepEqual(res, [{ tabId: 't1', delivered: 3, dropped: 0 }]);
     assert.deepEqual(m.summary(), { count: 0, tabs: 0 });
   });
@@ -132,7 +132,7 @@ describe('buildCoalescedPrompt / drain', () => {
     assert.ok(out.includes('--- 1 of 1 ---\nonly'));
   });
 
-  for (const disposition of ['refused', 'unconfirmed']) {
+  for (const disposition of ['refused', 'unconfirmed', 'held']) {
     it(`keeps entries when send resolves '${disposition}'`, async () => {
       const m = freshModule();
       m.defer({ tabId: 't1', prompt: 'p1', kind: 'job-notice', hold: HOLD });
@@ -141,6 +141,25 @@ describe('buildCoalescedPrompt / drain', () => {
       assert.deepEqual(m.summary(), { count: 1, tabs: 1 });
     });
   }
+
+  it('hold returns mid-drain: the originals stay, no coalesced entry, then one un-nested delivery', async () => {
+    const m = freshModule();
+    m.defer({ tabId: 't1', prompt: 'a', kind: 'job-notice', hold: HOLD });
+    m.defer({ tabId: 't1', prompt: 'b', kind: 'settle-digest', hold: HOLD });
+    m.defer({ tabId: 't1', prompt: 'c', kind: 'auto-start-follow-up', hold: HOLD });
+    const before = JSON.parse(fs.readFileSync(storeFile(), 'utf8')).entries.map((e) => e.id).sort();
+    const res = await m.drain({ send: async () => ({ disposition: 'held', reason: 'usage' }) });
+    assert.deepEqual(res, [{ tabId: 't1', delivered: 0, dropped: 0 }]);
+    const left = JSON.parse(fs.readFileSync(storeFile(), 'utf8')).entries;
+    assert.deepEqual(left.map((e) => e.id).sort(), before);
+    assert.ok(left.every((e) => !e.prompt.includes('The usage hold kept')));
+    const calls = [];
+    await m.drain({ send: async (tabId, prompt) => { calls.push(prompt); return { disposition: 'started' }; } });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].split('The usage hold kept').length - 1, 1);
+    assert.ok(calls[0].includes('--- 3 of 3 ---\nc'));
+    assert.deepEqual(m.summary(), { count: 0, tabs: 0 });
+  });
 
   it('keeps entries when send throws', async () => {
     const m = freshModule();

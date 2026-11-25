@@ -1422,6 +1422,9 @@ function holdSchedulerTurn(tabId, prompt, extra) {
   const heldSchedulerTurns = require('./lib/scheduler/heldSchedulerTurns.cjs');
   const hold = heldSchedulerTurns.currentHold();
   if (!hold) return null;
+  // A drain batch held again keeps its original entries; re-deferring it would
+  // nest coalesced headers on the next delivery.
+  if (extra.heldBatch === true) return { disposition: 'held', reason: hold.reason };
   const { sessionId, cwd, heldKind } = extra;
   const entry = heldSchedulerTurns.defer({ tabId, prompt, kind: heldKind || 'scheduler-notice', sessionId, cwd, hold });
   const key = schedulerHoldKey(hold);

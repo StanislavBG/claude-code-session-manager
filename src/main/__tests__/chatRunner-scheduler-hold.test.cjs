@@ -131,3 +131,40 @@ test('no hold: a scheduler send broadcasts as before', async () => {
   expect(fs.existsSync(path.join(tmp, 'held-scheduler-turns.json'))).toBe(false);
   expect(auditLines()).toHaveLength(0);
 });
+
+test('hold returns mid-drain: the batch send is held without a new entry or audit line; originals stay', async () => {
+  held.setHoldProvider(() => HOLD);
+  for (const prompt of ['notice 1', 'notice 2', 'notice 3']) {
+    await chatRunner.enqueueExternalPrompt('tab-f', prompt, { origin: 'scheduler', sessionId: 'sess-f', cwd: '/proj' });
+  }
+  const storePath = path.join(tmp, 'held-scheduler-turns.json');
+  const before = JSON.parse(fs.readFileSync(storePath, 'utf8')).entries.map((e) => e.id).sort();
+  expect(before).toHaveLength(3);
+  const auditsBefore = auditLines().length;
+
+  // The hold is still (again) active when drain sends: the seam holds the batch.
+  const send = (tabId, prompt, extra) => chatRunner.enqueueExternalPrompt(tabId, prompt, extra);
+  const direct = await chatRunner.enqueueExternalPrompt('tab-f', held.buildCoalescedPrompt([{ prompt: 'x', heldAt: '' }]), {
+    origin: 'scheduler', heldBatch: true, sessionId: 'sess-f', cwd: '/proj',
+  });
+  expect(direct).toEqual({ disposition: 'held', reason: 'utilization-held' });
+  const res = await held.drain({ send });
+  expect(res).toEqual([{ tabId: 'tab-f', delivered: 0, dropped: 0 }]);
+  expect(externalSends()).toHaveLength(0);
+  expect(auditLines()).toHaveLength(auditsBefore);
+  const left = JSON.parse(fs.readFileSync(storePath, 'utf8')).entries;
+  expect(left.map((e) => e.id).sort()).toEqual(before);
+  expect(left.some((e) => e.prompt.includes('The usage hold kept'))).toBe(false);
+
+  // The hold clears: one delivery, one header, no nesting.
+  held.setHoldProvider(() => null);
+  const p = held.drain({ send });
+  await new Promise((r) => setImmediate(r));
+  expect(externalSends()).toHaveLength(1);
+  const delivered = externalSends()[0].payload.prompt;
+  expect(delivered.split('The usage hold kept').length - 1).toBe(1);
+  expect(delivered).toContain('--- 3 of 3 ---\nnotice 3');
+  ackAll();
+  expect(await p).toEqual([{ tabId: 'tab-f', delivered: 3, dropped: 0 }]);
+  expect(JSON.parse(fs.readFileSync(storePath, 'utf8')).entries).toHaveLength(0);
+});

@@ -22,7 +22,9 @@ const { writeJsonAtomicSync, readJsonOrSync } = require('../util/atomicFs.cjs');
 const { heldSchedulerTurnsPath } = require('./schedulerPaths.cjs');
 
 const KINDS = Object.freeze(['settle-digest', 'job-notice', 'auto-start-follow-up', 'scheduler-notice']);
-const NOT_ACCEPTED = new Set(['refused', 'unconfirmed']);
+// 'held': the hold returned between the drain check and the send. The batch is not
+// re-deferred (heldBatch), so the originals must stay or they are lost.
+const NOT_ACCEPTED = new Set(['refused', 'unconfirmed', 'held']);
 
 /** @type {null | (() => any)} */
 let holdProvider = null;
@@ -138,6 +140,7 @@ async function drainOnce({ send, isStillNeeded }) {
       try {
         const res = await send(tabId, buildCoalescedPrompt(keep), {
           origin: 'scheduler',
+          heldBatch: true,
           sessionId: head.sessionId ?? undefined,
           cwd: withCwd.cwd ?? undefined,
         });

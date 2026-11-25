@@ -14185,7 +14185,15 @@ const remote = {
   // long as the underlying PRD set doesn't change mid-page.
   async listPrds(filter = {}) {
     const filterCwd = normalizeListCwd(filter.cwd);
-    const all = await listPrdsShared({ cwd: filterCwd });
+    // fresh: true (strictly the boolean) skips the single-flight and scans
+    // now. It exists for the PRD-create cross-Epic guard, which reads under a
+    // per-project lock and must never reuse a scan that began before another
+    // create's write (2026-11-24: Bilko PRD 2005 duplicated 2001). In-process
+    // callers only — the admin route never forwards it, since outside callers
+    // piling up full scans is the 2026-11-08 heap incident the single-flight fixed.
+    const all = filter.fresh === true
+      ? await listPrdsInternal({ cwd: filterCwd })
+      : await listPrdsShared({ cwd: filterCwd });
     const filtered = all.filter((entry) => {
       if (filterCwd && entry.cwd !== filterCwd) return false;
       if (filter.epicId && entry.epicId !== filter.epicId) return false;

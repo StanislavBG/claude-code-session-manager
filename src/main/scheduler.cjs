@@ -9910,6 +9910,50 @@ function autoDispatchHoldKey(hold) {
   return autoDispatchHold.holdIdentityKey(hold);
 }
 
+/** The audited fields of one auto-dispatch hold (null when none is in force). */
+function holdAuditFields(hold) {
+  if (!hold) return null;
+  return {
+    reason: hold.reason,
+    window: hold.window ?? null,
+    percent: hold.percent ?? null,
+    threshold: hold.threshold ?? null,
+    resetsAt: hold.resetsAt ?? null,
+    holdKey: autoDispatchHold.holdIdentityKey(hold),
+  };
+}
+
+/**
+ * One 'scheduler_human_press' audit event for a Run now / Fire next batch now
+ * press, naming the auto-dispatch hold in force at press time (null = none),
+ * so a human launch under a usage hold is told apart from a leak. Never throws.
+ * @param {'run-now' | 'force-tick'} press
+ */
+async function auditHumanPress(press) {
+  try {
+    let config = lastSeenConfig;
+    try { config = (await readQueue()).config; } catch { /* last seen config */ }
+    appendAuditEvent('scheduler_human_press', { press, hold: holdAuditFields(currentAutoDispatchHold(config)) });
+  } catch (e) {
+    console.error('[scheduler] human press audit failed', e?.message ?? String(e));
+  }
+}
+
+/**
+ * One 'auto_dispatch_hold_bypassed' audit event for a human tick that passed
+ * through `hold`, naming the slugs of the batch it launches. Never throws.
+ */
+function auditHoldBypassed(hold, batch) {
+  try {
+    appendAuditEvent('auto_dispatch_hold_bypassed', {
+      ...holdAuditFields(hold),
+      dispatched: (batch || []).map((j) => j.slug),
+    });
+  } catch (e) {
+    console.error('[scheduler] hold bypass audit failed', e?.message ?? String(e));
+  }
+}
+
 /**
  * Tick-level bound on the per-row held-key Maps. No hold in force → clear
  * both (a later hold audits every row once again); a hold in force → drop
@@ -10241,6 +10285,8 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
     // watchdog, boot/resume runDueJobs — holds at or above the threshold on
     // ANY live window of the last real reading, and under firePolicy
     // 'manual'. Only a human Run now / Fire next batch now passes through.
+    // bypassedHold = the hold a human tick passed through (audited after the picker).
+    let bypassedHold = null;
     {
       const hold = currentAutoDispatchHold(state.config);
       const nextHold = hold && hold.reason === 'utilization-held'
@@ -10256,6 +10302,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
       if (hold || openAutoDispatchHold) trackAutoDispatchHoldAudit(hold, pendingCount);
       if (hold) {
         if (human) {
+          bypassedHold = hold;
           console.log(`[scheduler] ${hold.reason}: ${hold.detail} — human run bypassed the hold`);
         } else {
           if (holdChanged) {
@@ -10288,6 +10335,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
       heldSlugs,
       satisfiedSlugsByCwd,
     });
+    if (bypassedHold) auditHoldBypassed(bypassedHold, batch);
     if (batch.length === 0 && freeSlots === 0) {
       const snap = sessionSlots.snapshot();
       const pendingCount = state.jobs.filter((j) => j.status === 'pending').length;
@@ -13212,6 +13260,7 @@ function registerScheduleHandlers() {
   });
 
   ipcMain.handle('schedule:force-tick', async () => {
+    await auditHumanPress('force-tick');
     // Bypass the billing-poll gate entirely — fire pending jobs immediately regardless of meter state.
     // Clears any existing pause first (same semantics as run-now).
     await clearPause('run-now');
@@ -13308,6 +13357,7 @@ function registerScheduleHandlers() {
   }));
 
   ipcMain.handle('schedule:run-now', async () => {
+    await auditHumanPress('run-now');
     // Manual run-now overrides any auto-pause. Clear it first.
     await clearPause('run-now');
     runDueJobs({ bypassLoadGate: true, human: true }).catch((e) => logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (run-now)', meta: { error: e?.message } }));
@@ -15066,6 +15116,7 @@ module.exports = {
   persistSchedulerState,
   getSchedulerStateSnapshot,
   _getOpenAutoDispatchHoldForTests,
+  _auditHumanPressForTests: auditHumanPress,
   _forgetOpenAutoDispatchHoldForTests,
   computeDegradedBudget,
   utilizationReading,

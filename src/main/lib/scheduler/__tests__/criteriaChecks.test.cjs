@@ -230,3 +230,142 @@ test('reverifyAc without criteria carries no criteriaChecks key', async () => {
   expect(r.status).toBe('pass');
   expect('criteriaChecks' in r).toBe(false);
 });
+
+// ── httpRetry ────────────────────────────────────────────────────────────
+
+const {
+  HTTP_RETRY_ATTEMPTS,
+  HTTP_RETRY_DELAY_MS,
+} = require('../criteriaChecks.cjs');
+
+function countingSleep(onSleep) {
+  const calls = [];
+  const sleep = async (ms) => { calls.push(ms); if (onSleep) await onSleep(calls.length); };
+  return { calls, sleep };
+}
+
+test('httpRetry constants match the PRD contract', () => {
+  expect(HTTP_RETRY_ATTEMPTS).toBe(3);
+  expect(HTTP_RETRY_DELAY_MS).toBe(10_000);
+});
+
+test('httpRetry (a): 404 then 200 passes on attempt 2', async () => {
+  let hits = 0;
+  const port = await listen((req, res) => { hits++; res.statusCode = hits === 1 ? 404 : 200; res.end('x'); });
+  const { calls, sleep } = countingSleep();
+  const [r] = await runCriteriaChecks({
+    cwd: mkcwd(),
+    httpRetry: { delayMs: 5, sleep },
+    criteria: [crit('r-a', 'http', `http://127.0.0.1:${port}/`)],
+  });
+  expect(r).toEqual({ id: 'r-a', kind: 'http', ok: true, detail: 'HTTP 200', attempts: 2 });
+  expect(calls).toEqual([5]);
+});
+
+test('httpRetry (b): connection refused, then the server comes up during the wait', async () => {
+  const probe = http.createServer();
+  await new Promise((res) => probe.listen(0, '127.0.0.1', res));
+  const port = probe.address().port;
+  await new Promise((res) => probe.close(res));
+  const srv = http.createServer((req, res) => { res.statusCode = 200; res.end('up'); });
+  try {
+    const { calls, sleep } = countingSleep(async () => {
+      if (srv.listening) return;
+      await new Promise((res) => { srv.once('listening', res); srv.listen(port, '127.0.0.1'); });
+    });
+    const [r] = await runCriteriaChecks({
+      cwd: mkcwd(),
+      httpRetry: { delayMs: 5, sleep },
+      criteria: [crit('r-b', 'http', `http://127.0.0.1:${port}/`)],
+    });
+    expect(r.ok).toBe(true);
+    expect(r.attempts).toBe(2);
+    expect(calls).toEqual([5]);
+  } finally {
+    await new Promise((res) => (srv.listening ? srv.close(res) : res()));
+  }
+});
+
+test('httpRetry (c): always 404 fails after 3 attempts with the last detail and two waits', async () => {
+  let hits = 0;
+  const port = await listen((req, res) => { hits++; res.statusCode = 404; res.end('x'); });
+  const { calls, sleep } = countingSleep();
+  const [r] = await runCriteriaChecks({
+    cwd: mkcwd(),
+    httpRetry: { delayMs: 5, sleep },
+    criteria: [crit('r-c', 'http', `http://127.0.0.1:${port}/`)],
+  });
+  expect(r).toEqual({ id: 'r-c', kind: 'http', ok: false, detail: 'HTTP 404, expected 200', attempts: 3 });
+  expect(hits).toBe(3);
+  expect(calls).toEqual([5, 5]);
+});
+
+test('httpRetry (d): waits are shared by the round, passing checks never wait, attempts clamp to 3', async () => {
+  const port = await listen((req, res) => { res.statusCode = req.url === '/ok' ? 200 : 404; res.end('x'); });
+  const two = countingSleep();
+  const rows = await runCriteriaChecks({
+    cwd: mkcwd(),
+    httpRetry: { attempts: 9, delayMs: 5, sleep: two.sleep },
+    criteria: [
+      crit('d-1', 'http', `http://127.0.0.1:${port}/a`),
+      crit('d-ok', 'http', `http://127.0.0.1:${port}/ok`),
+      crit('d-2', 'http', `http://127.0.0.1:${port}/b`),
+      crit('d-file', 'file', 'missing.txt'),
+    ],
+  });
+  expect(two.calls).toEqual([5, 5]);
+  expect(rows.map((r) => r.attempts)).toEqual([3, 1, 3, undefined]);
+  expect(rows.map((r) => r.ok)).toEqual([false, true, false, false]);
+  expect('attempts' in rows[3]).toBe(false);
+
+  const pass = countingSleep();
+  const [ok] = await runCriteriaChecks({
+    cwd: mkcwd(),
+    httpRetry: { delayMs: 5, sleep: pass.sleep },
+    criteria: [crit('d-pass', 'http', `http://127.0.0.1:${port}/ok`)],
+  });
+  expect(ok.attempts).toBe(1);
+  expect(pass.calls).toEqual([]);
+
+  for (const bad of [0, -2, 1.5, 'x']) {
+    const s = countingSleep();
+    const [r] = await runCriteriaChecks({
+      cwd: mkcwd(),
+      httpRetry: { attempts: bad, delayMs: 5, sleep: s.sleep },
+      criteria: [crit('d-bad', 'http', `http://127.0.0.1:${port}/a`)],
+    });
+    expect(r.attempts).toBe(bad === 0 || bad === -2 ? 1 : 3);
+  }
+});
+
+test('httpRetry (e): a non-loopback refusal is attempted once and never waits', async () => {
+  const { calls, sleep } = countingSleep();
+  const rows = await runCriteriaChecks({
+    cwd: mkcwd(),
+    httpRetry: { delayMs: 5, sleep },
+    criteria: [
+      crit('e-remote', 'http', 'https://example.com/'),
+      crit('e-proto', 'http', 'ftp://127.0.0.1/'),
+      crit('e-bad', 'http', 'not a url'),
+      crit('e-cred', 'http', 'http://u:p@127.0.0.1/'),
+    ],
+  });
+  expect(rows.map((r) => r.attempts)).toEqual([1, 1, 1, 1]);
+  expect(rows.every((r) => r.ok === false)).toBe(true);
+  expect(rows[0].detail).toMatch(/loopback/);
+  for (const r of rows) expect('refused' in r).toBe(false);
+  expect(calls).toEqual([]);
+});
+
+test('httpRetry with keepBody: the re-run replaces body fields in place', async () => {
+  let hits = 0;
+  const port = await listen((req, res) => { hits++; res.statusCode = hits === 1 ? 503 : 200; res.end(hits === 1 ? 'down' : 'fresh'); });
+  const { sleep } = countingSleep();
+  const [r] = await runCriteriaChecks({
+    cwd: mkcwd(),
+    keepBody: true,
+    httpRetry: { delayMs: 5, sleep },
+    criteria: [crit('kb', 'http', `http://127.0.0.1:${port}/`)],
+  });
+  expect(r).toEqual({ id: 'kb', kind: 'http', ok: true, detail: 'HTTP 200', body: 'fresh', bodyBytes: 5, truncated: false, attempts: 2 });
+});

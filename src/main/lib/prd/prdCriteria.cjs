@@ -8,7 +8,8 @@
  * criterion can be checked mechanically:
  *   - command: spec is one gate command; must pass prdGateFiles.validateGate.
  *   - file:    spec is a repo-relative path string, or { path, contains? }.
- *   - http:    spec is a loopback URL string, or { url, status? } (status defaults to 200).
+ *   - http:    spec is a loopback URL string, or { url, status?, contains? } (status defaults
+ *              to 200; contains is one-line text the response body must include).
  *   - manual:  spec is optional one-line guidance for the human/validator.
  *
  * Pure, no I/O. normalizeCriteria throws a CriteriaError naming the 1-based
@@ -71,9 +72,9 @@ function normalizeFile(spec, idx) {
 function normalizeHttp(spec, idx) {
   const obj = typeof spec === 'string' ? { url: spec } : spec;
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
-    throw new CriteriaError(idx, 'http check spec must be a loopback URL or { url, status? }.');
+    throw new CriteriaError(idx, 'http check spec must be a loopback URL or { url, status?, contains? }.');
   }
-  const extra = Object.keys(obj).filter((k) => k !== 'url' && k !== 'status');
+  const extra = Object.keys(obj).filter((k) => k !== 'url' && k !== 'status' && k !== 'contains');
   if (extra.length) throw new CriteriaError(idx, `http check spec has unknown key(s): ${extra.join(', ')}.`);
   const raw = oneLine(obj.url, 2000, 'http check url', idx);
   let url;
@@ -93,7 +94,9 @@ function normalizeHttp(spec, idx) {
   if (!Number.isInteger(status) || status < 100 || status > 599) {
     throw new CriteriaError(idx, 'http check status must be an integer from 100 to 599.');
   }
-  return { url: url.href, status };
+  const out = { url: url.href, status };
+  if (obj.contains !== undefined) out.contains = oneLine(obj.contains, CONTAINS_MAX_CHARS, 'http check contains', idx);
+  return out;
 }
 
 function normalizeCheck(check, idx) {

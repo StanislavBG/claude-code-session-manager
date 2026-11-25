@@ -82,6 +82,19 @@ test('http check: non-loopback, bad scheme and bad status are refused with index
   expect(refusal([{ statement: 'x', check: { kind: 'http', spec: { url: 'http://localhost/', status: 700 } } }]).error).toMatch(/status/);
 });
 
+test('http check: optional one-line contains is kept; too long, multi-line, empty or unknown keys are refused', () => {
+  const [c] = normalizeCriteria([{ statement: 'runbook', check: { kind: 'http', spec: { url: 'http://127.0.0.1:4317/x', contains: '"runbook":' } } }]);
+  expect(c.check.spec).toEqual({ url: 'http://127.0.0.1:4317/x', status: 200, contains: '"runbook":' });
+  const [d] = normalizeCriteria([{ statement: 'no contains', check: { kind: 'http', spec: { url: 'http://127.0.0.1:4317/x' } } }]);
+  expect('contains' in d.check.spec).toBe(false);
+  const spec = (contains) => [{ statement: 'x', check: { kind: 'http', spec: { url: 'http://localhost/', contains } } }];
+  expect(refusal(spec('a'.repeat(501))).error).toMatch(/entry 1: http check contains must be at most 500 chars/);
+  expect(normalizeCriteria(spec('a'.repeat(500)))[0].check.spec.contains).toHaveLength(500);
+  expect(refusal(spec('line one\nline two')).error).toMatch(/http check contains must not contain a newline/);
+  expect(refusal(spec('')).error).toMatch(/http check contains must be a non-empty string/);
+  expect(refusal([{ statement: 'x', check: { kind: 'http', spec: { url: 'http://localhost/', method: 'POST' } } }]).error).toMatch(/unknown key\(s\): method/);
+});
+
 test('duplicate ids are refused, including an explicit id colliding with a generated one', () => {
   const r = refusal([{ id: 'same', statement: 'a' }, { id: 'same', statement: 'b' }]);
   expect(r.index).toBe(2);

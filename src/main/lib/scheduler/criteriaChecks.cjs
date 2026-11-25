@@ -12,7 +12,10 @@
  *     a path that escapes `cwd` fails closed.
  *   - http:    loopback hosts only (re-checked here, never trusted from the
  *     frontmatter), no redirects followed, HTTP_TIMEOUT_MS timeout; ok when
- *     the response status equals the expected one (default 200).
+ *     the response status equals the expected one (default 200) and, when
+ *     `contains` is set, the first HTTP_BODY_MAX_BYTES of the body include it.
+ *     With keepBody, each http row also carries { body, bodyBytes, truncated }
+ *     (body capped at HTTP_BODY_MAX_BYTES); without it rows never hold a body.
  *   - manual:  never run — ok: null; detail carries the guidance line.
  *
  * Never throws: every failure becomes { ok: false, detail }. Checks run
@@ -27,6 +30,7 @@ const { parseChain, runIsolatedSequence } = require('./definitionOfDone.cjs');
 
 const COMMAND_CAP_MS = 300_000;
 const HTTP_TIMEOUT_MS = 15_000;
+const HTTP_BODY_MAX_BYTES = 1024 * 1024;
 const FILE_READ_MAX_BYTES = 16 * 1024 * 1024;
 const DETAIL_MAX_CHARS = 500;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
@@ -91,12 +95,17 @@ function runFileCheck(spec, cwd) {
 }
 
 /**
+ * @typedef {{ok: boolean, detail: string, body?: string, bodyBytes?: number, truncated?: boolean}} HttpResult
+ */
+
+/**
  * @param {unknown} spec
  * @param {number} timeoutMs
- * @returns {Promise<{ok: boolean, detail: string}>}
+ * @param {boolean} [keepBody] attach { body, bodyBytes, truncated } to the result
+ * @returns {Promise<HttpResult>}
  */
-function runHttpCheck(spec, timeoutMs) {
-  /** @type {{url?: unknown, status?: unknown}} */
+function runHttpCheck(spec, timeoutMs, keepBody = false) {
+  /** @type {{url?: unknown, status?: unknown, contains?: unknown}} */
   const obj = typeof spec === 'string' ? { url: spec } : (spec && typeof spec === 'object' ? /** @type {any} */ (spec) : {});
   let url;
   try { url = new URL(String(obj.url)); } catch { return Promise.resolve({ ok: false, detail: 'http check url is not a valid URL' }); }
@@ -107,10 +116,12 @@ function runHttpCheck(spec, timeoutMs) {
     return Promise.resolve({ ok: false, detail: `refused: host "${url.hostname}" is not loopback` });
   }
   const want = Number.isInteger(obj.status) ? /** @type {number} */ (obj.status) : 200;
+  const contains = typeof obj.contains === 'string' && obj.contains !== '' ? obj.contains : null;
+  const readBody = contains !== null || keepBody;
   const lib = url.protocol === 'https:' ? https : http;
   return new Promise((resolve) => {
     let done = false;
-    /** @param {{ok: boolean, detail: string}} r */
+    /** @param {HttpResult} r */
     const finish = (r) => { if (!done) { done = true; clearTimeout(timer); resolve(r); } };
     /** @type {import('node:http').ClientRequest} */
     let req;
@@ -121,11 +132,48 @@ function runHttpCheck(spec, timeoutMs) {
     try {
       // Self-signed certs are normal on a loopback dev server.
       req = lib.request(url, { method: 'GET', ...(lib === https ? { rejectUnauthorized: false } : {}) }, (res) => {
-        res.resume();
         const got = res.statusCode;
-        finish(got === want
-          ? { ok: true, detail: `HTTP ${got}` }
-          : { ok: false, detail: `HTTP ${got}, expected ${want}` });
+        if (!readBody) {
+          res.resume();
+          finish(got === want
+            ? { ok: true, detail: `HTTP ${got}` }
+            : { ok: false, detail: `HTTP ${got}, expected ${want}` });
+          return;
+        }
+        /** @type {Buffer[]} */
+        const chunks = [];
+        let bytes = 0;
+        let truncated = false;
+        let settled = false;
+        const decide = () => {
+          if (settled) return;
+          settled = true;
+          const buf = Buffer.concat(chunks, bytes);
+          const text = buf.toString('utf8');
+          /** @type {HttpResult} */
+          let r;
+          if (got !== want) r = { ok: false, detail: `HTTP ${got}, expected ${want}` };
+          else if (contains === null) r = { ok: true, detail: `HTTP ${got}` };
+          else if (text.includes(contains)) r = { ok: true, detail: `HTTP ${got}, body contains the text` };
+          else r = { ok: false, detail: clip(`HTTP ${got}, body does not contain ${JSON.stringify(contains)}`) };
+          if (keepBody) Object.assign(r, { body: text, bodyBytes: bytes, truncated });
+          finish(r);
+        };
+        res.on('data', (/** @type {Buffer} */ chunk) => {
+          if (settled) return;
+          const room = HTTP_BODY_MAX_BYTES - bytes;
+          if (chunk.length > room) {
+            if (room > 0) { chunks.push(chunk.subarray(0, room)); bytes += room; }
+            truncated = true;
+            decide();
+            res.destroy();
+            return;
+          }
+          chunks.push(chunk);
+          bytes += chunk.length;
+        });
+        res.on('end', decide);
+        res.on('error', (e) => finish({ ok: false, detail: `response failed: ${e && e.message ? e.message : e}` }));
       });
       req.on('error', (e) => finish({ ok: false, detail: `request failed: ${e && e.message ? e.message : e}` }));
       req.end();
@@ -138,11 +186,13 @@ function runHttpCheck(spec, timeoutMs) {
 /**
  * Run every criterion's check in `cwd`, in order.
  *
- * @param {{ criteria: unknown, cwd: string, commandCapMs?: number, httpTimeoutMs?: number }} opts
+ * @param {{ criteria: unknown, cwd: string, commandCapMs?: number, httpTimeoutMs?: number, keepBody?: boolean }} opts
  *   commandCapMs / httpTimeoutMs exist for tests; callers use the defaults.
- * @returns {Promise<Array<{id: string, kind: string, ok: boolean|null, detail: string}>>}
+ *   keepBody (default false): http rows also carry { body, bodyBytes, truncated };
+ *   off, every row is exactly { id, kind, ok, detail } (gate shadow + job row store no body).
+ * @returns {Promise<Array<{id: string, kind: string, ok: boolean|null, detail: string, body?: string, bodyBytes?: number, truncated?: boolean}>>}
  */
-async function runCriteriaChecks({ criteria, cwd, commandCapMs = COMMAND_CAP_MS, httpTimeoutMs = HTTP_TIMEOUT_MS }) {
+async function runCriteriaChecks({ criteria, cwd, commandCapMs = COMMAND_CAP_MS, httpTimeoutMs = HTTP_TIMEOUT_MS, keepBody = false }) {
   if (!Array.isArray(criteria) || !criteria.length) return [];
   const out = [];
   for (let i = 0; i < criteria.length; i++) {
@@ -150,20 +200,27 @@ async function runCriteriaChecks({ criteria, cwd, commandCapMs = COMMAND_CAP_MS,
     const id = c && typeof c.id === 'string' ? c.id : `ac-${i + 1}`;
     const check = c && c.check && typeof c.check === 'object' ? c.check : { kind: 'manual' };
     const kind = typeof check.kind === 'string' ? check.kind : 'manual';
-    /** @type {{ok: boolean|null, detail: string}} */
+    /** @type {{ok: boolean|null, detail: string, body?: string, bodyBytes?: number, truncated?: boolean}} */
     let r;
     try {
       if (kind === 'manual') r = { ok: null, detail: typeof check.spec === 'string' && check.spec ? check.spec : 'manual check' };
       else if (kind === 'command') r = await runCommandCheck(check.spec, commandCapMs, cwd);
       else if (kind === 'file') r = runFileCheck(check.spec, cwd);
-      else if (kind === 'http') r = await runHttpCheck(check.spec, httpTimeoutMs);
+      else if (kind === 'http') r = await runHttpCheck(check.spec, httpTimeoutMs, keepBody === true);
       else r = { ok: false, detail: `unknown check kind ${JSON.stringify(kind)}` };
     } catch (e) {
       r = { ok: false, detail: `check error: ${e && /** @type {Error} */ (e).message ? /** @type {Error} */ (e).message : e}` };
     }
-    out.push({ id, kind, ok: r.ok, detail: r.detail });
+    /** @type {{id: string, kind: string, ok: boolean|null, detail: string, body?: string, bodyBytes?: number, truncated?: boolean}} */
+    const row = { id, kind, ok: r.ok, detail: r.detail };
+    if (keepBody === true && kind === 'http' && typeof r.body === 'string') {
+      row.body = r.body;
+      row.bodyBytes = r.bodyBytes;
+      row.truncated = r.truncated;
+    }
+    out.push(row);
   }
   return out;
 }
 
-module.exports = { runCriteriaChecks, COMMAND_CAP_MS, HTTP_TIMEOUT_MS };
+module.exports = { runCriteriaChecks, COMMAND_CAP_MS, HTTP_TIMEOUT_MS, HTTP_BODY_MAX_BYTES };

@@ -96,6 +96,55 @@ test('http check: loopback pass and status mismatch fail', async () => {
   expect(results[1].detail).toMatch(/404/);
 });
 
+test('http check contains: body match, mismatch, and a body over 1 MiB without the text fails', async () => {
+  const big = Buffer.alloc(2 * 1024 * 1024, 'a');
+  const port = await listen((req, res) => {
+    if (req.url === '/big') { res.statusCode = 200; res.end(big); return; }
+    if (req.url === '/bigtail') { res.statusCode = 200; res.end(Buffer.concat([big, Buffer.from('NEEDLE')])); return; }
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ runbook: 'steps here' }));
+  });
+  const results = await runCriteriaChecks({
+    cwd: mkcwd(),
+    criteria: [
+      crit('c-match', 'http', { url: `http://127.0.0.1:${port}/j`, contains: '"runbook":"steps' }),
+      crit('c-miss', 'http', { url: `http://127.0.0.1:${port}/j`, contains: 'nope' }),
+      crit('c-big', 'http', { url: `http://127.0.0.1:${port}/big`, contains: 'NEEDLE' }),
+      crit('c-bigtail', 'http', { url: `http://127.0.0.1:${port}/bigtail`, contains: 'NEEDLE' }),
+      crit('c-status', 'http', { url: `http://127.0.0.1:${port}/j`, status: 404, contains: 'runbook' }),
+    ],
+  });
+  expect(results.map((r) => r.ok)).toEqual([true, false, false, false, false]);
+  expect(results[0].detail).toBe('HTTP 200, body contains the text');
+  expect(results[1].detail).toBe('HTTP 200, body does not contain "nope"');
+  expect(results[2].detail).toBe('HTTP 200, body does not contain "NEEDLE"');
+  expect(results[4].detail).toMatch(/HTTP 200, expected 404/);
+  for (const r of results) expect(Object.keys(r).sort()).toEqual(['detail', 'id', 'kind', 'ok']);
+});
+
+test('keepBody: http rows carry body, bodyBytes and truncated only when asked', async () => {
+  const big = Buffer.alloc(2 * 1024 * 1024, 'b');
+  const port = await listen((req, res) => {
+    res.statusCode = 200;
+    res.end(req.url === '/big' ? big : '{"ok":true}');
+  });
+  const criteria = [
+    crit('k-small', 'http', `http://127.0.0.1:${port}/small`),
+    crit('k-big', 'http', { url: `http://127.0.0.1:${port}/big`, contains: 'b' }),
+    crit('k-file', 'file', 'present.txt'),
+  ];
+  const kept = await runCriteriaChecks({ cwd: mkcwd(), criteria, keepBody: true });
+  expect(kept[0]).toMatchObject({ ok: true, body: '{"ok":true}', bodyBytes: 11, truncated: false });
+  expect(kept[1].ok).toBe(true);
+  expect(kept[1].truncated).toBe(true);
+  expect(kept[1].bodyBytes).toBe(1048576);
+  expect(kept[1].body).toHaveLength(1048576);
+  expect('body' in kept[2]).toBe(false);
+  const plain = await runCriteriaChecks({ cwd: mkcwd(), criteria });
+  for (const r of plain) expect(Object.keys(r).sort()).toEqual(['detail', 'id', 'kind', 'ok']);
+});
+
 test('http check refuses a non-loopback host without connecting', async () => {
   const [r] = await runCriteriaChecks({
     cwd: mkcwd(),

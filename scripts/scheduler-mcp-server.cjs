@@ -552,7 +552,7 @@ const ACCEPTANCE_CRITERION_ITEM_SCHEMA = {
             kind: { type: 'string', enum: ['command', 'file', 'http', 'manual'] },
             spec: {
               description: 'command: one gate-syntax command string. file: repo-relative path, or { path, contains? }. '
-                + 'http: loopback URL (localhost/127.0.0.1/[::1]), or { url, status? } (status defaults to 200). manual: optional guidance string.',
+                + 'http: loopback URL (localhost/127.0.0.1/[::1]), or { url, status?, contains? } (status defaults to 200; contains is body text that must appear in the response). manual: optional guidance string.',
             },
           },
           required: ['kind'],

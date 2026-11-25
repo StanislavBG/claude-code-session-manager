@@ -63,6 +63,7 @@
 'use strict';
 
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
+const { usageHeldBody } = require('../scheduler/usageHoldRoute.cjs');
 const { resolveCwd } = require('./projectHomeAdminRoutes.cjs');
 const macroLibrary = require('../persona-macro/macroLibrary.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
@@ -457,17 +458,6 @@ const USAGE_HOLD_HINT =
   "Usage is above 'pause above': script presses wait until the window resets or usage drops below it. "
   + 'Retry after hold.resetsAt. GET /admin/usage-hold reads the hold.';
 
-/** @param {any} hold → the 429 usage_held body (same shape as POST /admin/tasks). */
-function holdBody(hold) {
-  return {
-    ok: false,
-    error: 'usage_held',
-    hold: { reason: hold.reason, window: hold.window ?? null, percent: hold.percent ?? null, threshold: hold.threshold ?? null, resetsAt: hold.resetsAt ?? null },
-    detail: hold.detail ?? null,
-    hint: USAGE_HOLD_HINT,
-  };
-}
-
 /**
  * The usage hold ('pause above') gate in front of every script-press
  * startExternalNewSession call. Replies 429 usage_held / 503 usage_hold_error
@@ -484,7 +474,7 @@ function refusedByUsageHold(deps, res) {
     return true;
   }
   if (!hold) return false;
-  sendJson(res, 429, holdBody(hold));
+  sendJson(res, 429, usageHeldBody(hold, USAGE_HOLD_HINT));
   return true;
 }
 

@@ -95,6 +95,7 @@ const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { resolveProjectRoot } = require('../opsOwnership.cjs');
 const { phaseOfTask } = require('../phaseProjection.cjs');
 const { registerTaskSwitchRoute } = require('./taskSwitchRoute.cjs');
+const { usageHeldBody } = require('../scheduler/usageHoldRoute.cjs');
 
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_IMPORT_BODY_BYTES = 8 * 1024 * 1024;
@@ -442,17 +443,6 @@ const USAGE_HOLD_HINT =
   "Usage is above 'pause above': automatic Tasks wait until the window resets or usage drops below it. "
   + 'Retry after hold.resetsAt; never run claude -p directly instead. GET /admin/usage-hold reads the hold.';
 
-/** @param {any} hold → the 429 usage_held body. */
-function holdBody(hold) {
-  return {
-    ok: false,
-    error: 'usage_held',
-    hold: { reason: hold.reason, window: hold.window ?? null, percent: hold.percent ?? null, threshold: hold.threshold ?? null, resetsAt: hold.resetsAt ?? null },
-    detail: hold.detail ?? null,
-    hint: USAGE_HOLD_HINT,
-  };
-}
-
 /**
  * @param {{ registerRoute: Function }} adminHttp
  * @param {{ taskSwitch?: any, resolveInfo?: Function, sessionSlots?: any, runTask?: Function,
@@ -656,7 +646,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
       return;
     }
     if (heldNow) {
-      reply(429, holdBody(heldNow));
+      reply(429, usageHeldBody(heldNow, USAGE_HOLD_HINT));
       return;
     }
 
@@ -735,7 +725,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
       if (heldLate) {
         try { slots().release(token); } catch { /* */ }
         await end({ status: 'usage_held', slotWaitMs });
-        reply(429, { ...holdBody(heldLate), taskId, slotWaitMs });
+        reply(429, { ...usageHeldBody(heldLate, USAGE_HOLD_HINT), taskId, slotWaitMs });
         return;
       }
 

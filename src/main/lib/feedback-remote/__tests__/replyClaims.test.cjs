@@ -133,12 +133,6 @@ describe('isSessionManagerRepo', () => {
       fs.rmSync(bad, { recursive: true, force: true });
     }
   });
-  test('reads package.json through atomicFs readJsonOrSync, not a hand-rolled JSON.parse', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'replyClaims.cjs'), 'utf8');
-    expect(src).not.toMatch(/JSON\.parse\(\s*fs\.readFileSync/);
-    expect(src).toMatch(/require\('\.\.\/util\/atomicFs\.cjs'\)/);
-    expect(src).toMatch(/readJsonOrSync\(path\.join\(cwd, 'package\.json'\), null\)/);
-  });
 });
 
 describe('checkReleaseContains', () => {

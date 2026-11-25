@@ -204,8 +204,12 @@ test('add keeps at most MAX_COMMITS (20) valid hashes: a 25-commit entry stores 
   expect(ledger.listDueReplies('0.142.0')[0].commits).toEqual(hashes.slice(0, 20));
 });
 
-test('pendingReplies.cjs reuses replyClaims commit rule (no COMMIT_RE of its own)', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'pendingReplies.cjs'), 'utf8');
-  expect(src).not.toMatch(/COMMIT_RE/);
-  expect(src).toMatch(/isCommitHash/);
+test('pendingReplies keeps exactly the commits replyClaims.isCommitHash accepts', () => {
+  const { isCommitHash } = require('../replyClaims.cjs');
+  const candidates = ['abc1234', 'ABC1234', 'abc12', 'zzzzzzz', 'a'.repeat(40), 'a'.repeat(41), '', 42, null, ' abc1234', 'DEF5678'];
+  const expected = [...new Set(candidates.filter(isCommitHash).map((c) => String(c).toLowerCase()))];
+  expect(expected.length).toBeGreaterThan(1);
+  expect(expected.length).toBeLessThan(candidates.length);
+  const e = ledger.addPendingReply(entry({ commits: candidates }));
+  expect(e.commits).toEqual(expected);
 });

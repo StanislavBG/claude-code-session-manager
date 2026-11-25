@@ -174,6 +174,8 @@ test('a Task held live by the registered POST /admin/tasks route reads running t
   registerAdminRoute({ registerRoute: (m, u, fn) => { routes.set(`${m} ${u}`, fn); } }, {
     resolveInfo: async () => ({ personaFound: true, resolvedModelId: 'claude-haiku-4-5', personaEffort: 'low' }),
     sessionSlots: { waitForSlot: async () => 'tok', stampPid: () => {}, release: () => {} },
+    usageHold: () => null,
+    appendAuditEvent: () => {},
     runTask: async () => {
       startedResolve();
       await gate;

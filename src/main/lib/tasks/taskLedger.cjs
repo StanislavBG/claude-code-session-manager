@@ -62,10 +62,10 @@ const KINDS = new Set([KIND_STARTED, KIND_STATUS_CHANGED]);
 /** Pre-event-log kinds still on disk (≤ tasksDays old) → their current kind. */
 const LEGACY_KINDS = { start: KIND_STARTED, end: KIND_STATUS_CHANGED, imported: KIND_STATUS_CHANGED };
 
-/** Terminal Task statuses (taskRun.cjs + taskAdminRoutes.cjs + read-side 'interrupted'). */
+/** Terminal Task statuses (taskRun.cjs + taskAdminRoutes.cjs incl. the slot-grant 'usage_held' + read-side 'interrupted'). */
 const TERMINAL_STATUSES = Object.freeze([
   'ok', 'error', 'rate_limited', 'timeout', 'spawn_failed', 'caller_gone', 'slot_timeout',
-  'too_many_waiting', 'interrupted',
+  'too_many_waiting', 'interrupted', 'usage_held',
 ]);
 
 /**

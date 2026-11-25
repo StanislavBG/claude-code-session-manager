@@ -94,6 +94,8 @@ function liveDeps(over) {
     runTask: (o) => runImpl(o),
     buildTaskArgs: () => ['-p'],
     buildTaskEnv: () => ({}),
+    usageHold: () => null,
+    appendAuditEvent: () => {},
     ...over,
   };
 }

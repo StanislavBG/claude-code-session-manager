@@ -76,6 +76,8 @@ describe('Task route passes the persona declared set', () => {
       resolveInfo: async () => ({ personaFound: true, resolvedModelId: 'sonnet', personaEffort: 'low', declaredMcpServers: ['session-manager-scheduler'] }),
       buildTaskArgs: (o) => { seen = o; const e = new Error('stop'); /** @type {any} */ (e).code = 'stop_here'; throw e; },
       ledger: { appendTaskStart: async () => {}, appendTaskEnd: async () => {} },
+      usageHold: () => null,
+      appendAuditEvent: () => {},
     });
     const handler = routes['POST /admin/tasks'];
     expect(typeof handler).toBe('function');

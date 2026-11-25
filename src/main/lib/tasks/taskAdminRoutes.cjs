@@ -15,11 +15,23 @@
  *          422 model_unresolved, 422 effort_unresolved. The persona BODY is
  *          never read into the prompt or argv;
  *       4. 409 session_busy when another running Task holds the session;
- *       5. ledger start line, THEN sessionSlots.waitForSlot by priority lane
+ *          then buildTaskArgs (400);
+ *       5. the usage hold (scheduler.currentUsageHold — the same 'pause
+ *          above' rule the PRD queue holds at): a hold → 429 usage_held
+ *          { hold: { reason, window, percent, threshold, resetsAt }, detail,
+ *          hint }, a throw → 503 usage_hold_error, both before any ledger
+ *          line. No body key, priority or caller bypasses it — this loopback
+ *          route cannot prove a human. One 'task_usage_held' audit event per
+ *          project root per hold (holdIdentityKey), not per request;
+ *       6. ledger start line, THEN sessionSlots.waitForSlot by priority lane
  *          (null → 'slot_timeout', too_many_waiting → 429);
- *       6. taskRun.runTask, token released in finally, ledger end line with
+ *       7. once the slot is granted the usage hold is read AGAIN: a hold (or
+ *          a throw) releases the token, writes the end line status
+ *          'usage_held' + slotWaitMs and replies 429 usage_held (+ taskId,
+ *          slotWaitMs) — a Task that waited through the hold never spawns;
+ *       8. taskRun.runTask, token released in finally, ledger end line with
  *          costUsd from modelPricing.costOfUsage;
- *       7. 200 { ok: true, taskId, status, stdout, envelope, usage, costUsd,
+ *       9. 200 { ok: true, taskId, status, stdout, envelope, usage, costUsd,
  *          cliCostUsd, durationMs, slotWaitMs, exitCode, model, effort,
  *          sessionId, quota }.
  *   A req/res 'close' before the reply aborts the wait or the run
@@ -426,12 +438,28 @@ function liveTaskIdsFor(root) {
   return ids;
 }
 
+const USAGE_HOLD_HINT =
+  "Usage is above 'pause above': automatic Tasks wait until the window resets or usage drops below it. "
+  + 'Retry after hold.resetsAt; never run claude -p directly instead. GET /admin/usage-hold reads the hold.';
+
+/** @param {any} hold → the 429 usage_held body. */
+function holdBody(hold) {
+  return {
+    ok: false,
+    error: 'usage_held',
+    hold: { reason: hold.reason, window: hold.window ?? null, percent: hold.percent ?? null, threshold: hold.threshold ?? null, resetsAt: hold.resetsAt ?? null },
+    detail: hold.detail ?? null,
+    hint: USAGE_HOLD_HINT,
+  };
+}
+
 /**
  * @param {{ registerRoute: Function }} adminHttp
  * @param {{ taskSwitch?: any, resolveInfo?: Function, sessionSlots?: any, runTask?: Function,
  *   buildTaskArgs?: Function, buildTaskEnv?: Function, ledger?: any, costOfUsage?: Function,
  *   now?: () => number, randomUUID?: () => string, resolveProjectRoot?: Function,
  *   syncInteractiveReserve?: () => any, knownMcpServers?: () => Record<string, object>,
+ *   usageHold?: () => any, appendAuditEvent?: (kind: string, fields: Record<string, any>) => void,
  *   switchRouteDeps?: Record<string, any> }} [deps]
  */
 function registerAdminRoute(adminHttp, deps = {}) {
@@ -460,6 +488,31 @@ function registerAdminRoute(adminHttp, deps = {}) {
   const syncReserve = deps.syncInteractiveReserve || (() => require('./taskSwitch.cjs').syncInteractiveReserve());
   const safeSync = () => {
     try { syncReserve(); } catch { /* a failed sync never changes the response */ }
+  };
+  // The usage hold ('pause above'): read lazily so scheduler.cjs never loads at module load.
+  const usageHold = deps.usageHold || (() => require('../../scheduler.cjs').currentUsageHold());
+  const audit = (/** @type {string} */ kind, /** @type {Record<string, any>} */ fields) =>
+    (deps.appendAuditEvent || require('../telemetry/auditLog.cjs').appendAuditEvent)(kind, fields);
+  /** project root → holdIdentityKey of the hold last audited for it; cleared when a read returns null. */
+  const heldAudited = new Map();
+  /** @param {string} root @param {any} hold */
+  const auditHold = (root, hold) => {
+    try {
+      const key = require('../../scheduler/utilizationHold.cjs').holdIdentityKey(hold);
+      if (heldAudited.get(root) === key) return;
+      heldAudited.set(root, key);
+      audit('task_usage_held', {
+        cwd: root, reason: hold.reason, window: hold.window, percent: hold.percent,
+        threshold: hold.threshold, resetsAt: hold.resetsAt,
+      });
+    } catch { /* an audit failure never changes the response */ }
+  };
+  /** @param {string} root @returns {any} the hold, or null; throws when the read throws. */
+  const readHold = (root) => {
+    const hold = usageHold();
+    if (!hold) { heldAudited.delete(root); return null; }
+    auditHold(root, hold);
+    return hold;
   };
 
   /** sessionId → taskId for every Task currently between its start line and its end line. */
@@ -594,6 +647,19 @@ function registerAdminRoute(adminHttp, deps = {}) {
     }
     const env = buildEnv(runtime, process.env);
 
+    // Last check before the ledger start line: the usage hold.
+    let heldNow;
+    try {
+      heldNow = readHold(cwd);
+    } catch (e) {
+      reply(503, { ok: false, error: 'usage_hold_error', details: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    if (heldNow) {
+      reply(429, holdBody(heldNow));
+      return;
+    }
+
     const ac = new AbortController();
     const onClose = () => { if (!replied) ac.abort(); };
     req.on('close', onClose);
@@ -655,6 +721,21 @@ function registerAdminRoute(adminHttp, deps = {}) {
         const status = ac.signal.aborted ? 'caller_gone' : 'slot_timeout';
         await end({ status, slotWaitMs });
         reply(503, { ok: false, error: status, taskId, slotWaitMs });
+        return;
+      }
+
+      // The hold may have engaged while this Task waited for its slot.
+      let heldLate;
+      try {
+        heldLate = readHold(cwd);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        heldLate = { reason: 'usage_hold_error', window: null, percent: null, threshold: null, resetsAt: null, detail: `usage hold read failed: ${msg}` };
+      }
+      if (heldLate) {
+        try { slots().release(token); } catch { /* */ }
+        await end({ status: 'usage_held', slotWaitMs });
+        reply(429, { ...holdBody(heldLate), taskId, slotWaitMs });
         return;
       }
 

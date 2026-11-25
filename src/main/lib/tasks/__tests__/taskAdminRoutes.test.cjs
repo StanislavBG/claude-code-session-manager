@@ -58,7 +58,7 @@ function okRun(over = {}) {
 }
 
 function setup(over = {}) {
-  const calls = { order: [], starts: [], ends: [], waits: [], runs: [], args: [], released: [], stamped: [] };
+  const calls = { order: [], starts: [], ends: [], waits: [], runs: [], args: [], released: [], stamped: [], audits: [] };
   const deps = {
     resolveProjectRoot: (c) => c,
     syncInteractiveReserve: () => { calls.order.push('sync'); return false; },
@@ -78,6 +78,8 @@ function setup(over = {}) {
     },
     costOfUsage: () => ({ costUsd: 0.5 }),
     randomUUID: () => 'task-1',
+    usageHold: () => null,
+    appendAuditEvent: (kind, fields) => { calls.audits.push({ kind, ...fields }); },
     ...over,
   };
   const handlers = new Map();
@@ -592,5 +594,124 @@ describe('held interactive slot re-sync from the switch file', () => {
     expect(res.status).toBe(403);
     expect(slots.snapshot().reserve).toBe(0);
     slots.__resetForTests();
+  });
+});
+
+describe('usage hold', () => {
+  const HOLD = {
+    reason: 'utilization-held', window: 'seven_day', percent: 93, threshold: 90,
+    resetsAt: '2026-11-27T10:00:00.000Z', detail: 'seven_day window at 93% ≥ 90%, resets 2026-11-27T10:00:00.000Z',
+  };
+  const holdShape = { reason: HOLD.reason, window: HOLD.window, percent: HOLD.percent, threshold: HOLD.threshold, resetsAt: HOLD.resetsAt };
+
+  test('a hold gives 429 usage_held, with no start line, wait or run (JSON)', async () => {
+    const s = setup({ usageHold: () => HOLD });
+    const res = await s.call(base());
+    expect(res.status).toBe(429);
+    expect(res.body).toMatchObject({ ok: false, error: 'usage_held', hold: holdShape, detail: HOLD.detail });
+    expect(res.body.hint).toMatch(/resetsAt/);
+    expect(res.body.hint).toMatch(/GET \/admin\/usage-hold/);
+    expect(s.calls.starts).toHaveLength(0);
+    expect(s.calls.waits).toHaveLength(0);
+    expect(s.calls.runs).toHaveLength(0);
+    expect(s.calls.ends).toHaveLength(0);
+  });
+
+  test('a hold gives the same 429 JSON in stream mode, with no NDJSON head', async () => {
+    const s = setup({ usageHold: () => HOLD });
+    const res = await s.call(base({ stream: true }));
+    expect(res.status).toBe(429);
+    expect(res.headers && res.headers['Content-Type']).not.toBe('application/x-ndjson');
+    expect(res.chunks).toHaveLength(0);
+    expect(res.body).toMatchObject({ ok: false, error: 'usage_held', hold: holdShape });
+    expect(s.calls.starts).toHaveLength(0);
+    expect(s.calls.waits).toHaveLength(0);
+    expect(s.calls.runs).toHaveLength(0);
+  });
+
+  test("usageHold: () => null leaves the ok path unchanged", async () => {
+    const a = await setup().call(base());
+    const b = await setup({ usageHold: () => null }).call(base());
+    expect(b.status).toBe(200);
+    expect(b.body).toEqual(a.body);
+  });
+
+  test("priority: 'interactive' is refused the same way", async () => {
+    const s = setup({ usageHold: () => HOLD });
+    const res = await s.call(base({ priority: 'interactive' }));
+    expect(res.status).toBe(429);
+    expect(res.body.error).toBe('usage_held');
+    expect(s.calls.starts).toHaveLength(0);
+    expect(s.calls.runs).toHaveLength(0);
+  });
+
+  test('a throwing usageHold gives 503 usage_hold_error before any ledger line', async () => {
+    const s = setup({ usageHold: () => { throw new Error('reading broke'); } });
+    const res = await s.call(base());
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ ok: false, error: 'usage_hold_error' });
+    expect(res.body.details).toMatch(/reading broke/);
+    expect(s.calls.starts).toHaveLength(0);
+    expect(s.calls.waits).toHaveLength(0);
+    expect(s.calls.runs).toHaveLength(0);
+  });
+
+  const heldAfterWait = (over = {}) => {
+    let reads = 0;
+    return setup({ usageHold: () => (++reads >= 2 ? HOLD : null), ...over });
+  };
+
+  test('a hold that appears after the slot wait ends usage_held, releases the token, never runs (JSON)', async () => {
+    const s = heldAfterWait();
+    const res = await s.call(base());
+    expect(res.status).toBe(429);
+    expect(res.body).toMatchObject({ ok: false, error: 'usage_held', hold: holdShape, taskId: 'task-1' });
+    expect(typeof res.body.slotWaitMs).toBe('number');
+    expect(s.calls.starts).toHaveLength(1);
+    expect(s.calls.waits).toHaveLength(1);
+    expect(s.calls.released).toEqual(['tok']);
+    expect(s.calls.runs).toHaveLength(0);
+    expect(s.calls.ends).toHaveLength(1);
+    expect(s.calls.ends[0]).toMatchObject({ taskId: 'task-1', status: 'usage_held' });
+    expect(typeof s.calls.ends[0].slotWaitMs).toBe('number');
+  });
+
+  test('a hold that appears after the slot wait ends with an sm_task_result line (stream)', async () => {
+    const s = heldAfterWait();
+    const res = await s.call(base({ stream: true }));
+    expect(res.status).toBe(200);
+    const lines = res.lines();
+    expect(lines[0].type).toBe('sm_task_started');
+    expect(lines.some((l) => l.type === 'sm_task_running')).toBe(false);
+    const last = lines[lines.length - 1];
+    expect(last).toMatchObject({ type: 'sm_task_result', ok: false, error: 'usage_held', taskId: 'task-1', hold: holdShape, detail: HOLD.detail });
+    expect(typeof last.slotWaitMs).toBe('number');
+    expect(s.calls.released).toEqual(['tok']);
+    expect(s.calls.runs).toHaveLength(0);
+    expect(s.calls.ends[0].status).toBe('usage_held');
+  });
+
+  test('a throw on the slot-grant re-read also ends usage_held with nothing spawned', async () => {
+    let reads = 0;
+    const s = setup({ usageHold: () => { if (++reads >= 2) throw new Error('late'); return null; } });
+    const res = await s.call(base());
+    expect(res.status).toBe(429);
+    expect(res.body.error).toBe('usage_held');
+    expect(s.calls.released).toEqual(['tok']);
+    expect(s.calls.runs).toHaveLength(0);
+    expect(s.calls.ends[0].status).toBe('usage_held');
+  });
+
+  test('two refusals under one hold append one audit event; a clear re-arms it', async () => {
+    let hold = HOLD;
+    const s = setup({ usageHold: () => hold });
+    await s.call(base());
+    await s.call(base());
+    expect(s.calls.audits).toEqual([{ kind: 'task_usage_held', cwd: PROJ, ...holdShape }]);
+    hold = null;
+    expect((await s.call(base())).status).toBe(200);
+    hold = HOLD;
+    await s.call(base());
+    expect(s.calls.audits).toHaveLength(2);
   });
 });

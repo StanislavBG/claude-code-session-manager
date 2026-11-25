@@ -1126,17 +1126,26 @@ async function openReplyFallbackSession(input = {}, deps = {}) {
  * requires everywhere else: a PROJECT IS A CWD, resolved from transcript
  * CONTENT, never by naively decoding a `~/.claude/projects/` folder name back
  * into a path. A folder whose cwd cannot be resolved is DROPPED, not guessed.
+ *
+ * Two sources:
+ *   1. transcript folders under `~/.claude/projects/` (above);
+ *   2. the created-projects ledger (`createdProjects.cjs`, injectable as
+ *      `createdProjects`, default `getCreatedProjects()`), so a folder made by
+ *      project_create is a target before anyone has worked in it. Ledger cwds
+ *      are recorded main checkouts, so they skip resolveProjectContext; their
+ *      lastActivity is the later of transcript activity and createdAt, and a
+ *      cwd in both sources is listed once.
  * Results are then filtered to directories that still exist AND already carry
  * an operations root — exactly `openFeedbackSession`'s own precondition, so
  * this list can't offer a target that would then be refused.
  */
-async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT, projectsDir } = {}) {
+async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT, projectsDir, createdProjects } = {}) {
   const root = resolveProjectsDir(projectsDir);
   let entries;
   try {
     entries = await fsp.readdir(root, { withFileTypes: true });
   } catch {
-    return { projects: [], scanned: 0, truncated: 0 };
+    entries = [];
   }
   const dirs = entries.filter((e) => e.isDirectory());
 
@@ -1164,6 +1173,19 @@ async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT, projectsDir } = 
     if (!cwd || isEphemeralCwd(cwd)) continue;
     const prior = byCwd.get(cwd);
     if (!prior || prior.lastActivity < mtimeMs) byCwd.set(cwd, { cwd, lastActivity: mtimeMs });
+  }
+
+  // Second source: the created-projects ledger. A broken ledger never hides
+  // the transcript-derived list.
+  let ledgerEntries = [];
+  try {
+    const store = createdProjects || require('./createdProjects.cjs').getCreatedProjects();
+    ledgerEntries = store.list();
+  } catch { ledgerEntries = []; }
+  for (const e of ledgerEntries) {
+    if (!e || typeof e.cwd !== 'string' || typeof e.createdAt !== 'number') continue;
+    const prior = byCwd.get(e.cwd);
+    if (!prior || prior.lastActivity < e.createdAt) byCwd.set(e.cwd, { cwd: e.cwd, lastActivity: e.createdAt });
   }
 
   const projects = [...byCwd.values()]

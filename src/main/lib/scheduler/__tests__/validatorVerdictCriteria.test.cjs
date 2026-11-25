@@ -167,10 +167,98 @@ describe('scheduler loadValidatorCriteriaContext', () => {
     );
     const ctx = await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '3790-validate', dependsOn: ['3787-a', '3788-b'] });
     assert.deepEqual(ctx.expected, { '3787-a': { ids: ['ac-1', 'ac-2'], failedIds: ['ac-2'] } });
-    assert.match(ctx.section, /`ac-2` \(file\) FAIL — missing: file exists/);
+    // file criteria run fresh at dispatch: a.txt is absent in cwd → FAIL, stamped.
+    assert.match(ctx.section, /`ac-2` \(file\) FAIL \(ran [^)]+\) — missing: a\.txt: file exists/);
+    assert.match(ctx.section, /`ac-1` \(command\) PASS — exit 0: tests pass/);
+    const rec = JSON.parse(fs.readFileSync(path.join(epicDir, 'outcomes', '3787-a.json'), 'utf8'));
+    assert.equal(rec.checks.find((c) => c.id === 'ac-1').detail, 'exit 0');
+    assert.equal(rec.checks.find((c) => c.id === 'ac-2').stage, 'validator-dispatch');
     assert.doesNotMatch(ctx.section, /3788-b/);
 
     const nonValidator = await loadValidatorCriteriaContext({ agentType: 'dev-lead', cwd, epicId, dependsOn: ['3787-a'] });
     assert.deepEqual(nonValidator, { expected: {}, section: '' });
+  });
+
+  describe('loopback http criteria with the OS sandbox available (socat present)', () => {
+    const http = require('node:http');
+    const { buildJobSandboxSettings } = require('../../claude/jobSandboxPolicy.cjs');
+    const { loadEnvironment } = require('../../claude/environmentProfiles.cjs');
+    let server;
+    let base;
+
+    beforeAll(async () => {
+      server = http.createServer((req, res) => {
+        if (req.url === '/ok') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ items: [{ name: 'a' }, { name: 'b' }] })); return; }
+        res.writeHead(500); res.end('boom');
+      });
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      base = `http://127.0.0.1:${server.address().port}`;
+    });
+    afterAll(async () => { await new Promise((resolve) => server.close(resolve)); });
+
+    it('validator-readonly is os-sandbox with no network, so the scheduler runs loopback checks at dispatch', async () => {
+      const env = loadEnvironment({ name: 'validator-readonly', homeDir: tmpHome });
+      const policy = buildJobSandboxSettings({
+        agentType: 'validator', environment: env, worktreeDir: tmpHome, projectRoot: tmpHome,
+        homeDir: tmpHome, tmpDir: os.tmpdir(), deps: { available: true, missing: [] }, mode: 'enforce',
+      });
+      assert.equal(policy.level, 'os-sandbox');
+      assert.deepEqual(policy.settings.sandbox.network.allowedDomains, []);
+
+      const cwd = fs.mkdtempSync(path.join(tmpHome, 'proj-'));
+      const epicId = 'epic-loop';
+      const epicDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId);
+      fs.mkdirSync(path.join(epicDir, 'prds'), { recursive: true });
+      fs.mkdirSync(path.join(epicDir, 'outcomes'), { recursive: true });
+      const criteria = [
+        { id: 'live-ok', statement: 'route answers', check: { kind: 'http', spec: { url: `${base}/ok` } } },
+        { id: 'live-bad', statement: 'broken route answers', check: { kind: 'http', spec: { url: `${base}/bad` } } },
+        { id: 'gate', statement: 'tests pass', check: { kind: 'command', spec: 'npm test' } },
+      ];
+      fs.writeFileSync(path.join(epicDir, 'prds', '4459-live.md'), `---\ntitle: L\ncriteria: ${JSON.stringify(criteria)}\n---\n# Goal\n\nx\n`);
+      fs.writeFileSync(path.join(epicDir, 'outcomes', '4459-live.json'), JSON.stringify({
+        slug: '4459-live', verdict: 'completed', checks: [{ id: 'gate', kind: 'command', ok: true, detail: 'exit 0' }, { id: 'live-bad', kind: 'http', ok: null, detail: 'old' }],
+      }));
+
+      const ctx = await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '4460-validate', dependsOn: ['4459-live'] });
+      assert.match(ctx.section, /`live-ok` \(http\) PASS \(ran [^)]+\) — HTTP 200/);
+      assert.match(ctx.section, /`live-bad` \(http\) FAIL \(ran [^)]+\) — HTTP 500, expected 200/);
+      assert.match(ctx.section, /`gate` \(command\) PASS — exit 0/);
+      assert.match(ctx.section, /run by the scheduler outside your sandbox just before you started/);
+      assert.match(ctx.section, /cannot reach host loopback/);
+      assert.deepEqual(ctx.expected['4459-live'], { ids: ['live-ok', 'live-bad', 'gate'], failedIds: ['live-bad'] });
+
+      // body sidecar: written to <slug>.bodies/<id>.txt, path in the section, never inline in the record.
+      const bodyFile = path.join(epicDir, 'outcomes', '4459-live.bodies', 'live-ok.txt');
+      assert.deepEqual(JSON.parse(fs.readFileSync(bodyFile, 'utf8')), { items: [{ name: 'a' }, { name: 'b' }] });
+      const okBytes = fs.statSync(bodyFile).size;
+      assert.ok(ctx.section.includes(`body: ${bodyFile} (${okBytes} bytes)`));
+
+      const rec = JSON.parse(fs.readFileSync(path.join(epicDir, 'outcomes', '4459-live.json'), 'utf8'));
+      const byId = Object.fromEntries(rec.checks.map((c) => [c.id, c]));
+      assert.equal(byId.gate.detail, 'exit 0');
+      assert.equal(byId['live-ok'].ok, true);
+      assert.equal(byId['live-ok'].bodyPath, bodyFile);
+      assert.equal(byId['live-ok'].bodyBytes, okBytes);
+      assert.equal(byId['live-ok'].truncated, false);
+      assert.equal('body' in byId['live-ok'], false);
+      assert.equal(byId['live-bad'].ok, false);
+      assert.equal(byId['live-bad'].stage, 'validator-dispatch');
+      assert.equal(rec.verdict, 'completed');
+
+      const verdict = (met) => ({ schedulerVerdict: 'PASS', verdicts: [{
+        prd: '4459-live', verdict: met ? 'VERIFIED' : 'REFUTED', reason: met ? '' : 'route 500s', findings: [],
+        criteria: [
+          { id: 'live-ok', met: true, evidence: 'PASS' },
+          { id: 'live-bad', met, evidence: 'FAIL HTTP 500', ...(met ? {} : { missKind: 'behavior-wrong' }) },
+          { id: 'gate', met: true, evidence: 're-ran' },
+        ],
+      }] });
+      const refused = parseValidatorVerdict(verdict(true), { expected: ctx.expected });
+      assert.equal(refused.ok, false);
+      assert.equal(refused.code, 'criterion-met-on-failed-check');
+      const accepted = parseValidatorVerdict(verdict(false), { expected: ctx.expected });
+      assert.equal(accepted.ok, true, accepted.error);
+    });
   });
 });

@@ -7,7 +7,7 @@ const path = require('node:path');
 const { OPS_ROOT_DIR } = require('../../opsOwnership.cjs');
 const epicEventLog = require('../../epic/epicEventLog.cjs');
 const {
-  writeOutcomeRecord, outcomeRecordPath, buildOutcomeFromJob,
+  writeOutcomeRecord, outcomeRecordPath, buildOutcomeFromJob, mergeOutcomeChecks, writeCheckBody,
 } = require('../prdOutcomeRecord.cjs');
 
 const EPIC = 'epic-abc123';
@@ -92,5 +92,52 @@ describe('writeOutcomeRecord', () => {
     await assert.rejects(writeOutcomeRecord({ cwd, epicId: EPIC, slug: '../evil', verdict: 'failed' }));
     await assert.rejects(writeOutcomeRecord({ cwd, epicId: '../x', slug: 'ok', verdict: 'failed' }));
     assert.equal(fs.existsSync(path.join(cwd, OPS_ROOT_DIR)), false);
+  });
+});
+
+describe('mergeOutcomeChecks', () => {
+  const slug = '4459-merge';
+  it('replaces checks by id, keeps unrelated entries, stamps fresh ones', async () => {
+    await writeOutcomeRecord({
+      cwd, epicId: EPIC, slug, commits: [], files: [], gates: [], verdict: 'completed',
+      checks: [{ id: 'a', kind: 'command', ok: true, detail: 'exit 0' }, { id: 'b', kind: 'http', ok: null, detail: 'old' }],
+      appendEvent: async () => {},
+    });
+    const ok = await mergeOutcomeChecks({ cwd, epicId: EPIC, slug, checks: [{ id: 'b', kind: 'http', ok: false, detail: 'HTTP 500' }] });
+    assert.equal(ok, true);
+    const rec = readRecord(slug);
+    assert.equal(rec.verdict, 'completed');
+    assert.equal(rec.checks.length, 2);
+    assert.deepEqual(rec.checks[0], { id: 'a', kind: 'command', ok: true, detail: 'exit 0' });
+    assert.equal(rec.checks[1].id, 'b');
+    assert.equal(rec.checks[1].ok, false);
+    assert.equal(rec.checks[1].stage, 'validator-dispatch');
+    assert.match(rec.checks[1].ranAt, /^\d{4}-\d\d-\d\dT/);
+  });
+
+  it('writes nothing when no record exists', async () => {
+    let called = 0;
+    const ok = await mergeOutcomeChecks({ cwd, epicId: EPIC, slug: 'none', checks: [{ id: 'x', ok: true }], write: async () => { called++; } });
+    assert.equal(ok, false);
+    assert.equal(called, 0);
+    assert.equal(fs.existsSync(path.join(cwd, OPS_ROOT_DIR, 'scheduler', 'epics', EPIC, 'outcomes', 'none.json')), false);
+  });
+
+  it('never throws on an unsafe epicId', async () => {
+    assert.equal(await mergeOutcomeChecks({ cwd, epicId: '../evil', slug, checks: [] }), false);
+  });
+});
+
+describe('writeCheckBody', () => {
+  it('writes <slug>.bodies/<id>.txt, overwriting per id, and returns the path', async () => {
+    const p1 = await writeCheckBody({ cwd, epicId: EPIC, slug: '4459-b', id: 'live', body: 'one' });
+    const p2 = await writeCheckBody({ cwd, epicId: EPIC, slug: '4459-b', id: 'live', body: 'two' });
+    assert.equal(p1, path.join(cwd, OPS_ROOT_DIR, 'scheduler', 'epics', EPIC, 'outcomes', '4459-b.bodies', 'live.txt'));
+    assert.equal(p1, p2);
+    assert.equal(fs.readFileSync(p1, 'utf8'), 'two');
+  });
+  it('returns null without throwing on unsafe ids', async () => {
+    assert.equal(await writeCheckBody({ cwd, epicId: '../x', slug: 's', id: 'a', body: '' }), null);
+    assert.equal(await writeCheckBody({ cwd, epicId: EPIC, slug: 's', id: '../a', body: '' }), null);
   });
 });

@@ -3989,10 +3989,50 @@ async function readStoredCriteriaChecks(cwd, epicId, slug) {
 }
 
 /**
+ * runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored) → merged checks.
+ * Runs the PRD's http + file criteria fresh in `cwd` (outside the job
+ * sandbox, whose Bash cannot reach host loopback), never command or manual
+ * ones. http bodies go to a sidecar file (writeCheckBody); the row keeps
+ * only bodyPath/bodyBytes/truncated. Fresh rows replace stored ones by id;
+ * the exact-slug outcome record (when one exists) is updated in place.
+ * Falls back to `stored` on any error. Never rejects.
+ */
+async function runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored) {
+  try {
+    const subset = criteria.filter((c) => c && c.check && (c.check.kind === 'http' || c.check.kind === 'file'));
+    if (!subset.length) return stored;
+    const ranAt = new Date().toISOString();
+    const rows = await runCriteriaChecks({ criteria: subset, cwd, keepBody: true });
+    const fresh = [];
+    for (const r of rows) {
+      const { body, ...rest } = r;
+      /** @type {Record<string, unknown>} */
+      const row = { ...rest, ranAt, stage: 'validator-dispatch' };
+      if (typeof body === 'string') {
+        const bodyPath = await prdOutcomeRecord.writeCheckBody({ cwd, epicId, slug, id: r.id, body });
+        if (bodyPath) row.bodyPath = bodyPath;
+      }
+      fresh.push(row);
+    }
+    const freshIds = new Set(fresh.map((c) => c.id));
+    const merged = [...(Array.isArray(stored) ? stored : []).filter((c) => !(c && freshIds.has(c.id))), ...fresh];
+    let exactExists = false;
+    try { exactExists = !!(await readJsonOr(prdOutcomeRecord.outcomeRecordPath(cwd, epicId, slug), null)); } catch { exactExists = false; }
+    if (exactExists) await prdOutcomeRecord.mergeOutcomeChecks({ cwd, epicId, slug, checks: fresh });
+    return merged;
+  } catch (e) {
+    console.error('[scheduler] runDispatchCriteriaChecks error', slug, e && e.message ? e.message : e);
+    return stored;
+  }
+}
+
+/**
  * loadValidatorCriteriaContext(job) → { expected, section } for a validator
  * job: per judged PRD (job.dependsOn) with frontmatter `criteria`, the
  * { ids, failedIds } parseValidatorVerdict cross-checks against, and the
- * prompt section listing each criterion's stored check result. Empty when
+ * prompt section listing each criterion's check result — http + file checks
+ * run fresh here at dispatch (runDispatchCriteriaChecks), command results as
+ * stored. Empty when
  * nothing is structured. Never rejects.
  * @param {any} job
  * @returns {Promise<{ expected: Record<string, { ids: string[], failedIds: string[] }>, section: string }>}
@@ -4012,7 +4052,8 @@ async function loadValidatorCriteriaContext(job) {
       let criteria = null;
       try { criteria = parsePrdFile(text).frontmatter.criteria; } catch { criteria = null; }
       if (!Array.isArray(criteria) || !criteria.length) continue;
-      const checks = await readStoredCriteriaChecks(job.cwd, epicId, slug);
+      const stored = await readStoredCriteriaChecks(job.cwd, epicId, slug);
+      const checks = await runDispatchCriteriaChecks(job.cwd, epicId, slug, criteria, stored);
       const exp = expectedFromCriteria(criteria, checks);
       if (exp) expected[slug] = exp;
       prds.push({ slug, criteria, checks });
@@ -6002,8 +6043,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       isArtifactOnly = false;
     }
   }
-  // Validator: list each judged PRD's structured criteria with their stored
-  // mechanical check results, so its per-criterion verdict entries use the
+  // Validator: list each judged PRD's structured criteria with their
+  // mechanical check results (http + file run fresh here, outside the sandbox), so its per-criterion verdict entries use the
   // same ids and never mark a failed check met (parseValidatorVerdict refuses that).
   if (job.agentType === 'validator') {
     const { section } = await loadValidatorCriteriaContext({ ...job, cwd: job.cwd || cwd });

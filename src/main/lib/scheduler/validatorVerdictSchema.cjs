@@ -316,8 +316,9 @@ function expectedFromCriteria(criteria, checks) {
 
 /**
  * formatCriteriaChecksSection(prds) → Markdown for the validator prompt: per
- * judged PRD, each criterion id, its statement, and its stored mechanical
- * check result. '' when no PRD has structured criteria.
+ * judged PRD, each criterion id, its statement, and its mechanical check
+ * result (http/file run at validator dispatch; command as stored), plus the
+ * body sidecar path of each http row. '' when no PRD has structured criteria.
  * @param {Array<{ slug: string, criteria: unknown, checks: unknown }>} prds
  * @returns {string}
  */
@@ -341,7 +342,12 @@ function formatCriteriaChecksSection(prds) {
       const kind = isPlainObject(c.check) && typeof c.check.kind === 'string' ? c.check.kind : 'manual';
       const result = !r ? 'not run' : r.ok === true ? 'PASS' : r.ok === false ? 'FAIL' : 'manual';
       const detail = r && r.detail ? ` — ${oneLine(r.detail)}` : '';
-      lines.push(`- \`${oneLine(c.id, 60)}\` (${kind}) ${result}${detail}: ${oneLine(c.statement)}`);
+      const ranAt = r && typeof r.ranAt === 'string' && r.ranAt ? ` (ran ${oneLine(r.ranAt, 40)})` : '';
+      lines.push(`- \`${oneLine(c.id, 60)}\` (${kind}) ${result}${ranAt}${detail}: ${oneLine(c.statement)}`);
+      if (r && typeof r.bodyPath === 'string' && r.bodyPath) {
+        const bytes = Number.isFinite(r.bodyBytes) ? r.bodyBytes : 0;
+        lines.push(`  - body: ${oneLine(r.bodyPath, 500)} (${bytes} bytes${r.truncated === true ? ', truncated at 1 MiB' : ''})`);
+      }
     }
     blocks.push(lines.join('\n'));
   }
@@ -349,7 +355,7 @@ function formatCriteriaChecksSection(prds) {
   return [
     '## Stored mechanical check results',
     '',
-    'The scheduler ran each structured criterion\'s mechanical check when the PRD finished. In your verdict JSON, return one `criteria` entry per criterion id below, using that id exactly. A criterion whose check is FAIL must be `met: false` — a verdict marking it met is refused.',
+    'The `http` and `file` checks below were run by the scheduler outside your sandbox just before you started. `command` rows show a stored result or `not run` — re-run those yourself. Your Bash cannot reach host loopback, so never probe a running service: judge `http` criteria from these results. Each `http` row names a `body:` file holding the response body; judge structural expectations (for example every item has a non-empty field) by reading that file inside your sandbox. In your verdict JSON, return one `criteria` entry per criterion id below, using that id exactly. A criterion whose check is FAIL must be `met: false` — a verdict marking it met is refused.',
     '',
     ...blocks,
   ].join('\n');

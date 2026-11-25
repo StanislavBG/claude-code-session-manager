@@ -18,7 +18,7 @@
 
 const path = require('node:path');
 const { opsPath, assertOpsWrite } = require('../opsOwnership.cjs');
-const { writeJsonAtomic } = require('../util/atomicFs.cjs');
+const { writeJsonAtomic, writeTextAtomic, readJsonOr } = require('../util/atomicFs.cjs');
 
 const WRITER = 'scheduler';
 const SCHEMA_VERSION = 1;
@@ -78,6 +78,64 @@ async function writeOutcomeRecord({
 }
 
 /**
+ * mergeOutcomeChecks({ cwd, epicId, slug, checks, write? }) → Promise<boolean>
+ * (true when a record was rewritten). Replaces the existing record's `checks`
+ * entries by id with the fresh ones (each stamped ranAt + stage
+ * 'validator-dispatch' unless already stamped), keeps every other entry, and
+ * writes atomically as 'scheduler'. No record on disk → no write. Never throws.
+ */
+async function mergeOutcomeChecks({ cwd, epicId, slug, checks, write = writeJsonAtomic } = {}) {
+  try {
+    const file = outcomeRecordPath(cwd, epicId, slug);
+    const record = await readJsonOr(file, null);
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return false;
+    const ranAt = new Date().toISOString();
+    const fresh = objList(checks)
+      .filter((c) => typeof c.id === 'string' && c.id)
+      .map((c) => ({ ...c, ranAt: c.ranAt || ranAt, stage: c.stage || 'validator-dispatch' }));
+    const freshById = new Map(fresh.map((c) => [c.id, c]));
+    const merged = [];
+    const seen = new Set();
+    for (const c of objList(record.checks)) {
+      if (typeof c.id === 'string' && freshById.has(c.id)) {
+        if (!seen.has(c.id)) { merged.push(freshById.get(c.id)); seen.add(c.id); }
+      } else merged.push(c);
+    }
+    for (const c of fresh) if (!seen.has(c.id)) { merged.push(c); seen.add(c.id); }
+    assertOpsWrite(file, WRITER);
+    await write(file, { ...record, checks: merged });
+    return true;
+  } catch (e) {
+    console.error('[prdOutcomeRecord] mergeOutcomeChecks failed', epicId, slug, e && e.message ? e.message : e);
+    return false;
+  }
+}
+
+/**
+ * writeCheckBody({ cwd, epicId, slug, id, body, write? }) → Promise<string|null>.
+ * Writes one http check's response body to
+ * scheduler/epics/<epicId>/outcomes/<slug>.bodies/<id>.txt (atomic, writer
+ * 'scheduler'; overwritten per id, so each check keeps one copy). Returns the
+ * absolute path, or null on a bad id / write failure. Never throws. The
+ * directory lives under the Epic's scheduler folder, so epicPurge removes it
+ * with the outcome records.
+ */
+async function writeCheckBody({ cwd, epicId, slug, id, body, write = writeTextAtomic } = {}) {
+  try {
+    assertIds(epicId, slug);
+    if (typeof id !== 'string' || !SLUG_RE.test(id) || id.includes('..')) throw new Error(`invalid check id "${id}"`);
+    if (typeof body !== 'string') throw new Error('body must be a string');
+    const file = opsPath(cwd, 'scheduler', 'epics', epicId, 'outcomes', `${slug}.bodies`, `${id}.txt`);
+    assertOpsWrite(file, WRITER);
+    await write(file, body);
+    return file;
+  } catch (e) {
+    console.error('[prdOutcomeRecord] writeCheckBody failed', epicId, slug, id, e && e.message ? e.message : e);
+    return null;
+  }
+}
+
+/**
  * Pure: derive { verdict, commits, files, gates, checks } from a finalized
  * job row plus the run's verifyResult. `gates` holds the verifier verdict
  * (always) and the row's gate re-run (gateShadow) when one is recorded;
@@ -129,5 +187,5 @@ async function listCommitFiles(cwd, shas) {
 }
 
 module.exports = {
-  writeOutcomeRecord, outcomeRecordPath, buildOutcomeFromJob, listCommitFiles, SCHEMA_VERSION,
+  writeOutcomeRecord, mergeOutcomeChecks, writeCheckBody, outcomeRecordPath, buildOutcomeFromJob, listCommitFiles, SCHEMA_VERSION,
 };

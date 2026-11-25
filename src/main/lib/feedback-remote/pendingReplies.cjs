@@ -24,11 +24,11 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { writeJsonAtomicSync, readJsonOrSync } = require('../util/atomicFs.cjs');
 const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
+const { isCommitHash, MAX_COMMITS } = require('./replyClaims.cjs');
 
 const STORE_VERSION = 1;
 const FILE_NAME = 'pending-replies.json';
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
-const COMMIT_RE = /^[0-9a-f]{7,40}$/;
 /** Failed delivery attempts (one per hourly pass) before an entry gives up for good. */
 const MAX_DELIVERY_ATTEMPTS = 24;
 
@@ -82,14 +82,18 @@ function normalizeYSource(v) {
   try { return JSON.parse(JSON.stringify(v)); } catch { return null; }
 }
 
-/** Lowercased, de-duplicated commit hashes (7-40 hex); [] when none are valid. */
+/**
+ * Lowercased, de-duplicated commit hashes (replyClaims.isCommitHash), at most
+ * MAX_COMMITS; invalid entries are dropped (the route already validated). [] when none.
+ */
 function normalizeCommits(v) {
   if (!Array.isArray(v)) return [];
   const out = [];
   for (const c of v) {
-    if (typeof c !== 'string') continue;
+    if (out.length === MAX_COMMITS) break;
+    if (!isCommitHash(c)) continue;
     const lc = c.toLowerCase();
-    if (COMMIT_RE.test(lc) && !out.includes(lc)) out.push(lc);
+    if (!out.includes(lc)) out.push(lc);
   }
   return out;
 }

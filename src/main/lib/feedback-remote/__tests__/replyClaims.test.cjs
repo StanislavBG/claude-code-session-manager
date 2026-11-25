@@ -12,7 +12,27 @@ const {
   normalizeReleaseClaim,
   isSessionManagerRepo,
   checkReleaseContains,
+  isCommitHash,
+  MAX_COMMITS,
 } = require('../replyClaims.cjs');
+
+describe('isCommitHash', () => {
+  test('true for 7 and 40 hex chars, either case', () => {
+    expect(isCommitHash('abc1234')).toBe(true);
+    expect(isCommitHash('ABC1234')).toBe(true);
+    expect(isCommitHash('a'.repeat(40))).toBe(true);
+  });
+  test('false for 6 or 41 hex, non-hex, and non-strings', () => {
+    expect(isCommitHash('abc123')).toBe(false);
+    expect(isCommitHash('a'.repeat(41))).toBe(false);
+    expect(isCommitHash('xyz1234')).toBe(false);
+    expect(isCommitHash('abc1234 ')).toBe(false);
+    for (const v of [1234567, null, undefined, {}, ['abc1234']]) expect(isCommitHash(v)).toBe(false);
+  });
+  test('MAX_COMMITS is 20', () => {
+    expect(MAX_COMMITS).toBe(20);
+  });
+});
 
 describe('findUnfilledPlaceholders', () => {
   test('finds every wrapper style, first-seen order, distinct', () => {

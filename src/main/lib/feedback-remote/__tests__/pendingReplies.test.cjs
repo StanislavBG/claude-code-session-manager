@@ -194,3 +194,18 @@ test('add omits the commits key when none are given or none are valid', () => {
   expect('commits' in ledger.addPendingReply(entry({ commits: [] }))).toBe(false);
   expect('commits' in ledger.addPendingReply(entry({ commits: ['zz'] }))).toBe(false);
 });
+
+test('add keeps at most MAX_COMMITS (20) valid hashes: a 25-commit entry stores its first 20', () => {
+  const { MAX_COMMITS } = require('../replyClaims.cjs');
+  const hashes = Array.from({ length: 25 }, (_, i) => `abc${String(i).padStart(4, '0')}`);
+  const e = ledger.addPendingReply(entry({ commits: ['not-hex', ...hashes] }));
+  expect(MAX_COMMITS).toBe(20);
+  expect(e.commits).toEqual(hashes.slice(0, 20));
+  expect(ledger.listDueReplies('0.142.0')[0].commits).toEqual(hashes.slice(0, 20));
+});
+
+test('pendingReplies.cjs reuses replyClaims commit rule (no COMMIT_RE of its own)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'pendingReplies.cjs'), 'utf8');
+  expect(src).not.toMatch(/COMMIT_RE/);
+  expect(src).toMatch(/isCommitHash/);
+});

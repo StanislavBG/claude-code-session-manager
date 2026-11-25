@@ -25,6 +25,11 @@ const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const COMMIT_RE = /^[0-9a-f]{7,40}$/i;
 const MAX_COMMITS = 20;
 
+/** True only for a string of 7-40 hex chars (either case) — the one commit-hash rule. */
+function isCommitHash(v) {
+  return typeof v === 'string' && COMMIT_RE.test(v);
+}
+
 const PLACEHOLDER_NAMES = [
   'version', 'appversion', 'app_version', 'app-version', 'release',
   'releaseversion', 'release_version', 'smversion', 'sm_version', 'semver',
@@ -89,7 +94,7 @@ function normalizeReleaseClaim(raw) {
   }
   const out = [];
   for (const c of commits) {
-    if (typeof c !== 'string' || !COMMIT_RE.test(c)) {
+    if (!isCommitHash(c)) {
       return fail(`release.commits has an invalid commit hash: ${JSON.stringify(c)}`);
     }
     const lc = c.toLowerCase();
@@ -158,4 +163,6 @@ module.exports = {
   normalizeReleaseClaim,
   isSessionManagerRepo,
   checkReleaseContains,
+  isCommitHash,
+  MAX_COMMITS,
 };

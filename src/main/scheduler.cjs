@@ -1118,6 +1118,30 @@ function restoreOpenAutoDispatchHold(v) {
 /** Test-only seam: the open audit hold, and a reset that drops it from memory (a simulated process exit). */
 function _getOpenAutoDispatchHoldForTests() { return openAutoDispatchHold; }
 function _forgetOpenAutoDispatchHoldForTests() { openAutoDispatchHold = null; }
+/** Test-only seam: a fresh process — no unheld tick seen since boot. */
+function _resetSawUnheldTickForTests() { sawUnheldTickSinceBoot = false; }
+
+const HOLD_RESET_CONTINUITY_MS = 60_000;
+
+/**
+ * Whether `hold` continues the open audit hold: same reason and window, and
+ * resetsAt within 60 s (equal strings when either is unparseable). Not
+ * holdIdentityKey equality — its nearest-minute rounding flips when a reset
+ * near hh:mm:30 jitters by under a second.
+ * @param {{ reason?: string | null, window?: string | null, resetsAt?: string | null } | null} open
+ * @param {{ reason?: string | null, window?: string | null, resetsAt?: string | number | null } | null} hold
+ */
+function continuesOpenHold(open, hold) {
+  if (!open || !hold) return false;
+  if ((open.reason ?? null) !== (hold.reason ?? null)) return false;
+  if ((open.window ?? null) !== (hold.window ?? null)) return false;
+  const a = open.resetsAt ?? null;
+  const b = hold.resetsAt ?? null;
+  const ta = a == null ? NaN : Date.parse(String(a));
+  const tb = b == null ? NaN : Date.parse(String(b));
+  if (Number.isFinite(ta) && Number.isFinite(tb)) return Math.abs(ta - tb) <= HOLD_RESET_CONTINUITY_MS;
+  return (a == null ? null : String(a)) === (b == null ? null : String(b));
+}
 
 /**
  * Track the auto-dispatch hold in audit-log.jsonl: one started event when a
@@ -1130,7 +1154,7 @@ function trackAutoDispatchHoldAudit(hold, pending) {
   try {
     const identity = hold ? autoDispatchHold.holdIdentityKey(hold) : null;
     const open = openAutoDispatchHold;
-    if (open && open.holdKey === identity) {
+    if (open && continuesOpenHold(open, hold)) {
       if (Number.isFinite(hold.percent) && (open.maxPercent == null || hold.percent > open.maxPercent)) open.maxPercent = hold.percent;
       open.heldTicks += 1;
       return;
@@ -1160,6 +1184,7 @@ function trackAutoDispatchHoldAudit(hold, pending) {
         resetsAt: hold.resetsAt ?? null,
         holdKey: identity,
         pending,
+        startObserved: sawUnheldTickSinceBoot,
         version: SCHEDULER_BUILD_IDENTITY.version,
       });
       openAutoDispatchHold = {
@@ -2763,10 +2788,15 @@ let lastAutoDispatchHoldKey = null;
 // The auto-dispatch hold currently open in audit-log.jsonl (one
 // auto_dispatch_hold_started written, its _ended not yet): { holdKey, reason,
 // window, threshold, resetsAt, startedAt, maxPercent, heldTicks, restored? },
-// keyed by utilizationHold.holdIdentityKey so percent changes and reset jitter
-// write nothing. Persisted in scheduler-state.json so a restart neither
-// re-opens nor loses it (the heartbeat log keeps only ~18-37 h).
+// continued under continuesOpenHold (same reason + window, resetsAt within
+// 60 s) so percent changes and reset jitter write nothing. Persisted in
+// scheduler-state.json so a restart neither re-opens nor loses it (the
+// heartbeat log keeps only ~18-37 h).
 let openAutoDispatchHold = null;
+// True once this process ran a tick with no auto-dispatch hold in force: a
+// hold that opens after that was seen to start (startObserved: true); one
+// already in force on the first tick after boot was not.
+let sawUnheldTickSinceBoot = false;
 // ms timestamp of the last FRESH reset observation (see recordObservedReset)
 // — distinct from Date.now(), so persistSchedulerState never re-stamps a
 // stale cachedNextReset as "just observed" on every poll cycle.
@@ -9979,7 +10009,9 @@ function holdAuditFields(hold) {
     threshold: hold.threshold ?? null,
     baseThreshold: hold.baseThreshold ?? null,
     resetsAt: hold.resetsAt ?? null,
-    holdKey: autoDispatchHold.holdIdentityKey(hold),
+    holdKey: openAutoDispatchHold && continuesOpenHold(openAutoDispatchHold, hold)
+      ? openAutoDispatchHold.holdKey
+      : autoDispatchHold.holdIdentityKey(hold),
   };
 }
 
@@ -10360,6 +10392,7 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
         ? state.jobs.filter((j) => j.status === 'pending' && !runningSet.has(j.slug)).length
         : 0;
       if (hold || openAutoDispatchHold) trackAutoDispatchHoldAudit(hold, pendingCount);
+      if (!hold) sawUnheldTickSinceBoot = true;
       if (hold) {
         if (human) {
           bypassedHold = hold;
@@ -15185,6 +15218,7 @@ module.exports = {
   _getOpenAutoDispatchHoldForTests,
   _auditHumanPressForTests: auditHumanPress,
   _forgetOpenAutoDispatchHoldForTests,
+  _resetSawUnheldTickForTests,
   computeDegradedBudget,
   utilizationReading,
   usageHoldThreshold,

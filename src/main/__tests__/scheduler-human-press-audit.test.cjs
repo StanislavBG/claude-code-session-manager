@@ -210,3 +210,24 @@ test('ac-5: an audit write failure never throws out of the press or the tick', a
   const r = await scheduler.runDueJobs({ bypassLoadGate: true, human: true });
   expect(r.reason).not.toBe('utilization-held');
 });
+
+test('continuity: a human bypass after a resetsAt jitter across hh:mm:30 carries the started event holdKey', async () => {
+  const base = minuteReset(7 * DAY + HOUR);
+  await reading(96, base + 29_600);
+  queueOne();
+  await scheduler.tickQueue();
+  const started = auditLines().slice(auditMark).filter((e) => e.kind === 'auto_dispatch_hold_started');
+  expect(started).toHaveLength(1);
+  await reading(96, base + 30_400);
+  const slug = queueOne();
+  await scheduler.runDueJobs({ bypassLoadGate: true, human: true });
+  await scheduler._auditHumanPressForTests('run-now');
+  expect(spawned).toContain(slug);
+  const bypass = pressEvents().filter((e) => e.kind === 'auto_dispatch_hold_bypassed');
+  expect(bypass).toHaveLength(1);
+  expect(utilizationHold.holdIdentityKey(bypass[0])).not.toBe(started[0].holdKey);
+  expect(bypass[0].holdKey).toBe(started[0].holdKey);
+  const press = pressEvents().filter((e) => e.kind === 'scheduler_human_press');
+  expect(press.at(-1).hold.holdKey).toBe(started[0].holdKey);
+  expect(auditLines().slice(auditMark).filter((e) => e.kind === 'auto_dispatch_hold_started' || e.kind === 'auto_dispatch_hold_ended')).toHaveLength(1);
+});

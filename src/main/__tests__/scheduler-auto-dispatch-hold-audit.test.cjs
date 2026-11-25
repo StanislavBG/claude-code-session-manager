@@ -260,3 +260,51 @@ test('ac-6: an audit write failure never throws out of the tick', async () => {
   expect(r.reason).toBe('utilization-held');
   expect(auditLog).toBeTruthy();
 });
+
+test('continuity: resetsAt hh:mm:29.6 then hh:mm:30.4 (holdIdentityKey flips) writes no ended/started pair', async () => {
+  const base = minuteReset(7 * DAY + HOUR);
+  await reading(95, base + 29_600);
+  queueOne();
+  await scheduler.tickQueue();
+  await reading(96, base + 30_400);
+  await scheduler.tickQueue();
+  const ev = holdEvents();
+  expect(ev.map((e) => e.kind)).toEqual(['auto_dispatch_hold_started']);
+  expect(scheduler._getOpenAutoDispatchHoldForTests()).toMatchObject({ holdKey: ev[0].holdKey, maxPercent: 96, heldTicks: 2 });
+});
+
+test('continuity: a resetsAt moved by 2 minutes writes ended then started', async () => {
+  const base = minuteReset(7 * DAY + HOUR);
+  await reading(95, base);
+  queueOne();
+  await scheduler.tickQueue();
+  await reading(95, base + 2 * MINUTE);
+  await scheduler.tickQueue();
+  const ev = holdEvents();
+  expect(ev.map((e) => e.kind)).toEqual(['auto_dispatch_hold_started', 'auto_dispatch_hold_ended', 'auto_dispatch_hold_started']);
+  expect(ev[1].holdKey).toBe(ev[0].holdKey);
+  expect(ev[2].holdKey).not.toBe(ev[0].holdKey);
+});
+
+test('startObserved: a held first tick after boot writes startObserved false', async () => {
+  scheduler._resetSawUnheldTickForTests();
+  await reading(96, minuteReset(7 * DAY + HOUR));
+  queueOne();
+  await scheduler.tickQueue();
+  const ev = holdEvents();
+  expect(ev).toHaveLength(1);
+  expect(ev[0]).toMatchObject({ kind: 'auto_dispatch_hold_started', startObserved: false });
+});
+
+test('startObserved: an unheld tick then a held tick writes startObserved true', async () => {
+  scheduler._resetSawUnheldTickForTests();
+  const reset = minuteReset(7 * DAY + HOUR);
+  await reading(10, reset);
+  await scheduler.tickQueue();
+  await reading(96, reset);
+  queueOne();
+  await scheduler.tickQueue();
+  const ev = holdEvents();
+  expect(ev).toHaveLength(1);
+  expect(ev[0]).toMatchObject({ kind: 'auto_dispatch_hold_started', startObserved: true });
+});

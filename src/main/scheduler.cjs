@@ -4301,11 +4301,14 @@ async function runDispatchCriteriaChecks(cwd, epicId, slug, criteria, stored) {
  * prompt section listing each criterion's check result — http + file checks
  * run fresh here at dispatch (runDispatchCriteriaChecks), command results as
  * stored. Empty when
- * nothing is structured. Never rejects.
+ * nothing is structured. Never rejects. With `runChecks: false` (the notify
+ * fallback for a row without a dispatch-time stamp) it reads the stored
+ * checks only: no http request, no outcome record or body file write.
  * @param {any} job
+ * @param {{ runChecks?: boolean }} [opts]
  * @returns {Promise<{ expected: Record<string, { ids: string[], failedIds: string[] }>, section: string }>}
  */
-async function loadValidatorCriteriaContext(job) {
+async function loadValidatorCriteriaContext(job, { runChecks = true } = {}) {
   /** @type {Record<string, { ids: string[], failedIds: string[] }>} */
   const expected = {};
   try {
@@ -4321,7 +4324,7 @@ async function loadValidatorCriteriaContext(job) {
       try { criteria = parsePrdFile(text).frontmatter.criteria; } catch { criteria = null; }
       if (!Array.isArray(criteria) || !criteria.length) continue;
       const stored = await readStoredCriteriaChecks(job.cwd, epicId, slug);
-      const checks = await runDispatchCriteriaChecks(job.cwd, epicId, slug, criteria, stored);
+      const checks = runChecks ? await runDispatchCriteriaChecks(job.cwd, epicId, slug, criteria, stored) : stored;
       const exp = expectedFromCriteria(criteria, checks);
       if (exp) expected[slug] = exp;
       prds.push({ slug, criteria, checks });
@@ -4631,9 +4634,14 @@ async function notifyOriginatingTab(job, {
       // Cross-check per-criterion entries against the judged PRDs' frontmatter
       // criteria + stored check results: a missing id or met-on-failed-check
       // refuses the whole verdict.
+      // The dispatch-time stamp (job.validatorCriteriaExpected) is what the
+      // validator was shown; re-running the http/file checks here would judge
+      // it against results it never saw and overwrite the outcome record.
       let expected = null;
       try {
-        const ctx = await loadValidatorCriteria(job);
+        const stamp = job && job.validatorCriteriaExpected;
+        const isPlain = !!stamp && typeof stamp === 'object' && !Array.isArray(stamp);
+        const ctx = isPlain ? { expected: stamp } : await loadValidatorCriteria(job, { runChecks: false });
         if (ctx && ctx.expected && Object.keys(ctx.expected).length) expected = ctx.expected;
       } catch (e) {
         console.error('[scheduler] notifyOriginatingTab loadValidatorCriteria error', job?.slug, e);
@@ -6315,7 +6323,10 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // mechanical check results (http + file run fresh here, outside the sandbox), so its per-criterion verdict entries use the
   // same ids and never mark a failed check met (parseValidatorVerdict refuses that).
   if (job.agentType === 'validator') {
-    const { section } = await loadValidatorCriteriaContext({ ...job, cwd: job.cwd || cwd });
+    const { section, expected } = await loadValidatorCriteriaContext({ ...job, cwd: job.cwd || cwd });
+    // Stamped onto the queue row (spawnJob onPid) so notifyOriginatingTab
+    // cross-checks the verdict against exactly these results.
+    job.validatorCriteriaExpected = expected;
     if (section) prompt = `${prompt}\n\n${section}`;
   }
   prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly, isValidator: job.agentType === 'validator' }) });
@@ -8568,6 +8579,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           if (idx >= 0) {
             s.jobs[idx].sessionId = sessionId;
             if (job.agentSnapshotId) s.jobs[idx].agentSnapshotId = job.agentSnapshotId;
+            if (job.validatorCriteriaExpected) s.jobs[idx].validatorCriteriaExpected = job.validatorCriteriaExpected;
             s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt, sessionId, cwd };
             s.jobs[idx].dispatchPhase = 'spawned';
             s.jobs[idx].dispatchPhaseAt = new Date().toISOString();

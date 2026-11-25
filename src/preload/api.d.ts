@@ -1110,6 +1110,8 @@ export interface ScheduleJob {
   macroId?: string | null;
   /** Content id of the AgentSnapshot the first dispatch pinned; a resume re-runs it, never the live persona. */
   agentSnapshotId?: string;
+  /** Validator only: dispatch-time { ids, failedIds } per judged PRD; the verdict is cross-checked against it, never a re-run. */
+  validatorCriteriaExpected?: Record<string, { ids: string[]; failedIds: string[] }>;
   /** PRD frontmatter artifact-only declaration (PRD 3114). */
   deliverable?: 'artifact' | null;
   artifactPaths?: string[] | null;

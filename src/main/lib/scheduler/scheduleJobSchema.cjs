@@ -161,6 +161,10 @@ const ScheduleJobSchema = z
     // Content id of the AgentSnapshot (agentSnapshot.cjs) the job's first
     // dispatch pinned; every later dispatch (resume) re-runs that snapshot.
     agentSnapshotId: z.string().optional(),
+    // Validator only: the { ids, failedIds } per judged PRD built at dispatch
+    // from the check results the validator was shown; notifyOriginatingTab
+    // cross-checks the verdict against it instead of re-running the checks.
+    validatorCriteriaExpected: z.record(z.string(), z.object({ ids: z.array(z.string()), failedIds: z.array(z.string()) })).optional(),
   })
   .passthrough();
 

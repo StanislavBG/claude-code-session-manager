@@ -209,4 +209,43 @@ describe('notifyOriginatingTab validator verdicts', () => {
     expect(d.appendResponseEvent).toHaveBeenCalledTimes(1);
     err.mockRestore();
   });
+  describe('dispatch-time validatorCriteriaExpected stamp (PRD validator-expected-run-once)', () => {
+    const MET = {
+      schedulerVerdict: 'PASS',
+      verdicts: [{ prd: '3612-alpha', verdict: 'VERIFIED', reason: 'ok', criteria: [{ id: 'ac-1', met: true, evidence: 'PASS' }], findings: [] }],
+    };
+    const row = (extra) => ({ slug: '3640-validate-plan', status: 'completed', cwd: tmpRoot, agentType: 'validator', runId: 'run-s', dependsOn: ['3612-alpha'], ...extra });
+    const verdictCalls = (d) => d.appendResponseEvent.mock.calls.filter((c) => c[3] && c[3].validator === '3640-validate-plan');
+
+    test('a stamp with failedIds [ac-1] refuses a met ac-1 verdict and never calls loadValidatorCriteria', async () => {
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const spy = vi.fn(async () => ({ expected: {}, section: '' }));
+      const d = deps(MET, { loadValidatorCriteria: spy, writeVerdictsFile: vi.fn(async () => {}) });
+      await notifyOriginatingTab(row({ validatorCriteriaExpected: { '3612-alpha': { ids: ['ac-1'], failedIds: ['ac-1'] } } }), d);
+      expect(verdictCalls(d)).toHaveLength(0);
+      expect(spy).not.toHaveBeenCalled();
+      err.mockRestore();
+    });
+
+    test('a stamp with failedIds [] accepts the same verdict and appends its verdict events', async () => {
+      const spy = vi.fn(async () => ({ expected: {}, section: '' }));
+      const d = deps(MET, { loadValidatorCriteria: spy, writeVerdictsFile: vi.fn(async () => {}) });
+      await notifyOriginatingTab(row({ validatorCriteriaExpected: { '3612-alpha': { ids: ['ac-1'], failedIds: [] } } }), d);
+      const calls = verdictCalls(d);
+      expect(calls).toHaveLength(1);
+      expect(calls[0][3]).toMatchObject({ prdSlug: '3612-alpha', validation: 'verified' });
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    test('a row without the stamp calls loadValidatorCriteria once with { runChecks: false }', async () => {
+      const spy = vi.fn(async () => ({ expected: {}, section: '' }));
+      const d = deps(MET, { loadValidatorCriteria: spy, writeVerdictsFile: vi.fn(async () => {}) });
+      const job = row({});
+      await notifyOriginatingTab(job, d);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0][0]).toMatchObject({ slug: '3640-validate-plan' });
+      expect(spy.mock.calls[0][1]).toEqual({ runChecks: false });
+      expect(verdictCalls(d)).toHaveLength(1);
+    });
+  });
 });

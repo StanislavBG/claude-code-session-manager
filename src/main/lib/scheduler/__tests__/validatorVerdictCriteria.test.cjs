@@ -260,5 +260,36 @@ describe('scheduler loadValidatorCriteriaContext', () => {
       const accepted = parseValidatorVerdict(verdict(false), { expected: ctx.expected });
       assert.equal(accepted.ok, true, accepted.error);
     });
+
+    it('runChecks: false makes no request, leaves the outcome record byte-identical, and builds expected from stored checks', async () => {
+      let requests = 0;
+      const counted = http.createServer((req, res) => { requests += 1; res.writeHead(200); res.end('ok'); });
+      await new Promise((resolve) => counted.listen(0, '127.0.0.1', resolve));
+      try {
+        const url = `http://127.0.0.1:${counted.address().port}/ok`;
+        const cwd = fs.mkdtempSync(path.join(tmpHome, 'proj-'));
+        const epicId = 'epic-norun';
+        const epicDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId);
+        fs.mkdirSync(path.join(epicDir, 'prds'), { recursive: true });
+        fs.mkdirSync(path.join(epicDir, 'outcomes'), { recursive: true });
+        const criteria = [
+          { id: 'live', statement: 'route answers', check: { kind: 'http', spec: { url } } },
+          { id: 'gate', statement: 'tests pass', check: { kind: 'command', spec: 'npm test' } },
+        ];
+        fs.writeFileSync(path.join(epicDir, 'prds', '4470-norun.md'), `---\ntitle: N\ncriteria: ${JSON.stringify(criteria)}\n---\n# Goal\n\nx\n`);
+        const recPath = path.join(epicDir, 'outcomes', '4470-norun.json');
+        fs.writeFileSync(recPath, JSON.stringify({
+          slug: '4470-norun', verdict: 'completed', checks: [{ id: 'gate', kind: 'command', ok: true, detail: 'exit 0' }, { id: 'live', kind: 'http', ok: false, detail: 'HTTP 500' }],
+        }));
+        const before = fs.readFileSync(recPath);
+        const ctx = await loadValidatorCriteriaContext({ agentType: 'validator', cwd, epicId, slug: '4471-validate', dependsOn: ['4470-norun'] }, { runChecks: false });
+        assert.equal(requests, 0);
+        assert.ok(fs.readFileSync(recPath).equals(before));
+        assert.equal(fs.existsSync(path.join(epicDir, 'outcomes', '4470-norun.bodies')), false);
+        assert.deepEqual(ctx.expected['4470-norun'], { ids: ['live', 'gate'], failedIds: ['live'] });
+      } finally {
+        await new Promise((resolve) => counted.close(resolve));
+      }
+    });
   });
 });

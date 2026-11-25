@@ -171,6 +171,21 @@ test('429 usage_held answer restores the previous model; the next call reviews a
   expect(h.getState()[CWD].model).toBe('claude-sonnet-5-1');
 });
 
+test('503 usage_hold_error answer restores the previous model', async () => {
+  const h = harness({ lastSeen: 'claude-sonnet-4-6', current: 'claude-sonnet-5-1' });
+  const before = h.getState()[CWD];
+  h.deps.adminPost = async (p, body) => {
+    h.posts.push({ path: p, body });
+    return { status: 503, body: { ok: false, error: 'usage_hold_error' } };
+  };
+  const r = await mr.maybeStartMitigationReview({ cwd: CWD, now: NOW, deps: h.deps });
+  expect(r.started).toBe(true);
+  const out = await r.done;
+  expect(out).toMatchObject({ ok: false, error: 'usage_hold_error' });
+  expect(h.getState()[CWD]).toEqual(before);
+  expect(h.posts.filter((p) => p.path === '/admin/needs-you')).toHaveLength(0);
+});
+
 test('503 slot_timeout leaves a newer entry another writer stored', async () => {
   const h = harness({ lastSeen: 'claude-sonnet-4-6', current: 'claude-sonnet-5-1' });
   h.deps.adminPost = async () => {

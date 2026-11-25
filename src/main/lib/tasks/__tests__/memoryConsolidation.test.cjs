@@ -144,7 +144,7 @@ test('a usageHold throw ends in reason error and starts nothing', async () => {
 });
 
 test('NOT_RUN_STATUSES is frozen and lists the never-ran statuses', () => {
-  expect(mc.NOT_RUN_STATUSES).toEqual(['usage_held', 'slot_timeout', 'too_many_waiting']);
+  expect(mc.NOT_RUN_STATUSES).toEqual(['usage_held', 'usage_hold_error', 'slot_timeout', 'too_many_waiting']);
   expect(Object.isFrozen(mc.NOT_RUN_STATUSES)).toBe(true);
 });
 

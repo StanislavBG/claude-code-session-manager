@@ -691,12 +691,36 @@ describe('usage hold', () => {
     expect(s.calls.ends[0].status).toBe('usage_held');
   });
 
-  test('a throw on the slot-grant re-read also ends usage_held with nothing spawned', async () => {
+  const throwsAfterWait = () => {
     let reads = 0;
-    const s = setup({ usageHold: () => { if (++reads >= 2) throw new Error('late'); return null; } });
+    return setup({ usageHold: () => { if (++reads >= 2) throw new Error('late'); return null; } });
+  };
+
+  test('a throw on the slot-grant re-read answers 503 usage_hold_error, ends usage_held, nothing spawned (JSON)', async () => {
+    const s = throwsAfterWait();
     const res = await s.call(base());
-    expect(res.status).toBe(429);
-    expect(res.body.error).toBe('usage_held');
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ ok: false, error: 'usage_hold_error', taskId: 'task-1', details: 'late' });
+    expect(typeof res.body.slotWaitMs).toBe('number');
+    expect(res.body.hold).toBeUndefined();
+    expect(s.calls.released).toEqual(['tok']);
+    expect(s.calls.runs).toHaveLength(0);
+    expect(s.calls.ends).toHaveLength(1);
+    expect(s.calls.ends[0]).toMatchObject({ taskId: 'task-1', status: 'usage_held' });
+    expect(typeof s.calls.ends[0].slotWaitMs).toBe('number');
+  });
+
+  test('a throw on the slot-grant re-read ends with an sm_task_result usage_hold_error line (stream)', async () => {
+    const s = throwsAfterWait();
+    const res = await s.call(base({ stream: true }));
+    expect(res.status).toBe(200);
+    const lines = res.lines();
+    expect(lines[0].type).toBe('sm_task_started');
+    expect(lines.some((l) => l.type === 'sm_task_running')).toBe(false);
+    const last = lines[lines.length - 1];
+    expect(last).toMatchObject({ type: 'sm_task_result', ok: false, error: 'usage_hold_error', taskId: 'task-1', details: 'late' });
+    expect(typeof last.slotWaitMs).toBe('number');
+    expect(last.hold).toBeUndefined();
     expect(s.calls.released).toEqual(['tok']);
     expect(s.calls.runs).toHaveLength(0);
     expect(s.calls.ends[0].status).toBe('usage_held');

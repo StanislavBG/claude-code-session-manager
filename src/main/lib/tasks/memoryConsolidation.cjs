@@ -146,7 +146,7 @@ function adminPosterFor(adminHttp) {
  * refused by the usage hold, or never given a slot. Such a Task does not use
  * up a cadence window.
  */
-const NOT_RUN_STATUSES = Object.freeze(['usage_held', 'slot_timeout', 'too_many_waiting']);
+const NOT_RUN_STATUSES = Object.freeze(['usage_held', 'usage_hold_error', 'slot_timeout', 'too_many_waiting']);
 
 function defaultDeps() {
   return {

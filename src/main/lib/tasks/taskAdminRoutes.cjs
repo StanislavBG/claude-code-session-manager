@@ -25,10 +25,11 @@
  *          project root per hold (holdIdentityKey), not per request;
  *       6. ledger start line, THEN sessionSlots.waitForSlot by priority lane
  *          (null → 'slot_timeout', too_many_waiting → 429);
- *       7. once the slot is granted the usage hold is read AGAIN: a hold (or
- *          a throw) releases the token, writes the end line status
- *          'usage_held' + slotWaitMs and replies 429 usage_held (+ taskId,
- *          slotWaitMs) — a Task that waited through the hold never spawns;
+ *       7. once the slot is granted the usage hold is read AGAIN: a hold or
+ *          a throw releases the token and writes the end line status
+ *          'usage_held' + slotWaitMs; a hold replies 429 usage_held, a throw
+ *          503 usage_hold_error (both + taskId, slotWaitMs) — a Task that
+ *          waited through the hold never spawns;
  *       8. taskRun.runTask, token released in finally, ledger end line with
  *          costUsd from modelPricing.costOfUsage;
  *       9. 200 { ok: true, taskId, status, stdout, envelope, usage, costUsd,
@@ -715,12 +716,15 @@ function registerAdminRoute(adminHttp, deps = {}) {
       }
 
       // The hold may have engaged while this Task waited for its slot.
+      // A failed read is fail-closed but is not a hold: 503 usage_hold_error, never 429.
       let heldLate;
       try {
         heldLate = readHold(cwd);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        heldLate = { reason: 'usage_hold_error', window: null, percent: null, threshold: null, resetsAt: null, detail: `usage hold read failed: ${msg}` };
+        try { slots().release(token); } catch { /* */ }
+        await end({ status: 'usage_held', slotWaitMs });
+        reply(503, { ok: false, error: 'usage_hold_error', taskId, slotWaitMs, details: e instanceof Error ? e.message : String(e) });
+        return;
       }
       if (heldLate) {
         try { slots().release(token); } catch { /* */ }

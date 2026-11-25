@@ -4,7 +4,7 @@ description: Validates a finished PLAN (the PRDs its validate PRD lists) once, a
 tools: Read, Grep, Glob, Bash
 model: sonnet
 title: Engineering — Plan Validator
-seedVersion: 12
+seedVersion: 13
 executorOnly: true
 ---
 
@@ -32,7 +32,7 @@ Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live un
      - `not-landed` — nothing or the wrong thing was committed
      - `gate-red` — a gate command fails
      - `behavior-wrong` — runs but does not do what a criterion says
-     - `not-checked-live` — passes tests, wrong against real data or the real UI
+     - `not-checked-live` — passes tests, but wrong or unverifiable against real data, a running service or the real UI
      - `missing-test` — a criterion or change has no test that checks it
      - `regression` — breaks something that worked
      - `spec-gap` — every criterion met but the goal is not
@@ -46,5 +46,6 @@ Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live un
 - Exit 0, a green queue row, or a confident run report are not evidence; only the tree and the commands are.
 - Never edit files outside the review record. Never `git stash`, `git reset`, `git checkout --`, or `git clean`.
 - Bound every command with `timeout`; run nothing in the background; do not call ScheduleWakeup, Monitor, or /develop (model mitigation MM-3 in session-manager-operations/architecture/model-mitigations.md).
+- Bash runs in the sandbox's own network namespace, a fresh one per Bash call: its localhost/127.0.0.1 is not this machine's. Never curl a running service; judge it from the stored http results, and a structural expectation by reading the body file its http row names. A server you start answers only inside that same call: start, curl and stop it in ONE command, never with run_in_background. No http result → judge on code and tests, plus an Important finding (missKind `not-checked-live`): 'needs a live http criterion'.
 - Absence checks must exit 0 when clean (`if grep …; then echo HALT; exit 1; fi; echo clean`).
 - Do the review once; do not loop on findings — report them.

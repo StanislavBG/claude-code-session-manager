@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->53<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->53<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills.
 
 ## Facts
 
@@ -10,22 +10,18 @@
 | Run | `npx claude-code-session-manager@latest` |
 | Installers | Mac `.dmg` and `.zip` (`arm64`, `x64`). Windows `.exe` (`x64`, `arm64`). Linux `AppImage` (`x64`). Get them from [GitHub Releases](https://github.com/StanislavBG/claude-code-session-manager/releases/latest). |
 | Needs | The Claude Code CLI, installed and signed in with your own account. `git`. Node <!-- gen:node-floor -->22.12.0<!-- /gen:node-floor --> or newer, for `npx` only. |
-| npx platforms | Linux and macOS. On Windows, use the installer. |
 | MCP server | `session-manager-scheduler`. It uses stdio. The app adds it for you. It needs the app running. |
-| Plugin | `session-manager-dev@session-manager` |
 | Agent CLIs | Claude Code is the default. Codex, Gemini CLI, Antigravity CLI, Cursor Agent and OpenCode work in Chat and Terminal only. |
 | Where state lives | App state: `~/.claude/session-manager/`. Per project: `<repo>/session-manager-operations/`. Session copies: `${XDG_STATE_HOME:-~/.local/state}/session-manager/`. |
 | Telemetry | Anonymous and on by default. Turn it off with `SM_TELEMETRY=0`. |
-| License | MIT |
 
 ## Not
 
 - It is not a hosted or cloud service. Your sessions and files stay on your machine.
 - It is not made or backed by Anthropic. One person builds it as open source.
 - It does not replace a Claude plan.
-- It has no paid, pro or trial tier. The app and the Field Manual are both free.
+- It has no paid, pro or trial tier.
 - It is not a team product. It has no support deal or uptime promise.
-- It is not a library. You cannot `import` it.
 
 ## Features
 
@@ -115,16 +111,14 @@ A **session** (in code: an Epic) is one unit of work. A **Mission** is the kind 
 | Voice input | Turns speech into text on your machine. Nothing leaves it. | App Settings |
 | Recording light | A light shows on top of every screen while the mic is on. | Top of window |
 | Web remote | Drive the app from your phone, or let a paired service send work, through the bilko.run relay. | App Settings |
-| Simple mode | `--simple` opens one plain terminal. | Launch flag |
-| Command palette | `Cmd-K` or `Ctrl-K` opens a list of commands. | Anywhere |
 
 ## Headless surface (for agents)
 
 ### MCP server
 
-The MCP server is `session-manager-scheduler`. It lets an agent queue PRDs, read the queue, write Project Home pages and more.
+The MCP server lets an agent queue PRDs, read the queue, write Project Home pages and more.
 
-The app adds it at user scope in `~/.claude.json` on first launch. To add it by hand, run:
+The app adds it at user scope on first launch. To add it by hand, run:
 
 ```bash
 claude mcp add session-manager-scheduler --scope user -- node <app>/scripts/scheduler-mcp-server.cjs
@@ -222,7 +216,7 @@ Rules the server enforces:
 
 ### Headless jobs
 
-Each PRD job runs as the PRD's persona, `dev-lead` by default, in its own worktree. It runs the PRD's gate, then commits. Its last line is a verdict such as `SCHEDULER_VERDICT: PASS`.
+Each PRD job runs as the PRD's persona (`dev-lead` by default) in its own worktree, then commits. Its last line is a verdict such as `SCHEDULER_VERDICT: PASS`.
 
 ### Scripts
 
@@ -232,7 +226,7 @@ A script can start a macro with `POST /admin/macros/run`, if a person marked it 
 
 ### Plugin session-manager-dev
 
-On first launch, the app installs and updates this plugin offline from the bundled `session-manager` marketplace. To skip it, set `SM_SEED_DEV_PLUGIN_DISABLE=1`. To install it outside the app, run:
+The app installs and updates it offline from its bundled `session-manager` marketplace. To install it outside the app, run:
 
 ```bash
 claude plugin marketplace add StanislavBG/claude-code-session-manager
@@ -252,8 +246,6 @@ claude plugin install session-manager-dev@session-manager
 
 ### Context packs
 
-A pack adds its skills and rules to one session only.
-
 <!-- list:packs -->
 | Pack | What it adds | Skills |
 | --- | --- | --- |
@@ -262,8 +254,6 @@ A pack adds its skills and rules to one session only.
 <!-- /list:packs -->
 
 ### Agent personas
-
-The app copies these into `~/.claude/agents/` on first launch.
 
 <!-- list:personas -->
 | Persona | Role |
@@ -284,8 +274,8 @@ The app copies these into `~/.claude/agents/` on first launch.
 
 | Path | How | Needs | Platforms |
 | --- | --- | --- | --- |
-| Installer | Download from [GitHub Releases](https://github.com/StanislavBG/claude-code-session-manager/releases/latest). | Nothing else. The app helps you set up `git` and Claude Code. | macOS, Windows, Linux |
-| npx | `npx claude-code-session-manager@latest` | Node per [Facts](#facts), `git`, Claude Code | Linux, macOS |
+| Installer | See Installers in [Facts](#facts). | Nothing else. The app helps you set up `git` and Claude Code. | macOS, Windows, Linux |
+| npx | See Run in [Facts](#facts). | Node per [Facts](#facts), `git`, Claude Code | Linux, macOS |
 | From source | `git clone`, `npm install`, `npm run dev` | Node, `git`, Claude Code | Linux, macOS |
 
 ### What the first launch changes
@@ -297,22 +287,16 @@ The app copies these into `~/.claude/agents/` on first launch.
 | Personas | `~/.claude/agents/`. Old copies are backed up to `~/.claude/session-manager/persona-backups/`. Files you edited are left alone. | `SM_SEED_AGENT_PERSONAS_DISABLE=1` |
 | Demo video kit | `~/.claude/session-manager/demo-video-kit/` | `SM_SEED_DEMO_VIDEO_KIT_DISABLE=1` |
 | Guard hook shims | `~/.claude/session-manager/hooks/`. A project uses them once you accept its setup banner. | Do not accept the banner. |
-| App state | `~/.claude/session-manager/` | None |
-| Project folder | `<repo>/session-manager-operations/` | None |
-| Session worktrees | `$XDG_STATE_HOME/session-manager/`, by default `~/.local/state/session-manager/` | None |
-| Telemetry | Sent to bilko.run | `SM_TELEMETRY=0` |
+
+It also makes the state folders in [Facts](#facts). They have no off switch.
 
 ### Start at login
 
-Off by default. Turn it on in App Settings, Startup.
+Off by default. Turn it on in App Settings, Startup. It is not offered in a dev run.
 
-An npx install runs `npx claude-code-session-manager@latest` at each login, or the cached copy if that fails within two minutes. The script is `~/.claude/session-manager/start-at-login.sh`, run by a desktop entry in `~/.config/autostart/` (Linux) or a launch agent in `~/Library/LaunchAgents/` (macOS).
+An npx install runs `npx claude-code-session-manager@latest` at each login, or the cached copy if that fails within two minutes. Its script, `~/.claude/session-manager/start-at-login.sh`, runs from `~/.config/autostart/claude-code-session-manager.desktop` (Linux) or `~/Library/LaunchAgents/run.bilko.session-manager.login.plist` (macOS). A packaged build uses a login item (macOS, Windows) or the autostart folder (Linux AppImage).
 
-A packaged build uses a login item (macOS, Windows) or the autostart folder (Linux AppImage).
-
-To remove it, turn the switch off, or delete the script and `claude-code-session-manager.desktop` (Linux) or `run.bilko.session-manager.login.plist` (macOS).
-
-It is not offered for an npx install on Windows, or in a dev run.
+To remove it, turn the switch off, or delete the script and its login entry.
 
 ### Check it worked
 
@@ -321,13 +305,11 @@ claude mcp get session-manager-scheduler
 claude plugin list
 ```
 
-Then have an agent call `session_manager_help` with no args.
-
 ### If it fails
 
 | Problem | Fix |
 | --- | --- |
-| Node is too old | Install the Node version in [Facts](#facts) or newer. Or use the installer. |
+| Node is too old | Install the Node in [Facts](#facts), or use the installer. |
 | The Electron download failed | Try again. Or set `ELECTRON_MIRROR` to a mirror you can reach. |
 | No `node-pty` build for your platform | macOS: run `xcode-select --install`. Linux: install `build-essential` and `python3`. |
 | Anything else | Read the logs. Linux: `~/.config/claude-code-session-manager/logs`. macOS: `~/Library/Application Support/claude-code-session-manager/logs`. Windows: `%APPDATA%\claude-code-session-manager\logs`. |
@@ -343,13 +325,10 @@ Then have an agent call `session_manager_help` with no args.
 
 ### Env vars
 
+`SM_TELEMETRY`: see [Facts](#facts). `SM_SEED_*`: see [What the first launch changes](#what-the-first-launch-changes).
+
 | Var | What it does |
 | --- | --- |
-| `SM_TELEMETRY=0` | Turns off telemetry. |
-| `SM_SEED_SCHEDULER_MCP_DISABLE=1` | Do not add the MCP server. |
-| `SM_SEED_DEV_PLUGIN_DISABLE=1` | Do not install the plugin. |
-| `SM_SEED_AGENT_PERSONAS_DISABLE=1` | Do not copy personas. |
-| `SM_SEED_DEMO_VIDEO_KIT_DISABLE=1` | Do not copy the demo video kit. |
 | `SM_WORKTREE_ROOT` | Moves where session and job worktrees are made. |
 | `SM_SCHEDULER_HOME` | Moves app state away from `~/.claude/session-manager/`. Use it for tests. |
 | `ELECTRON_MIRROR` | Where `npx` gets Electron from. |
@@ -381,18 +360,7 @@ Your prompts go only to the agent CLI you chose. The app itself talks to:
 
 ## Development
 
-```bash
-git clone https://github.com/StanislavBG/claude-code-session-manager
-cd claude-code-session-manager
-npm install
-npm run dev
-npm run typecheck
-npm run lint
-npm run test:unit
-npm run test:e2e
-```
-
-Read [CONTRIBUTING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/CONTRIBUTING.md) before you open a PR. Report security bugs as told in [SECURITY.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/SECURITY.md), not in a public issue. Read [PRD_AUTHORING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/src/main/templates/PRD_AUTHORING.md) before you write a PRD.
+Setup and the checks to run (`typecheck`, `lint`, `test:unit`) are in [CONTRIBUTING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/CONTRIBUTING.md). Read it before you open a PR. The Electron tests run with `npm run test:e2e`. Report security bugs as told in [SECURITY.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/SECURITY.md), not in a public issue. Read [PRD_AUTHORING.md](https://github.com/StanislavBG/claude-code-session-manager/blob/main/src/main/templates/PRD_AUTHORING.md) before you write a PRD.
 
 Run `npm run readme:build` after you change MCP tools, skills, packs, personas or `engines`. `npm run lint` fails if this page is out of date.
 
@@ -403,7 +371,6 @@ Run `npm run readme:build` after you change MCP tools, skills, packs, personas o
 | Field Manual | https://bilko.run/manual |
 | Product page | https://bilko.run/products/session-manager |
 | Source | https://github.com/StanislavBG/claude-code-session-manager |
-| Releases | https://github.com/StanislavBG/claude-code-session-manager/releases |
 | Issues | https://github.com/StanislavBG/claude-code-session-manager/issues |
 | Buy me a coffee | https://bilko.run/coffee |
 | Talk to Bilko | https://bilko.run/book?utm_source=session-manager&utm_medium=readme |

@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->51<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->52<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -204,6 +204,7 @@ Tools:
 | `task_switch_set` | tasks | `enabled`, `humanRequestQuote` | Turn Scripts may run Tasks on or off when the human asks. |
 | `video_script_switch_set` | project-home | `enabled`, `humanRequestQuote` | Turn Scripts may run Demo Video on or off when the human asks. |
 | `scheduler_slots_get` | scheduler | — | See how many sessions may run at once and how many are busy. |
+| `usage_hold_get` | scheduler | — | See if automatic runs are on hold. |
 | `scheduler_slots_set` | scheduler | `cap`, `quote` | Raise or lower the session limit when the human asks. |
 | `session_manager_help` | help | — | Start here: list every tool, or explain one tool or recipe. |
 | `artifact_publish` | artifacts | `path` | Publish a file for review. |

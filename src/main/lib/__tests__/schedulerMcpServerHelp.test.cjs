@@ -214,3 +214,26 @@ test('NOT_RUNNING_ERROR (app not running) carries the pointer and is surfaced vi
   expect(result.isError).toBe(true);
   expect(result.content[0].text).toBe(NOT_RUNNING_ERROR);
 });
+
+test('usage_hold_get returns the GET /admin/usage-hold answer unchanged', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const answer = { ok: true, hold: { reason: 'usage', window: 'five_hour', percent: 91, threshold: 90, resetsAt: '2026-11-24T20:00:00Z', detail: 'x' }, threshold: 90 };
+  const seen = [];
+  const server = await new Promise((resolve) => {
+    const s = http.createServer((req, res) => {
+      seen.push(`${req.method} ${req.url} ${req.headers.authorization}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(answer));
+    });
+    s.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const result = await callTool(handleCallTool, 'usage_hold_get', {});
+  expect(result.isError).toBeFalsy();
+  expect(JSON.parse(result.content[0].text)).toEqual(answer);
+  expect(seen).toEqual([`GET /admin/usage-hold Bearer ${token}`]);
+});

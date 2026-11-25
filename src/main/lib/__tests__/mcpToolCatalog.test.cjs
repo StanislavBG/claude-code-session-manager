@@ -369,8 +369,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 51 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(51);
+test('catalog has 52 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(52);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });
@@ -626,6 +626,20 @@ test('scheduler_slots_get / scheduler_slots_set sit in the scheduler group; set 
   expect(set.exampleArgs).toEqual({ cap: 14, quote: 'raise the limit to 14' });
   const tool = TOOLS.find((t) => t.name === 'scheduler_slots_set');
   expect(tool.inputSchema.required).toEqual(['cap', 'quote']);
+});
+
+test('usage_hold_get is a no-argument read-only scheduler tool over GET /admin/usage-hold', () => {
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'usage_hold_get');
+  expect(entry.group).toBe('scheduler');
+  expect(entry.exampleArgs).toEqual({});
+  const text = composeDescription(entry);
+  expect(text).toContain('GET /admin/usage-hold');
+  expect(text).toMatch(/hold null/i);
+  expect(text).toMatch(/Tasks/);
+  expect(text).toMatch(/human chats/);
+  const tool = TOOLS.find((t) => t.name === 'usage_hold_get');
+  expect(tool.description).toBe(text);
+  expect(tool.inputSchema).toEqual({ type: 'object', properties: {} });
 });
 
 // ── voice_list / voice_preview: read-only voice library tools ─────────────

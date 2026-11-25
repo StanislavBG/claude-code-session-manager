@@ -52,6 +52,7 @@
  *   video_script_switch_set({ enabled, humanRequestQuote, cwd? }) -> POST /admin/project-home/videos/script-switch
  *   scheduler_slots_get() -> GET /admin/scheduler/slots
  *   scheduler_slots_set({ cap, quote }) -> POST /admin/scheduler/slots
+ *   usage_hold_get() -> GET /admin/usage-hold
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -794,6 +795,11 @@ const TOOLS = [
   {
     name: 'scheduler_slots_get',
     description: descriptionFor('scheduler_slots_get'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'usage_hold_get',
+    description: descriptionFor('usage_hold_get'),
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -1847,6 +1853,11 @@ async function handleCallTool(request) {
     if (name === 'scheduler_slots_get') {
       const result = await adminRequest('GET', '/admin/scheduler/slots');
       if (result?.ok === false) return errorResult(adminErrorText(result, 'scheduler_slots_get failed'));
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'usage_hold_get') {
+      const result = await adminRequest('GET', '/admin/usage-hold');
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'usage_hold_get failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_slots_set') {

@@ -114,6 +114,7 @@ test('every MCP admin call names a route the app registers', () => {
   const keys = server.calls.map((c) => `${c.method} ${c.pathname}`);
   expect(keys).toContain('GET /admin/site-feedback/inbox');
   expect(keys).toContain('GET /admin/customer-feedback/inbox');
+  expect(keys).toContain('GET /admin/usage-hold');
 
   const set = registeredRoutes();
   const misses = findMisses([...server.calls, ...service], set);

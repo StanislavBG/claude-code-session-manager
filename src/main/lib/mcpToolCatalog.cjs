@@ -1015,6 +1015,23 @@ const MCP_TOOL_CATALOG = [
     notes: 'Read-only. Returns { ok: true, cap, min, max, inUse, available }.',
   },
   {
+    name: 'usage_hold_get',
+    group: 'scheduler',
+    purpose: "Read the usage hold Session Manager is applying right now to automatic claude -p work ('pause above') "
+      + "via the session-manager app's admin API (GET /admin/usage-hold): whether automatic runs are held, why, "
+      + 'and until when, plus the saved pause-above threshold.',
+    summary: 'See if automatic runs are on hold.',
+    whenToUse: 'Use before starting or asking for automatic claude -p work (a Task, a queued PRD), or to explain '
+      + 'why scheduled jobs or Tasks are not starting.',
+    whenNotToUse: 'Do not use it to change the threshold or lift the hold — this tool only reads. Not needed '
+      + 'before replying in a human chat.',
+    exampleArgs: {},
+    notes: 'Read-only, no arguments. Returns the route\'s answer unchanged: { ok: true, hold, threshold }. hold null = '
+      + 'no hold; otherwise { reason, window, percent, threshold, resetsAt, detail }, with resetsAt the time the hold '
+      + 'ends. The hold applies to every automatic claude -p start (scheduler ticks and Tasks), not to human chats. '
+      + 'A failed read (503 usage_hold_error) comes back as an error.',
+  },
+  {
     name: 'scheduler_slots_set',
     group: 'scheduler',
     purpose: "Raise or lower the scheduler's machine-wide limit on parallel claude sessions via the session-manager "

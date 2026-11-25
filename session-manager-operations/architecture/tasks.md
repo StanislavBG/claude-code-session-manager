@@ -165,11 +165,20 @@ The body is JSON, at most **4 MiB**. The schema is strict: an unknown key at any
    - The model is the persona's model, or the Settings model if the persona has none or says `inherit`. If
      neither gives a concrete model: `422 model_unresolved`. There is no fallback model.
    - If no effort resolves: `422 effort_unresolved`.
-4. Another running Task already holds this session id: `409 session_busy` (`heldBy` = that taskId).
-5. The `start` line is written to the ledger. Then the route waits for a slot.
-6. The run, then the `end` line, which carries `costUsd` priced by `modelPricing.costOfUsage`.
+4. Another running Task already holds this session id: `409 session_busy` (`heldBy` = that taskId). Then
+   `buildTaskArgs` (`400 argv_too_large`).
+5. The usage hold (`scheduler.currentUsageHold`, the same "pause above" rule the PRD queue holds at):
+   a hold gives `429 usage_held`, a failed read gives `503 usage_hold_error`. No body key, `priority` or
+   `caller` bypasses it, because this loopback route cannot prove a human. `firePolicy: 'manual'` does not
+   apply here: it is the PRD queue's own setting. One `task_usage_held` audit event is written per project
+   per hold, not per request.
+6. The `start` line is written to the ledger. Then the route waits for a slot.
+7. Once the slot is granted, the route reads the usage hold again. A hold (or a failed read) releases the
+   slot, writes the `end` line with status `usage_held` and `slotWaitMs`, and answers `429 usage_held` with
+   `taskId` and `slotWaitMs`. A Task that waited through the hold never spawns.
+8. The run, then the `end` line, which carries `costUsd` priced by `modelPricing.costOfUsage`.
 
-A `400 invalid_request` or `403` gets no ledger line. Once step 5 begins, every outcome gets an end line.
+Every refusal before step 6 gets no ledger line. Once step 6 begins, every outcome gets an end line.
 
 ### Success response — `200`
 
@@ -241,7 +250,9 @@ Every error body is `{ ok: false, error, ... }`.
 | 409 | `session_busy` | Another running Task holds the session id | `sessionId`, `heldBy` |
 | 422 | `model_unresolved` | No concrete model from the persona or Settings | `agent` |
 | 422 | `effort_unresolved` | No effort resolves for the persona | `agent` |
+| 429 | `usage_held` | The usage hold ("pause above") is on, before the start line or at slot grant | `hold` (`{ reason, window, percent, threshold, resetsAt }`), `detail`, `hint`; also `taskId` and `slotWaitMs` when refused at slot grant |
 | 429 | `too_many_waiting` | More than 50 Tasks are already waiting for a slot | `taskId` |
+| 503 | `usage_hold_error` | Reading the usage hold threw, before the start line (at slot grant a failed read answers `429 usage_held` instead) | `details` |
 | 503 | `slot_timeout` | No slot came within `slotWaitSec` | `taskId`, `slotWaitMs` |
 | 503 | `caller_gone` | The caller disconnected during the slot wait (the reply is rarely seen) | `taskId`, `slotWaitMs` |
 | 500 | another slot error code (e.g. `slot_error`) | `waitForSlot` threw something else | `taskId` |
@@ -259,6 +270,7 @@ Statuses are stored on the `end` (or `imported`) line. `GET` routes return them 
 | `error` | Non-zero exit, `envelope.is_error === true`, or the child died from a signal. |
 | `timeout` | `timeoutSec` passed; the process tree was SIGKILLed. |
 | `slot_timeout` | No slot came within `slotWaitSec`; the run never started. |
+| `usage_held` | The usage hold was on when the slot was granted; the slot was released and the run never started. |
 | `rate_limited` | The output or envelope shows a rate limit (`rateLimitDetect.cjs`). See `quota.resetsAt`. |
 | `caller_gone` | The HTTP caller disconnected during the wait or the run; the child was killed. |
 | `spawn_failed` | The `claude` binary could not be spawned (ENOENT, EACCES, …); the reason is in `stderrTail`. |
@@ -514,6 +526,11 @@ error. Route errors: `400 invalid_request`, `403 tasks_disabled` and `500 import
 there is still a connection error after you read the file again. Never fall back because of a `4xx`/`5xx`
 answer. A `403`, `404`, `422`, `429` or `503` is Session Manager's decision, and going around it skips the
 slot cap and the human switch.
+
+A `429 usage_held` is never a reason to run `claude -p` directly: wait until `hold.resetsAt` and retry. A
+runner that must start `claude -p` directly for any reason other than an unreachable admin API reads
+`GET /admin/usage-hold` (or the `usage_hold_get` MCP tool) first, and starts nothing automatic while `hold` is
+not `null`.
 
 When you do run directly:
 

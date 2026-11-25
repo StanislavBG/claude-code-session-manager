@@ -731,7 +731,15 @@ Tasks** for the project on the Scheduler → Tasks page. Code: `src/main/lib/tas
   `--disallowedTools` the CLI reads a later `-`-leading value as a new flag. An empty array sends nothing.
 - Errors: `400 invalid_request` (with `details`; also `sessionId` with `resume`, or `resume` with
   `persistSession: false`), `400 mcp_config_missing`, `403 tasks_disabled` (with `hint`), `404 unknown_agent`,
-  `409 session_busy`, `422 model_unresolved` / `effort_unresolved`, `429 too_many_waiting`, `503 slot_timeout`.
+  `409 session_busy`, `422 model_unresolved` / `effort_unresolved`, `429 usage_held`, `503 usage_hold_error`,
+  `429 too_many_waiting`, `503 slot_timeout`.
+- `429 usage_held`: the usage hold ("pause above", `scheduler.currentUsageHold`) is on. The body is
+  `{ ok: false, error: 'usage_held', hold: { reason, window, percent, threshold, resetsAt }, detail, hint }`.
+  The route checks it after `409 session_busy`, before the ledger start line, and again once the slot is
+  granted; the second refusal also carries `taskId` and `slotWaitMs` and stores the end status `usage_held`.
+  No body key, `priority` or `caller` bypasses it, and `firePolicy: 'manual'` does not apply to Tasks. A failed
+  read before the start line answers `503 usage_hold_error` (`details`). Retry after `hold.resetsAt`; never run
+  `claude -p` directly instead.
 - `status` in a `200` is the run's outcome: `ok`, `error`, `rate_limited`, `timeout`, `spawn_failed`. Closing
   the connection before the answer cancels the wait or the run (ledger status `caller_gone`).
 
@@ -753,6 +761,61 @@ With `stream: true`, every refusal before the ledger start line keeps its normal
 - While more than 8 MiB of the answer is unsent (the caller stopped reading), output lines are skipped and
   counted in `droppedLines`. The result line is still written.
 - The stream never carries stderr, env or argv.
+
+#### The usage hold: `GET /admin/usage-hold`
+
+| Route | MCP tool | Query / body | Answer |
+| --- | --- | --- | --- |
+| `GET /admin/usage-hold` | `usage_hold_get` | none (a query string is ignored) | `200 { ok: true, hold, threshold }` |
+
+Code: `src/main/lib/scheduler/usageHoldRoute.cjs`. It answers the same `currentUsageHold()` that
+`POST /admin/tasks` refuses on. A runner that starts `claude -p` directly reads it first and starts nothing
+automatic while `hold` is not `null`. It is read-only and works whatever the Task switch state.
+
+```http
+GET /admin/usage-hold
+Authorization: Bearer <token>
+```
+
+Nothing held:
+
+```json
+{ "ok": true, "hold": null, "threshold": 90 }
+```
+
+Held:
+
+```json
+{
+  "ok": true,
+  "hold": {
+    "reason": "utilization-held",
+    "window": "seven_day",
+    "percent": 93,
+    "threshold": 90,
+    "resetsAt": "2026-11-27T18:00:00.000Z",
+    "detail": "seven_day window at 93% ≥ 90%, resets 2026-11-27T18:00:00.000Z"
+  },
+  "threshold": 90
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `hold` | `null` when nothing is held. |
+| `hold.reason` | Always `utilization-held` (never `manual-fire-policy`: firePolicy is the PRD queue's own setting). |
+| `hold.window` | The holding usage window that resets last (for example `five_hour` or `seven_day`). |
+| `hold.percent` | That window's usage percent. |
+| `hold.threshold` | The "pause above" percent the hold was judged at. |
+| `hold.resetsAt` | ISO time that window resets, when the hold ends at the latest. |
+| `hold.detail` | One readable line about the hold. |
+| `threshold` | The saved "pause above" percent (`usageHoldThreshold()`), held or not. |
+
+A failed read answers `503 { ok: false, error: 'usage_hold_error', details }`.
+
+The `usage_hold_get` MCP tool (`scripts/scheduler-mcp-server.cjs`) takes no arguments and returns the route's
+answer unchanged; a `503 usage_hold_error` comes back as a tool error. It only reads: it cannot change the
+threshold or lift the hold.
 
 ### Reading Tasks and importing direct calls
 

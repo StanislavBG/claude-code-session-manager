@@ -5,48 +5,44 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-20 namespaces, no top-level files. Ownership + ops-path rules: [domain-model.md#single-writer-law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
+20 namespaces, no top-level files. [Single-writer law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 
-- **Owned** (in `OWNERS`, app-owned state): each `OWNERS →` row below;
-  `project-pages` covers the admin render route only (a Builder Epic's own
-  authoring stays ungoverned — see [`project-pages/README.md`](project-pages/README.md)).
-- **Deliberately NOT owned** (skill-authored docs/artifacts, no write
-  hazard): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`,
-  `reviews`. `feedback` **retired** (2026-08-02).
-- **A new top-level folder lands in the table below or `OWNERS` in the
-  same PR** — `scripts/ops-sweep.cjs` flags it `UNDOCUMENTED` otherwise.
+- **Owned** (app state): each `OWNERS →` row; `project-pages` = admin render route only
+  ([README](project-pages/README.md)). `not owned` rows are skill-authored, no write hazard.
+- **A new top-level folder joins this table in the same PR** — `scripts/ops-sweep.cjs` flags it `UNDOCUMENTED` otherwise.
 
-Bare root: no owner, writes refused. Retention exception: human-only purge (`lib/epic/epicPurge.cjs`).
+Bare root: writes refused. Retention exception: human-only purge (`lib/epic/epicPurge.cjs`).
 
-Epic lifecycle: only at [`prompt-sessions/README.md#lifecycle`](prompt-sessions/README.md#lifecycle).
+Epic lifecycle: [`prompt-sessions/README.md#lifecycle`](prompt-sessions/README.md#lifecycle) only.
 
-| Namespace | Governance | Purpose | Retention | README |
-| --- | --- | --- | --- | --- |
-| `agents` | OWNERS → agents | write-once AgentSnapshots `snapshots/<id>.json`; runtime, self-ignored | keep forever | none |
-| `architecture` | not owned | reference docs | keep | none |
-| `artifacts` | OWNERS → artifacts | review files `<epic-id>/`; runtime, self-ignored | `artifactsDays` after Epic completes | [link](artifacts/README.md) |
-| `design-mocks` | not owned | design mock artifacts | keep | [link](design-mocks/README.md) |
-| `events` | OWNERS → event-log | per-Epic event log `<epic-id>/events.jsonl`; runtime, self-ignored | keep forever | none |
-| `feedback` | retired 2026-08-02 | former intake | n/a | none |
-| `feedback-inbox` | OWNERS → feedback-inbox | per-project website feedback inbox; runtime, self-ignored | `feedbackInboxDays`, resolved/wontfix (default 90d) | none |
-| `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep | [link](HUMAN_LEARN/README.md) |
-| `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
-| `manual` | not owned | authoring source for the free Field Manual | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
-| `memory-clusters` | OWNERS → memory-clusters | memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
-| `plan-records` | OWNERS → scheduler | validator + ship/deploy records, `<epic-id>/<slug>.md` | `planRecordsDays` after Epic completes (default 14d) | [link](plan-records/README.md) |
-| `project-brief` | OWNERS → project-home | synthesized per-project Brief | keep | [link](project-brief/README.md) |
-| `project-pages` | OWNERS → project-home (render route only) | generated static Project Page artifacts | regenerated on demand | [link](project-pages/README.md) |
-| `prompt-sessions` | OWNERS → epics | durable Epic (PromptSession) store | keep | [link](prompt-sessions/README.md) |
-| `reviews` | not owned | frozen review docs; `validation/<epic-id>/` = legacy plan records | keep | [link](reviews/README.md) |
-| `scheduler` | OWNERS → scheduler | PRD sources + queue/history state | keep | [link](scheduler/README.md) |
-| `tasks` | OWNERS → tasks | runtime Task ledger | `tasksDays`, opsRetentionSettings (default 30d) | [link](tasks/README.md) |
-| `ui-prefs` | OWNERS → ui-prefs | per-project UI state | keep | [link](ui-prefs/README.md) |
-| `webhooks` | OWNERS → webhooks | loopback webhook subscriptions (0600, HMAC secrets); runtime, self-ignored | until removed | none |
+| Namespace | Governance | Git | Purpose | Retention | README |
+| --- | --- | --- | --- | --- | --- |
+| `agents` | OWNERS → agents | runtime | write-once AgentSnapshots `snapshots/<id>.json` | keep forever | none |
+| `architecture` | not owned | tracked | reference docs | keep | none |
+| `artifacts` | OWNERS → artifacts | runtime | review files `<epic-id>/` | `artifactsDays` after Epic completes | [link](artifacts/README.md) |
+| `design-mocks` | not owned | tracked | design mock artifacts | keep | [link](design-mocks/README.md) |
+| `events` | OWNERS → event-log | runtime | per-Epic event log `<epic-id>/events.jsonl` | keep forever | none |
+| `feedback` | retired 2026-08-02 | project's own | Session Manager retired it on 2026-08-02 and never writes, ignores, bans or untracks it, because in other projects it is that project's own folder | n/a | none |
+| `feedback-inbox` | OWNERS → feedback-inbox | runtime | per-project website feedback inbox | `feedbackInboxDays`, resolved/wontfix (default 90d) | none |
+| `HUMAN_LEARN` | not owned | tracked | knowledge-base pages | keep | [link](HUMAN_LEARN/README.md) |
+| `logs` | OWNERS → logs | runtime | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
+| `manual` | not owned | tracked | free Field Manual source | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
+| `memory-clusters` | OWNERS → memory-clusters | runtime | memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
+| `plan-records` | OWNERS → scheduler | runtime | validator + ship/deploy records, `<epic-id>/<slug>.md` | `planRecordsDays` after Epic completes (default 14d) | [link](plan-records/README.md) |
+| `project-brief` | OWNERS → project-home | tracked | synthesized per-project Brief | keep | [link](project-brief/README.md) |
+| `project-pages` | OWNERS → project-home (render route only) | tracked | Project Home library | regenerated on demand | [link](project-pages/README.md) |
+| `prompt-sessions` | OWNERS → epics | runtime | Epic (PromptSession) store | keep | [link](prompt-sessions/README.md) |
+| `reviews` | not owned | tracked | frozen review docs; `validation/<epic-id>/` = legacy plan records | keep | [link](reviews/README.md) |
+| `scheduler` | OWNERS → scheduler | runtime | PRD sources + queue/history state | keep | [link](scheduler/README.md) |
+| `tasks` | OWNERS → tasks | runtime | runtime Task ledger | `tasksDays` (default 30d) | [link](tasks/README.md) |
+| `ui-prefs` | OWNERS → ui-prefs | runtime | per-project UI state | keep | [link](ui-prefs/README.md) |
+| `webhooks` | OWNERS → webhooks | runtime | loopback webhook subscriptions (0600, HMAC secrets) | until removed | none |
+
+Git: runtime = machine-local, never committed, self-ignored by its own `*` .gitignore; tracked = the project's authored output, committed like docs, never ignored by Session Manager.
 
 ## Who consumes this
 
-The main process (owned, via `opsPath()`); skills/humans write the unowned
-ones. Each README is the layout contract.
+Main process (owned, via `opsPath()`); skills/humans (unowned). Each README is the layout contract.
 
 ## What must NOT be assumed
 

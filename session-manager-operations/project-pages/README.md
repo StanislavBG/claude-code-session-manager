@@ -1,23 +1,34 @@
-# Project Pages — two generated artifacts
+# Project Pages — the Project Home library
 
-Project Home hosts two independently generated, self-contained documents:
+Project Home hosts a library of independently generated, self-contained documents, one
+folder per entry (full layout: [Library: Knowledge Pages + Videos](#library-knowledge-pages--videos)):
 
 ```
 session-manager-operations/project-pages/
-  home.html               — overview: what it is, who it's for, structure, how to run, key commands
-  demo-video/index.html   — a 30-second or 1-minute self-contained HTML/JS animation of the project's goals + features
+  knowledge/<id>/     — Knowledge Pages: static, script-free documents that explain a topic
+  videos/<id>/        — videos: self-contained HTML/JS animations that show the project
+  videos/_character/  — the project persona every video can reuse
+  matrix/             — the Competitor matrix (see Competitor matrix)
 ```
+
+Projects that predate the library had `home.html` + `demo-video/index.html`; `migrateLegacy`
+moves them into the library once (see [Migration](#migration)).
 
 ## Who writes them
 
-Each artifact has exactly one writer route, reached through its own MCP tool:
+Every writer is a route in `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs`, reached
+through its own MCP tool, all writing as writer `project-home`:
 
-- `project_home_write` -> `POST /admin/project-home/write` -> `home.html`
-- `project_demo_video_write` -> `POST /admin/project-home/demo-video/write` -> `demo-video/index.html`
+- `project_page_write` -> `POST /admin/project-home/pages/write` -> `knowledge/<id>/`
+- `project_video_write` -> `POST /admin/project-home/videos/write` -> `videos/<id>/`
+- `project_character_write` -> `POST /admin/project-home/character/write` -> `videos/_character/`
+- `project_home_write` (alias) -> `POST /admin/project-home/write` -> `knowledge/overview/`
+- `project_demo_video_write` (alias) -> `POST /admin/project-home/demo-video/write` -> a new
+  `project-demo` entry under `videos/<id>/`
 
-Both routes live in `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs` and write as writer
-`project-home` — `project-pages` is an `OWNERS` namespace
-(`src/main/lib/opsOwnership.cjs`), so these two routes are the only sanctioned writers.
+`project-pages` is an `OWNERS` namespace (`src/main/lib/opsOwnership.cjs`), so these routes
+(plus the review, outcome and matrix routes listed in [Write tools and routes](#write-tools-and-routes))
+are the only sanctioned writers. Storage code: `src/main/lib/project-pages/pagesLibrary.cjs`.
 
 Both documents must be self-contained: no `<script src>`, remote `<link>`, `@import`,
 or remote `url(...)`. The demo video is additionally validated because it runs inline
@@ -36,17 +47,17 @@ JavaScript (the home page does not):
 
 ## Who reads them
 
-`src/main/projectPages.cjs` is read-only: `project-pages:get` returns `home.html`'s
-content plus `demo-video/index.html`'s `{ path, mtimeMs }` (or `null` if absent), and a
-per-cwd watcher pushes `project-pages:changed` with both whenever either file is
-added/changed/removed. Project Home shows a knowledge page in `HtmlFrame` (a `srcDoc`
+`src/main/projectPages.cjs` is read-only: `project-pages:get` runs `migrateLegacy`, then
+returns the library (`knowledge`, `videos`, persona, outcomes from `listLibrary`) plus, for
+the phone remote, the `overview` page's HTML and the newest video's `{ path, mtimeMs }`; a
+per-cwd watcher pushes `project-pages:changed` when the library changes. Project Home shows a knowledge page in `HtmlFrame` (a `srcDoc`
 iframe sandboxed to `allow-same-origin`, so no script runs) and plays a video in
 `VideoPlayer` (an `allow-scripts`-only sandboxed iframe over `smfile://`).
 
 **The demo video only plays for projects under `$HOME`.** The player loads the file
 over the `smfile://` scheme, which `assertInsideHome` (`src/main/index.cjs`) enforces —
 containment to the user's home directory plus symlink-escape rejection — so a project
-outside `$HOME` never renders a demo video even if `demo-video/index.html` exists on disk.
+outside `$HOME` never renders a video even if its `index.html` exists on disk.
 
 ## Who triggers generation
 
@@ -192,6 +203,13 @@ project-pages/
 `_character` can never match. `index.html` is written first, then `meta.json`, both
 atomically as writer `project-home`. Storage code: `src/main/lib/project-pages/pagesLibrary.cjs`
 (`listLibrary` is newest-first, capped at 500 entries).
+
+## Git class: tracked
+
+`project-pages` is GIT_CLASS `tracked` (`src/main/lib/opsOwnership.cjs`). Project Home output
+(`knowledge/`, `videos/` including `_character/`, `matrix/`) is the project's own content,
+committed like docs. Session Manager never writes `project-pages/.gitignore`; a project that
+wants it out of git adds its own ignore rule, which Session Manager leaves alone.
 
 ### meta.json schemas (`ipcSchemas.cjs`, both `.strict()`)
 

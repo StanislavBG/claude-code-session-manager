@@ -199,3 +199,23 @@ test('the create lock is released after a writePrd throw and after an early retu
   expect(done).not.toBe('timeout');
   expect(done.ok).toBe(true);
 });
+
+// ---- internalMint: the in-lock same-Epic re-check does not depend on optional fields ----
+
+test('an internalMint createPrd with no files/dependsOn/fixes still refuses a fresh-only same-Epic row', async () => {
+  remote = makeRemote({ freshOnly: [{ slug: `2001-${SLUG}`, epicId: EPIC_B, status: null }] });
+  const r = await createPrd({ ...entry(SLUG), cwd, sourcePromptId: EPIC_B }, remote, { internalMint: true });
+  expect(r.ok).toBe(false);
+  expect(r.status).toBe(409);
+  expect(r.error).toContain(`A PRD with slug "${SLUG}" already exists in this Epic as "2001-${SLUG}.md"`);
+  expect(allocations).toEqual([]);
+  expect(written()).toEqual([]);
+  expect(listCalls.filter((q) => q.fresh === true)).toHaveLength(1);
+});
+
+test('an internalMint createPrd whose bare slug matches another Epic\'s row still succeeds', async () => {
+  rows.push({ slug: `1999-${SLUG}`, epicId: EPIC_A, status: null });
+  const r = await createPrd({ ...entry(SLUG), cwd, sourcePromptId: EPIC_B }, remote, { internalMint: true });
+  expect(r.ok).toBe(true);
+  expect(written()).toEqual([`${r.nn}-${SLUG}.md`]);
+});

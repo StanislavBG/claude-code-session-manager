@@ -864,7 +864,9 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     const needCrossEpicGuard = opts.internalMint !== true;
     let listing = null;
     const hasFixes = input.fixes !== undefined && input.fixes !== null;
-    if (needCrossEpicGuard || hasFixes || (input.dependsOn && input.dependsOn.length) || (filesList && filesList.length)) {
+    // A real create always reads: the in-lock same-Epic re-check must not depend
+    // on which optional fields (fixes/dependsOn/files) the caller sends.
+    if (!opts.dryRun || needCrossEpicGuard || hasFixes || (input.dependsOn && input.dependsOn.length) || (filesList && filesList.length)) {
       try {
         const q = { cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER };
         if (!opts.dryRun) listing = await remote.listPrds({ ...q, fresh: true });

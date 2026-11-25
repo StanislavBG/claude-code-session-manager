@@ -846,6 +846,52 @@ function evaluateVisibleRuntimeState(results = []) {
 }
 
 /**
+ * collectRuntimeStateHealth(roots, { findTracked, findVisible })
+ *   → Promise<{ components: { tracked_runtime_state, visible_runtime_state }, issues }>
+ *
+ * Runs both runtime-state checks over `roots` (sequentially). Each side has its
+ * own failure handling: a throw on one side sets only that component to
+ * { ok: true, error } and adds no issues for it — the other side still reports.
+ * Non-critical: neither component ever sets ok=false.
+ */
+async function collectRuntimeStateHealth(roots = [], { findTracked, findVisible } = {}) {
+  const list = Array.isArray(roots) ? roots : [];
+  const components = {};
+  const visibleIssues = [];
+  const trackedIssues = [];
+
+  try {
+    const visible = [];
+    for (const cwd of list) {
+      visible.push({ cwd, count: (await findVisible(cwd)).length });
+    }
+    const visibleEval = evaluateVisibleRuntimeState(visible);
+    components.visible_runtime_state = visibleEval.component;
+    visibleIssues.push(...visibleEval.issues);
+  } catch (e) {
+    components.visible_runtime_state = { ok: true, error: e && e.message };
+  }
+
+  try {
+    const hits = [];
+    for (const cwd of list) {
+      const n = (await findTracked(cwd)).length;
+      if (n > 0) hits.push({ cwd, count: n });
+    }
+    components.tracked_runtime_state = hits.length === 0
+      ? { ok: true }
+      : { ok: true, warn: true, projects: hits };
+    for (const h of hits) {
+      trackedIssues.push(`warn: ${h.cwd} tracks ${h.count} Session Manager runtime-state file(s) in git — untrack from its main checkout`);
+    }
+  } catch (e) {
+    components.tracked_runtime_state = { ok: true, error: e && e.message };
+  }
+
+  return { components, issues: [...visibleIssues, ...trackedIssues] };
+}
+
+/**
  * evaluateCredentialHealth({ credState, now }) → { component, issues }
  *
  * Pure over its inputs — `credState` is the shape lib/credentials.cjs's
@@ -1515,27 +1561,22 @@ async function check(opts = {}) {
   // 6.76. Tracked runtime state: projects that committed Session Manager
   // runtime namespaces. Warning only (never flips ok) — untrack via
   // runtimeStateUntrack.untrackRuntimeState from the project's main checkout.
+  // Each check fails on its own inside collectRuntimeStateHealth; only a
+  // failure computing the roots blanks both.
+  let runtimeRoots = null;
   try {
-    const roots = [...new Set(allProjectCwds())].slice(0, 100).filter((cwd) => fs.existsSync(cwd));
-    const hits = [];
-    const visible = [];
-    for (const cwd of roots) {
-      const n = (await findTrackedRuntimeState(cwd)).length;
-      if (n > 0) hits.push({ cwd, count: n });
-      visible.push({ cwd, count: (await findVisibleRuntimeState(cwd)).length });
-    }
-    const visibleEval = evaluateVisibleRuntimeState(visible);
-    status.components.visible_runtime_state = visibleEval.component;
-    status.issues.push(...visibleEval.issues);
-    status.components.tracked_runtime_state = hits.length === 0
-      ? { ok: true }
-      : { ok: true, warn: true, projects: hits };
-    for (const h of hits) {
-      status.issues.push(`warn: ${h.cwd} tracks ${h.count} Session Manager runtime-state file(s) in git — untrack from its main checkout`);
-    }
+    runtimeRoots = [...new Set(allProjectCwds())].slice(0, 100).filter((cwd) => fs.existsSync(cwd));
   } catch (e) {
     status.components.tracked_runtime_state = { ok: true, error: e.message };
     status.components.visible_runtime_state = { ok: true, error: e.message };
+  }
+  if (runtimeRoots) {
+    const runtime = await collectRuntimeStateHealth(runtimeRoots, {
+      findTracked: findTrackedRuntimeState,
+      findVisible: findVisibleRuntimeState,
+    });
+    Object.assign(status.components, runtime.components);
+    status.issues.push(...runtime.issues);
   }
 
   // 6.8. Credential health (informational-but-loud): is the Claude OAuth token
@@ -1631,6 +1672,7 @@ module.exports = {
   evaluateBuildFreshness,
   evaluateMainDepLinks,
   evaluateVisibleRuntimeState,
+  collectRuntimeStateHealth,
   WORKTREE_SAFETY_PATHS,
   latestStarveEscalationReasons,
   DISPATCH_STALL_THRESHOLD_MS,

@@ -90,7 +90,7 @@ test('autoStartFollowUp sends once with scheduler origin, only when a plan is ne
   mod.autoStartFollowUp({ cwd: tmp, tabId: 't2', sessionId: 'cs-disc', send });
   mod.autoStartFollowUp({ cwd: tmp, tabId: 't3', sessionId: 'cs-prd', send });
   expect(calls).toEqual([
-    ['t1', mod.AUTO_START_FOLLOW_UP_PROMPT, { origin: 'scheduler', sessionId: 'cs-bug', cwd: tmp }],
+    ['t1', mod.AUTO_START_FOLLOW_UP_PROMPT, { origin: 'scheduler', heldKind: 'auto-start-follow-up', sessionId: 'cs-bug', cwd: tmp }],
   ]);
   expect(mod.AUTO_START_FOLLOW_UP_PROMPT).toContain('nothing queued');
   expect(mod.AUTO_START_FOLLOW_UP_PROMPT).toContain('/develop');

@@ -75,7 +75,7 @@ function autoStartFollowUp({ cwd, tabId, sessionId, send }) {
   try {
     if (typeof send !== 'function') return false;
     if (!autoStartNeedsPlan(cwd, sessionId)) return false;
-    const r = send(tabId, AUTO_START_FOLLOW_UP_PROMPT, { origin: 'scheduler', sessionId, cwd });
+    const r = send(tabId, AUTO_START_FOLLOW_UP_PROMPT, { origin: 'scheduler', heldKind: 'auto-start-follow-up', sessionId, cwd });
     if (r && typeof r.catch === 'function') r.catch(() => {});
     return true;
   } catch {

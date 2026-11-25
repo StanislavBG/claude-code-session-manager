@@ -189,7 +189,7 @@ const _rowInEpic = (r, epicId) => r && (r.epicId === epicId || r.sourcePromptId 
 
 /**
  * runEpicSettle({ cwd, epicId }, deps) → { action, reason?, slug? }
- * Never throws. Actions: 'none' | 'sweep-queued' | 'digest-sent'.
+ * Never throws. Actions: 'none' | 'sweep-queued' | 'digest-sent' | 'digest-held'.
  */
 async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
   const {
@@ -300,7 +300,18 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
       try { (log || console).error('[epicValidationHook] readVerdictFiles failed', epicId, e); } catch { /* noop */ }
     }
     const prompt = buildSettledDigest(digestSettle, { epicId, notValidatedReason, cwd, findings });
-    sendPrompt(epicId, prompt, { origin: 'scheduler' });
+    // A non-promise return or a rejected send counts as sent; only an explicit
+    // 'held' disposition (usage hold kept the turn) is recorded as held. The
+    // digestKey is kept either way so a later settle does not send a second one.
+    const sent = await Promise.resolve(sendPrompt(epicId, prompt, { origin: 'scheduler', heldKind: 'settle-digest' })).catch(() => null);
+    if (sent && sent.disposition === 'held') {
+      await appendResponseEvent(
+        cwd, epicId,
+        'Plan digest held by the usage hold — it is delivered when the hold clears',
+        { outcome: 'digest', digestKey: settle.digestKey, held: true },
+      );
+      return { action: 'digest-held' };
+    }
     await appendResponseEvent(
       cwd, epicId,
       `Plan digest sent: ${settle.verified.length} verified, ${settle.refuted.length} refuted, ${settle.uncovered.length} not validated`,

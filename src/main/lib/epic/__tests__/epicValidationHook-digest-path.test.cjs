@@ -147,4 +147,45 @@ describe('runEpicSettle findings collection', () => {
     await runEpicSettle({ cwd: '/c', epicId: EPIC }, d);
     expect(d.sendPrompt.mock.calls[0][1]).not.toContain('Findings (');
   });
+
+  it('sends the digest with the settle-digest held kind', async () => {
+    const d = deps([checkin('0001-a', 1), verdictEv('0001-a', 2)], []);
+    const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, d);
+    expect(res).toEqual({ action: 'digest-sent' });
+    expect(d.sendPrompt.mock.calls[0][0]).toBe(EPIC);
+    expect(d.sendPrompt.mock.calls[0][2]).toEqual({ origin: 'scheduler', heldKind: 'settle-digest' });
+    expect(d.appendResponseEvent.mock.calls[0][2]).toMatch(/^Plan digest sent: /);
+  });
+
+  it('records a held digest and does not send a second one for the same settle', async () => {
+    /** @type {any[]} */
+    const events = [];
+    const d = deps(events, []);
+    // A parked row is not windowed by the digest event, so the second settle
+    // sees the same unchanged settle (same digestKey).
+    d.loadJobs = vi.fn(async () => [{ slug: '0003-parked', status: 'needs_review', epicId: EPIC, cwd: '/c' }]);
+    d.sendPrompt = vi.fn(async () => ({ disposition: 'held' }));
+    d.appendResponseEvent = vi.fn(async (_cwd, _epic, text, extra) => {
+      events.push({ id: 'h', kind: 'response', at: at(9), text, ...extra });
+      return true;
+    });
+    const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, d);
+    expect(res).toEqual({ action: 'digest-held' });
+    expect(d.appendResponseEvent).toHaveBeenCalledTimes(1);
+    const [, , text, extra] = d.appendResponseEvent.mock.calls[0];
+    expect(text).toBe('Plan digest held by the usage hold — it is delivered when the hold clears');
+    expect(extra.outcome).toBe('digest');
+    expect(extra.held).toBe(true);
+    expect(typeof extra.digestKey).toBe('string');
+
+    const again = await runEpicSettle({ cwd: '/c', epicId: EPIC }, d);
+    expect(again).toEqual({ action: 'none', reason: 'already-digested' });
+    expect(d.sendPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a rejected send as sent', async () => {
+    const d = deps([checkin('0001-a', 1), verdictEv('0001-a', 2)], []);
+    d.sendPrompt = vi.fn(() => Promise.reject(new Error('boom')));
+    expect(await runEpicSettle({ cwd: '/c', epicId: EPIC }, d)).toEqual({ action: 'digest-sent' });
+  });
 });

@@ -5,7 +5,7 @@
  * a refreshed five_hour reading is never pro-rated against a cached weekly
  * window length.
  */
-import { test } from 'vitest';
+import { test, afterAll } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -13,8 +13,15 @@ const path = require('node:path');
 
 // HOME points at a temp dir BEFORE scheduler.cjs loads: the end-to-end test
 // below drives reapDeadRunningJobs, which reads and writes queue + machine state.
+const originalHome = process.env.HOME;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'binding-window-pause-threshold-'));
 process.env.HOME = tmpHome;
+
+afterAll(() => {
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
 
 const { __test, billingReadingForPause, reapDeadRunningJobs } = require('../scheduler.cjs');
 const billing = require('../usage.cjs');

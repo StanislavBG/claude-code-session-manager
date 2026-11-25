@@ -15333,6 +15333,9 @@ module.exports = {
   validateForeignWipBlockClaim,
   requeueForeignWipBlockedJobs,
   __test: { bindingWindowPauseThreshold },
+  // Test-only seams (schedulerPlanRecordHarvest.test.cjs).
+  __jobDeclaredArtifactPaths: jobDeclaredArtifactPaths,
+  __harvestJobPlanRecords: harvestJobPlanRecords,
 };
 
 // Lazy path getters: resolved from SM_SCHEDULER_HOME at each read, never frozen

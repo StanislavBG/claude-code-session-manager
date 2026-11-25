@@ -512,3 +512,26 @@ test('persona v15: the review stage saves review material only, and an approval 
     expect(proc).toContain(needle);
   }
 });
+
+test('persona makes every saved video play standalone: own-clock reduced motion, tap-anywhere sound, standalone.cjs', () => {
+  const raw = fs.readFileSync(personaPath, 'utf8');
+  expect(Number(frontmatter(raw).seedVersion) >= 25).toBe(true);
+  const body = personaBody();
+  const contract = body.slice(body.indexOf('<output_contract>'), body.indexOf('</output_contract>'));
+  expect(contract).toContain('still keystones');
+  expect(contract).toContain("video's own clock");
+  expect(contract).toContain('narration plays as usual');
+  expect(contract).not.toContain('static storyboard');
+  expect(contract).not.toContain('stepped by the host');
+  const audio = body.slice(body.indexOf('<audio_policy>\n'), body.indexOf('</audio_policy>'));
+  for (const needle of ['pointerdown', 'keydown', 'audio.currentTime', 'no visible control', 'no `<button>`', 'sound button']) {
+    expect(audio).toContain(needle);
+  }
+  expect(audio).not.toContain('keep playing muted');
+  const sketch = audio.slice(audio.indexOf('Sketch'), audio.indexOf('- Never write the literal pattern'));
+  expect(sketch).toContain('audio.play()');
+  expect(sketch).not.toMatch(/\bFunction\s*\(/i);
+  const kit = body.slice(body.indexOf('<kit>'), body.indexOf('</kit>'));
+  expect(kit).toContain('node <kit>/standalone.cjs <built.html>');
+  expect(body).toMatch(/7\. Self-check before saving:[^\n]*standalone\.cjs/);
+});

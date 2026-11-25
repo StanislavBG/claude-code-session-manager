@@ -810,6 +810,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         effort: "max",
       },
     },
+    {
+      commit: "seed-v25",
+      bodySha256: "c43fa11636e42f7e4c973557b9052523508cb68109cc34fe78b5a70432bf8318",
+      fm: {
+        description: "30-second or 1-minute self-contained HTML/JS demo video for Project Home, saved via project_video_write.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit, mcp__session-manager-scheduler__project_demo_video_write, mcp__session-manager-scheduler__project_video_write, mcp__session-manager-scheduler__project_character_write, mcp__session-manager-scheduler__project_video_review_write, mcp__session-manager-scheduler__project_video_outcome_write",
+        mcpServers: "session-manager-scheduler",
+        title: "Project Home — Demo Video",
+        model: "opus",
+        effort: "max",
+      },
+    },
   ],
   "blender-artist": [
     {

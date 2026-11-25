@@ -2713,6 +2713,38 @@ function currentAutoDispatchHold(config) {
 }
 
 /**
+ * The saved 'pause above' threshold (config.utilizationThreshold), read from
+ * the machine-runtime scheduler state file only — never every project's queue
+ * shard — so timers and routes can call it cheaply. DEFAULT_CONFIG's value
+ * when unset, non-finite or unreadable.
+ */
+function usageHoldThreshold() {
+  try {
+    const t = queueStore.readMachineConfigSync().utilizationThreshold;
+    return typeof t === 'number' && Number.isFinite(t) ? t : DEFAULT_CONFIG.utilizationThreshold;
+  } catch {
+    return DEFAULT_CONFIG.utilizationThreshold;
+  }
+}
+
+/**
+ * The usage hold in force right now for claude -p runs started OUTSIDE the PRD
+ * queue: Tasks (POST /admin/tasks), their timers, and outside readers. Applies
+ * the same utilization rule as currentAutoDispatchHold over the last real
+ * reading at usageHoldThreshold(), but never firePolicy — firePolicy is the PRD
+ * queue's own setting. null, or { reason: 'utilization-held', window, percent,
+ * threshold, resetsAt, detail }; never 'manual-fire-policy'.
+ */
+function currentUsageHold() {
+  return autoDispatchHold.evaluateAutoDispatchHold({
+    firePolicy: null,
+    threshold: usageHoldThreshold(),
+    reading: utilizationReading(),
+    now: Date.now(),
+  });
+}
+
+/**
  * The auto-fix investigation probe is an automatic `claude -p` too, but it is
  * launched from spawnJob's failure path and the periodic auto-fix pass, never
  * through tickBody — so it checks the same hold itself. Returns the hold (and
@@ -14803,6 +14835,8 @@ module.exports = {
   getSchedulerStateSnapshot,
   computeDegradedBudget,
   utilizationReading,
+  usageHoldThreshold,
+  currentUsageHold,
   writeQueue,
   _setPeriodicReverifyEnabledForTests,
   _setLoadGateForTests,

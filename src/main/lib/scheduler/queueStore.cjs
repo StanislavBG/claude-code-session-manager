@@ -403,6 +403,21 @@ function loadMachineStateSync() {
   }
 }
 
+/**
+ * The machine-runtime state file's `config` (firePolicy, utilizationThreshold,
+ * …) or {} when the file is missing, unreadable or carries none. Reads only the
+ * small machine file — never a project queue shard — and never throws.
+ */
+function readMachineConfigSync() {
+  try {
+    const m = loadMachineStateSync();
+    const c = m && m.shaped && m.shaped.config;
+    return c && typeof c === 'object' ? c : {};
+  } catch {
+    return {};
+  }
+}
+
 async function loadMachineState() {
   let raw;
   try {
@@ -604,6 +619,7 @@ module.exports = {
   writeJsonAtomic,
   writeJsonAtomicSync,
   findLongestValidJsonPrefix,
+  readMachineConfigSync,
 };
 
 // Lazy path getters (SM_SCHEDULER_HOME resolved at read, never at require).

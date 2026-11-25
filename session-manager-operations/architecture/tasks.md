@@ -174,8 +174,9 @@ The body is JSON, at most **4 MiB**. The schema is strict: an unknown key at any
    per hold, not per request.
 6. The `start` line is written to the ledger. Then the route waits for a slot.
 7. Once the slot is granted, the route reads the usage hold again. A hold (or a failed read) releases the
-   slot, writes the `end` line with status `usage_held` and `slotWaitMs`, and answers `429 usage_held` with
-   `taskId` and `slotWaitMs`. A Task that waited through the hold never spawns.
+   slot, writes the `end` line with status `usage_held` and `slotWaitMs`, and answers `429 usage_held` (a hold)
+   or `503 usage_hold_error` (a failed read), both with `taskId` and `slotWaitMs`. A Task that waited through
+   the hold never spawns.
 8. The run, then the `end` line, which carries `costUsd` priced by `modelPricing.costOfUsage`.
 
 Every refusal before step 6 gets no ledger line. Once step 6 begins, every outcome gets an end line.
@@ -250,9 +251,9 @@ Every error body is `{ ok: false, error, ... }`.
 | 409 | `session_busy` | Another running Task holds the session id | `sessionId`, `heldBy` |
 | 422 | `model_unresolved` | No concrete model from the persona or Settings | `agent` |
 | 422 | `effort_unresolved` | No effort resolves for the persona | `agent` |
-| 429 | `usage_held` | The usage hold ("pause above") is on, before the start line or at slot grant | `hold` (`{ reason, window, percent, threshold, resetsAt }`), `detail`, `hint`; also `taskId` and `slotWaitMs` when refused at slot grant |
+| 429 | `usage_held` | The usage hold ("pause above") is on, before the start line or at slot grant | `hold` (`{ reason, window, percent, threshold, resetsAt }`, plus `baseThreshold` when it is a number), `detail`, `hint`; also `taskId` and `slotWaitMs` when refused at slot grant |
 | 429 | `too_many_waiting` | More than 50 Tasks are already waiting for a slot | `taskId` |
-| 503 | `usage_hold_error` | Reading the usage hold threw, before the start line (at slot grant a failed read answers `429 usage_held` instead) | `details` |
+| 503 | `usage_hold_error` | Reading the usage hold threw, before the start line or at slot grant (at slot grant the end status is `usage_held`) | `details`; also `taskId` and `slotWaitMs` when it failed at slot grant |
 | 503 | `slot_timeout` | No slot came within `slotWaitSec` | `taskId`, `slotWaitMs` |
 | 503 | `caller_gone` | The caller disconnected during the slot wait (the reply is rarely seen) | `taskId`, `slotWaitMs` |
 | 500 | another slot error code (e.g. `slot_error`) | `waitForSlot` threw something else | `taskId` |
@@ -270,7 +271,7 @@ Statuses are stored on the `end` (or `imported`) line. `GET` routes return them 
 | `error` | Non-zero exit, `envelope.is_error === true`, or the child died from a signal. |
 | `timeout` | `timeoutSec` passed; the process tree was SIGKILLed. |
 | `slot_timeout` | No slot came within `slotWaitSec`; the run never started. |
-| `usage_held` | The usage hold was on when the slot was granted; the slot was released and the run never started. |
+| `usage_held` | The usage hold was on (or reading it failed) when the slot was granted; the slot was released and the run never started. |
 | `rate_limited` | The output or envelope shows a rate limit (`rateLimitDetect.cjs`). See `quota.resetsAt`. |
 | `caller_gone` | The HTTP caller disconnected during the wait or the run; the child was killed. |
 | `spawn_failed` | The `claude` binary could not be spawned (ENOENT, EACCES, …); the reason is in `stderrTail`. |

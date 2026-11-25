@@ -734,12 +734,13 @@ Tasks** for the project on the Scheduler → Tasks page. Code: `src/main/lib/tas
   `409 session_busy`, `422 model_unresolved` / `effort_unresolved`, `429 usage_held`, `503 usage_hold_error`,
   `429 too_many_waiting`, `503 slot_timeout`.
 - `429 usage_held`: the usage hold ("pause above", `scheduler.currentUsageHold`) is on. The body is
-  `{ ok: false, error: 'usage_held', hold: { reason, window, percent, threshold, resetsAt }, detail, hint }`.
+  `{ ok: false, error: 'usage_held', hold: { reason, window, percent, threshold, resetsAt, baseThreshold? }, detail, hint }`.
   The route checks it after `409 session_busy`, before the ledger start line, and again once the slot is
   granted; the second refusal also carries `taskId` and `slotWaitMs` and stores the end status `usage_held`.
   No body key, `priority` or `caller` bypasses it, and `firePolicy: 'manual'` does not apply to Tasks. A failed
-  read before the start line answers `503 usage_hold_error` (`details`). Retry after `hold.resetsAt`; never run
-  `claude -p` directly instead.
+  read answers `503 usage_hold_error` (`details`), never `429`: before the start line with no `taskId`; once
+  the slot is granted it releases the slot, stores the end status `usage_held` and also carries `taskId` and
+  `slotWaitMs`. Retry after `hold.resetsAt`; never run `claude -p` directly instead.
 - `status` in a `200` is the run's outcome: `ok`, `error`, `rate_limited`, `timeout`, `spawn_failed`. Closing
   the connection before the answer cancels the wait or the run (ledger status `caller_gone`).
 
@@ -790,11 +791,12 @@ Held:
   "ok": true,
   "hold": {
     "reason": "utilization-held",
-    "window": "seven_day",
+    "window": "weekly_all",
     "percent": 93,
     "threshold": 90,
     "resetsAt": "2026-11-27T18:00:00.000Z",
-    "detail": "seven_day window at 93% ≥ 90%, resets 2026-11-27T18:00:00.000Z"
+    "detail": "weekly_all window at 93% ≥ 90%, resets 2026-11-27T18:00:00.000Z",
+    "baseThreshold": 90
   },
   "threshold": 90
 }
@@ -804,11 +806,12 @@ Held:
 | --- | --- |
 | `hold` | `null` when nothing is held. |
 | `hold.reason` | Always `utilization-held` (never `manual-fire-policy`: firePolicy is the PRD queue's own setting). |
-| `hold.window` | The holding usage window that resets last (for example `five_hour` or `seven_day`). |
+| `hold.window` | The holding usage window that resets last. Names come from the usage payload's `limits[]` kinds (for example `session`, `weekly_all`); `five_hour` / `seven_day` appear only when the payload has no usable `limits[]` entry. |
 | `hold.percent` | That window's usage percent. |
 | `hold.threshold` | The "pause above" percent the hold was judged at. |
 | `hold.resetsAt` | ISO time that window resets, when the hold ends at the latest. |
 | `hold.detail` | One readable line about the hold. |
+| `hold.baseThreshold` | The saved "pause above" percent the hold started from; present only when it is a number. |
 | `threshold` | The saved "pause above" percent (`usageHoldThreshold()`), held or not. |
 
 A failed read answers `503 { ok: false, error: 'usage_hold_error', details }`.

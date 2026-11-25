@@ -61,6 +61,7 @@ import { usePagedList } from '../../lib/usePagedList'
 import { Pager } from '../ui/Pager'
 import { scrollWithin } from '../../lib/scrollWithin'
 import { UsageMeters } from './home/UsageMeters'
+import { UsageCapControl } from './home/UsageCapControl'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
 import { QueuedJobPopover, type QueuedJobPopoverJob } from './home/QueuedJobPopover'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
@@ -554,6 +555,7 @@ function BillingCard() {
       )}
       {!billing && <div className="text-xs text-fg-faint">loading usage…</div>}
       {data && <UsageMeters data={data} updatedAt={data.fetchedAt} />}
+      <UsageCapControl />
     </div>
   )
 }

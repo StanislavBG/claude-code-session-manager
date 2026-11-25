@@ -19,6 +19,10 @@ const path = require('node:path');
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+// A full week (plus an hour) to the weekly reset keeps the pro-rated cap at its
+// base: 96% >= the 90% 'pause above' holds. Inside 2/7 of the week the cap
+// lifts to 100 (utilizationHold.proRatedThreshold), so 41 h ahead never holds.
+const WEEK_AHEAD = 7 * DAY + HOUR;
 const EPIC = 'epic-continue-hold-fixture';
 const SESSION = '22222222-3333-4444-8555-666666666666';
 const SLUG = '10-continue-hold';
@@ -35,7 +39,7 @@ let calls = [];
 function cwdOf() { return path.join(tmpHome, 'proj'); }
 function iso(offsetMs) { return new Date(Date.now() + offsetMs).toISOString(); }
 
-function weekly(pct) {
+function weekly(pct, weeklyResetsAt = iso(WEEK_AHEAD)) {
   return {
     kind: 'ok',
     data: {
@@ -43,16 +47,16 @@ function weekly(pct) {
         five_hour: { utilization: 10, resets_at: iso(2 * HOUR) },
         limits: [
           { kind: 'session', percent: 10, resets_at: iso(2 * HOUR), scope: null },
-          { kind: 'weekly_all', percent: pct, resets_at: iso(3 * DAY), scope: null },
+          { kind: 'weekly_all', percent: pct, resets_at: weeklyResetsAt, scope: null },
         ],
       },
     },
   };
 }
 
-async function reading(pct) {
+async function reading(pct, weeklyResetsAt) {
   billing.usageCircuit.recordSuccess({});
-  billing.fetchUsage = async () => weekly(pct);
+  billing.fetchUsage = async () => weekly(pct, weeklyResetsAt);
   await scheduler.refreshNextReset();
 }
 
@@ -155,6 +159,17 @@ test('a 96% reading at threshold 90 refuses continue, keeps the row interrupted;
   expect(calls[0].resumeTarget).toMatchObject({ sessionId: SESSION, interrupt: true });
   // The resuming call appends no job_continue_held event: still only the one refusal.
   expect(auditEvents('job_continue_held', SLUG)).toHaveLength(1);
+});
+
+test('the same 96% reading with its weekly reset 41 h ahead does not refuse continue (pro-rated cap 100)', async () => {
+  await seed({ utilizationThreshold: 90, firePolicy: 'when-available' });
+  await reading(96, iso(41 * HOUR));
+  const heldBefore = auditEvents('job_continue_held', SLUG).length;
+  const ok = await scheduler.remote.continueJob(SLUG, { cwd: cwdOf(), source: 'admin-api' });
+  expect(ok).toMatchObject({ ok: true, sessionId: SESSION, resume: true });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(calls).toHaveLength(1);
+  expect(auditEvents('job_continue_held', SLUG)).toHaveLength(heldBefore);
 });
 
 test("firePolicy 'manual' refuses continue the same way", async () => {

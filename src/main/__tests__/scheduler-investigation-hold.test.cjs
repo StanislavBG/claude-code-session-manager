@@ -21,6 +21,10 @@ const path = require('node:path');
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+// A full week (plus an hour) to the weekly reset keeps the pro-rated cap at its
+// base: 96% >= the 90% 'pause above' holds. Inside 2/7 of the week the cap
+// lifts to 100 (utilizationHold.proRatedThreshold), so 41 h ahead never holds.
+const WEEK_AHEAD = 7 * DAY + HOUR;
 
 let tmpHome;
 let originalHome;
@@ -38,14 +42,14 @@ function iso(offsetMs) { return new Date(Date.now() + offsetMs).toISOString(); }
 
 // The same reset as the usage API reports it fetch to fetch: microsecond
 // strings jittering about ±0.5 s either side of one minute (real offsets
-// recorded 2026-11-23/24), three days out.
+// recorded 2026-11-23/24), a full week out.
 function jitteredResets() {
-  const base = Math.ceil((Date.now() + 3 * DAY) / 60_000) * 60_000;
+  const base = Math.ceil((Date.now() + WEEK_AHEAD) / 60_000) * 60_000;
   const at = (ms, frac) => `${new Date(ms).toISOString().slice(0, 19)}.${frac}+00:00`;
   return [at(base, '401695'), at(base, '301873'), at(base - 1000, '973643'), at(base - 1000, '539462')];
 }
 
-function weekly(pct, weeklyResetsAt = iso(3 * DAY)) {
+function weekly(pct, weeklyResetsAt = iso(WEEK_AHEAD)) {
   return {
     kind: 'ok',
     data: {
@@ -161,6 +165,15 @@ test('spawnInvestigation under the hold spawns nothing, leaves the row eligible,
   const events = heldEvents(t.slug);
   expect(events).toHaveLength(1);
   expect(events[0].reason).toBe('utilization-held');
+});
+
+test('the same 96% reading with its weekly reset 41 h ahead does not hold (pro-rated cap 100): the auto-fix pass launches', async () => {
+  await reading(96, iso(41 * HOUR));
+  const t = setupRow();
+  await scheduler.reverifyNeedsReview();
+  expect(launched).toEqual([t.slug]);
+  expect(rowOf(t).autoFixAttempted).toBe(true);
+  expect(heldEvents(t.slug)).toHaveLength(0);
 });
 
 test('the periodic auto-fix pass defers while held, then launches once the hold clears', async () => {

@@ -981,6 +981,27 @@ const MCP_TOOL_CATALOG = [
       + 'request_older_than_switch) carries error and reason; show the reason to the human.',
   },
   {
+    name: 'video_script_switch_set',
+    group: 'project-home',
+    purpose: "Turn one project's 'Scripts may run Demo Video' switch on or off via the session-manager app's admin API "
+      + '(POST /admin/project-home/videos/script-switch), on behalf of the human in this chat. Runs only in a Session '
+      + 'Manager chat or terminal session; a scheduled job, a Task or any other internal headless run is refused before '
+      + 'any request. The caller identity is taken from this session, never from arguments. `cwd` is optional and '
+      + "defaults to this session's project.",
+    summary: 'Turn Scripts may run Demo Video on or off when the human asks.',
+    whenToUse: 'Use only when the human asked in this chat to turn the switch on or off, and pass their words '
+      + 'verbatim as `humanRequestQuote` — the route checks the quote against this session\'s transcript and '
+      + 'that it names the switch and the project.',
+    whenNotToUse: 'Never on your own initiative, never from a job or script, and never to get past a 403 '
+      + "scripts_not_allowed without the human's words. Do not use it to press Demo Video — a script does that with "
+      + 'POST /admin/project-home/videos/run (recipe script-press-demo-video).',
+    exampleArgs: { enabled: true, humanRequestQuote: "turn on 'Scripts may run Demo Video' for burrow" },
+    notes: 'One instruction allows one change: do not reuse a quote to flip the switch again. Returns '
+      + '{ ok: true, cwd, enabled, changedAt, by, previous }. A refusal (400 invalid_request, 403 '
+      + 'human_request_unverified / quote_does_not_name_switch / quote_does_not_name_project, 409 '
+      + 'request_older_than_switch) carries error and reason; show the reason to the human.',
+  },
+  {
     name: 'scheduler_slots_get',
     group: 'scheduler',
     purpose: "Read the scheduler's machine-wide limit on parallel claude sessions via the session-manager app's "
@@ -1124,6 +1145,21 @@ const MCP_RECIPES = [
       'A review tool\'s first run calls project_video_review_write (text up to 32000 characters — a whole script fits — plus 1-6 images) and ends. The next run carries \'Review: approved…\' (build the final video) or \'Review: changes requested…\' (redo the review material with that note).',
       'If an approved final run fails, the owner presses Retry in Project Home ▸ Video; the next run carries the same \'Review: approved by the owner at <time>\' and \'Replace entry: <id>\' lines, so the final stage must start from the approved material (files its review stage committed, or the saved review material), not from the review run\'s context. No agent, script or MCP call can retry.',
       'A repoPaths run must land a commit under those paths (the saved video entry itself is never committed); without repoPaths the run is artifact-only. Only the human approves, asks for changes or retries — in Project Home ▸ Video; no tool can.',
+    ],
+  },
+  {
+    id: 'script-press-demo-video',
+    title: "Let a project's own script press Demo Video and read the outcome",
+    steps: [
+      "A human turns on 'Scripts may run Demo Video' for the project — in Project Home > Video, or by asking in a chat session, where the agent calls video_script_switch_set with their words verbatim as humanRequestQuote. No script, job or Task can turn it on; while it is off the run route answers 403 scripts_not_allowed.",
+      'The script POSTs /admin/project-home/videos/run with the port and token from ~/.claude/session-manager/admin-api.json, e.g. for a blog post (target = the post URL, externalRef = the post slug): '
+        + 'curl -s -X POST "http://127.0.0.1:$(jq -r .port ~/.claude/session-manager/admin-api.json)/admin/project-home/videos/run" '
+        + '-H "Authorization: Bearer $(jq -r .token ~/.claude/session-manager/admin-api.json)" -H \'Content-Type: application/json\' '
+        + '-d \'{"cwd":"/abs/project","kind":"Blog post","target":"https://example.com/blog/hello","externalRef":"hello"}\'. '
+        + 'Optional keys: length, style, character, voiceId, focus, reviewFirst. Success is { ok, entryId, epicId, slug, stage }; the same externalRef again answers { ok, existing: true, entryId, epicId } instead of a second run.',
+      'Read the outcome with GET /admin/project-home/videos/status?cwd=<encoded>&id=<entryId> (same bearer token): state is queued, running, awaiting_review, saved (files.index/meta/mp4/poster, absolute paths), season-complete or failed (reason).',
+      '409 already_building means a Demo Video job for this project is already pending or running — retry later; never loop tightly.',
+      'With Review first (reviewFirst: true) the run stops at awaiting_review: only the human approves or asks for changes in Project Home > Video, then the final video builds. A script just keeps reading the status.',
     ],
   },
 ];

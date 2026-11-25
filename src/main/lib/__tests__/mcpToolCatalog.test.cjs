@@ -78,11 +78,11 @@ test.each(MCP_TOOL_CATALOG)('$name composeDescription joins purpose/whenToUse/wh
   expect(composeDescription(entry).length).toBeGreaterThan(0);
 });
 
-test('project-home group lists the page/video tools, the two aliases and the voice read tools', () => {
+test('project-home group lists the page/video tools, the two aliases, the voice read tools and the script switch', () => {
   expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual([
     'project_home_write', 'project_page_write', 'project_matrix_read', 'project_matrix_write',
     'project_video_write', 'project_demo_video_write', 'project_character_write', 'project_video_review_write',
-    'project_video_outcome_write', 'voice_list', 'voice_preview',
+    'project_video_outcome_write', 'voice_list', 'voice_preview', 'video_script_switch_set',
   ]);
 });
 
@@ -369,8 +369,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 50 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(50);
+test('catalog has 51 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(51);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });

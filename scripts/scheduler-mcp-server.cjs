@@ -49,6 +49,7 @@
  *   task_list({ cwd, since?, until?, pipeline?, runId?, step?, agent?, status?, source?, limit?, offset? }) -> GET /admin/tasks?cwd=<encoded>&...
  *   task_get({ cwd, id, after? }) -> GET /admin/task?cwd=<encoded>&id=<encoded>[&after=<n>]
  *   task_switch_set({ enabled, humanRequestQuote, cwd? }) -> POST /admin/tasks/switch
+ *   video_script_switch_set({ enabled, humanRequestQuote, cwd? }) -> POST /admin/project-home/videos/script-switch
  *   scheduler_slots_get() -> GET /admin/scheduler/slots
  *   scheduler_slots_set({ cap, quote }) -> POST /admin/scheduler/slots
  *
@@ -771,6 +772,19 @@ const TOOLS = [
       type: 'object',
       properties: {
         enabled: { type: 'boolean', description: "true turns 'Scripts may run Tasks' on, false turns it off" },
+        humanRequestQuote: { type: 'string', description: "The human's words from this chat asking for the change, verbatim" },
+        cwd: { type: 'string', description: "Optional: absolute project root whose switch to set; defaults to this session's project" },
+      },
+      required: ['enabled', 'humanRequestQuote'],
+    },
+  },
+  {
+    name: 'video_script_switch_set',
+    description: descriptionFor('video_script_switch_set'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean', description: "true turns 'Scripts may run Demo Video' on, false turns it off" },
         humanRequestQuote: { type: 'string', description: "The human's words from this chat asking for the change, verbatim" },
         cwd: { type: 'string', description: "Optional: absolute project root whose switch to set; defaults to this session's project" },
       },
@@ -1509,7 +1523,8 @@ function siteErrorText(result, fallback, cwd) {
 // A switch only the human flips (the Tasks switch, the session slot limit): a
 // scheduled job, a Task or any other internal headless run (SM_KG_INTERNAL=1),
 // or a process outside a chat session, is refused before any request. One
-// helper so task_switch_set and scheduler_slots_set can never drift apart.
+// helper so task_switch_set, video_script_switch_set and scheduler_slots_set
+// can never drift apart.
 function humanSwitchRefusal(message) {
   if (process.env.SM_KG_INTERNAL === '1') return errorResult(message);
   return humanSessionRefusal(message);
@@ -1518,6 +1533,11 @@ function humanSwitchRefusal(message) {
 function taskSwitchSetRefusal() {
   return humanSwitchRefusal('refused: task_switch_set runs only in a Session Manager chat or terminal session where the human asked for it; '
     + 'say in your final result what the human should switch on Scheduler → Tasks.');
+}
+
+function videoScriptSwitchSetRefusal() {
+  return humanSwitchRefusal('refused: video_script_switch_set runs only in a Session Manager chat or terminal session where the human asked for it; '
+    + "say in your final result that the human should turn on 'Scripts may run Demo Video' in Project Home > Video.");
 }
 
 function slotsSetRefusal() {
@@ -1803,6 +1823,25 @@ async function handleCallTool(request) {
       if (typeof args.cwd === 'string') payload.cwd = args.cwd;
       const result = await adminRequest('POST', '/admin/tasks/switch', payload);
       if (result?.ok === false) return errorResult(adminErrorText(result, 'task_switch_set failed'));
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'video_script_switch_set') {
+      const refusal = videoScriptSwitchSetRefusal();
+      if (refusal) return refusal;
+      if (typeof args?.enabled !== 'boolean') return errorResult('missing or invalid required argument: enabled (boolean)');
+      if (typeof args?.humanRequestQuote !== 'string' || args.humanRequestQuote.trim() === '') {
+        return errorResult('missing or invalid required argument: humanRequestQuote (the human\'s words, verbatim)');
+      }
+      // Identity comes from this process's env only, exactly as task_switch_set.
+      const payload = {
+        enabled: args.enabled,
+        humanRequestQuote: args.humanRequestQuote,
+        originClaudeSessionId: process.env.SM_CHAT_SESSION_ID,
+      };
+      if (process.env.SM_PROJECT_ROOT) payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
+      if (typeof args.cwd === 'string') payload.cwd = args.cwd;
+      const result = await adminRequest('POST', '/admin/project-home/videos/script-switch', payload);
+      if (result?.ok === false) return errorResult(adminErrorText(result, 'video_script_switch_set failed'));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_slots_get') {

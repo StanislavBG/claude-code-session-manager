@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->50<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->51<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills. It runs on your machine. MIT license.
 
 ## Facts
 
@@ -149,6 +149,7 @@ Recipes:
 - `hand-finding-to-another-project` — Hand a finding to another project
 - `reply-to-the-project-that-asked` — Reply to the project that asked
 - `add-project-video-tool` — Add a project video tool
+- `script-press-demo-video` — Let a project's own script press Demo Video and read the outcome
 <!-- /gen:mcp-recipes -->
 
 Tools:
@@ -201,6 +202,7 @@ Tools:
 | `task_list` | tasks | `cwd` | List a project's Tasks with their status, model and cost. |
 | `task_get` | tasks | `cwd`, `id` | Read one Task in full, with its prompt and output. |
 | `task_switch_set` | tasks | `enabled`, `humanRequestQuote` | Turn Scripts may run Tasks on or off when the human asks. |
+| `video_script_switch_set` | project-home | `enabled`, `humanRequestQuote` | Turn Scripts may run Demo Video on or off when the human asks. |
 | `scheduler_slots_get` | scheduler | — | See how many sessions may run at once and how many are busy. |
 | `scheduler_slots_set` | scheduler | `cap`, `quote` | Raise or lower the session limit when the human asks. |
 | `session_manager_help` | help | — | Start here: list every tool, or explain one tool or recipe. |

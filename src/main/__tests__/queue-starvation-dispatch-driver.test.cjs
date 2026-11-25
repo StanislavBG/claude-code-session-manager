@@ -288,7 +288,7 @@ test('the watchdog latches: one forced tick / audit per starve episode, re-armed
 });
 
 test('under the auto-dispatch hold (tickBody owns it) the watchdog forces nothing and the escalation sweep stays quiet', async () => {
-  // A real reading at 96% weekly, reset 3 days out — the hold the tick applies.
+  // A real reading at 96% weekly, reset a full week out (pro-rated cap stays at 90) — the hold the tick applies.
   const billing = require('../usage.cjs');
   const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
   const auditKinds = () => {
@@ -299,7 +299,7 @@ test('under the auto-dispatch hold (tickBody owns it) the watchdog forces nothin
   const originalFetchUsage = billing.fetchUsage;
   const reading = (pct) => async () => ({
     kind: 'ok',
-    data: { usage: { limits: [{ kind: 'weekly_all', percent: pct, scope: null, resets_at: new Date(Date.now() + 3 * 86_400_000).toISOString() }] } },
+    data: { usage: { limits: [{ kind: 'weekly_all', percent: pct, scope: null, resets_at: new Date(Date.now() + 7 * 86_400_000 + 3_600_000).toISOString() }] } },
   });
   billing.fetchUsage = reading(96);
   await scheduler.refreshNextReset();

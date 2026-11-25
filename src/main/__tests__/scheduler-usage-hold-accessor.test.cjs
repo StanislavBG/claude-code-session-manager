@@ -120,7 +120,7 @@ test('weekly_all 92% at threshold 90 holds; 80% does not', async () => {
   expect(scheduler.currentUsageHold()).toBeNull();
 });
 
-test('weekly_all 92% resetting 41 h ahead at threshold 90 gives no hold (pro-rated cap 100)', async () => {
+test('weekly_all 92% resetting 41 h ahead at threshold 90 gives no hold (pro-rated cap 99)', async () => {
   await setConfig('when-available', 90);
   await goodReading(weekly(92, 41 * HOUR));
   expect(scheduler.usageHoldThreshold()).toBe(90);

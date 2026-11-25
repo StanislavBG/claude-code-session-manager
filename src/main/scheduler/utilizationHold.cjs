@@ -48,8 +48,13 @@ function resetMs(resetsAt) {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
-/** The pro-rated threshold reaches this in a window's final stretch. */
-const PRO_RATE_CEILING = 100;
+/**
+ * The pro-rated threshold reaches this in a window's final stretch. 99, not
+ * 100: automatic work stops one point short of the account limit so
+ * interactive chats keep working until the reset (owner's choice, 2026-11-24).
+ * A saved 'pause above' at or above it is returned unchanged.
+ */
+const PRO_RATE_CEILING = 99;
 /** Share of a window left at which the threshold reaches the ceiling (last 2 days of a week). */
 const PRO_RATE_FULL_FRACTION = 2 / 7;
 /** Length of each usage window kind. */

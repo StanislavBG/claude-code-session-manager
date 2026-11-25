@@ -31,16 +31,16 @@ function heartbeat(utilization, daysLeft) {
   };
 }
 
-test('weekly_all 92% with 1.7 days left is not held (pro-rated cap is 100)', () => {
+test('weekly_all 92% with 1.7 days left is not held (pro-rated cap is 99)', () => {
   const r = evaluateTickLiveness(queue(), heartbeat(92, 1.7), NOW);
   assert.notStrictEqual(r.reason, 'utilization-at-threshold');
   assert.strictEqual(r.stalled, true);
 });
 
-test('weekly_all 93% with 6 days left is held (effective cap about 92)', () => {
+test('weekly_all 93% with 6 days left is held (effective cap about 91.8)', () => {
   const hb = heartbeat(93, 6);
   const cap = proRatedThreshold({ base: 90, window: hb.utilizationWindow, resetsAt: hb.nextReset, now: NOW });
-  assert.ok(Math.abs(cap - 92) < 0.01, `cap ${cap}`);
+  assert.ok(Math.abs(cap - 91.8) < 0.01, `cap ${cap}`);
   const r = evaluateTickLiveness(queue(), hb, NOW);
   assert.strictEqual(r.stalled, false);
   assert.strictEqual(r.reason, 'utilization-at-threshold');

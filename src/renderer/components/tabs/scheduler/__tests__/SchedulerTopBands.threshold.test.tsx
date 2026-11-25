@@ -64,10 +64,10 @@ const effective = () => container.querySelector('[data-testid="kpi-threshold-eff
 
 describe('SchedulerTopBands — pro-rated pause above', () => {
   it('shows the cap in force when it differs from the editable base', async () => {
-    setSnapshot(100)
+    setSnapshot(99)
     await render()
-    expect(effective()?.textContent).toContain('now 100%')
-    expect(container.querySelector('[data-testid="kpi-threshold-text"]')?.getAttribute('title')).toContain('rises from this value toward 100%')
+    expect(effective()?.textContent).toContain('now 99%')
+    expect(container.querySelector('[data-testid="kpi-threshold-text"]')?.getAttribute('title')).toContain('rises from this value toward 99%')
   })
 
   it('rounds the cap in force to one decimal', async () => {

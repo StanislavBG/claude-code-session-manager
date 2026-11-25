@@ -497,11 +497,11 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
                   min={0}
                   max={100}
                   testId="kpi-threshold"
-                  title="Holds new dispatches when the highest of the 5-hour and weekly usage windows is at/above this percent (when-available policy only). The cap rises from this value toward 100% as the usage window's reset nears (100% in the final 2 days of the week). Not the executor rate-limit pause — click to edit"
+                  title="Holds new dispatches when the highest of the 5-hour and weekly usage windows is at/above this percent (when-available policy only). The cap rises from this value toward 99% as the usage window's reset nears (99% in the final 2 days of the week). Not the executor rate-limit pause — click to edit"
                   onCommit={(n) => window.api.schedule.setConfig({ utilizationThreshold: n })}
                 />
                 {effectiveCapShown != null && effectiveCapShown !== (snapshot.config.utilizationThreshold ?? 90) && (
-                  <span data-testid="kpi-threshold-effective" title="Cap in force now — pro-rated toward 100% as the usage window's reset nears">
+                  <span data-testid="kpi-threshold-effective" title="Cap in force now — pro-rated toward 99% as the usage window's reset nears">
                     {' · now '}{effectiveCapShown}%
                   </span>
                 )}

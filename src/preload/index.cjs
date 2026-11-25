@@ -478,6 +478,8 @@ contextBridge.exposeInMainWorld('api', {
     reviewList: (payload) => ipcRenderer.invoke('project-videos:review-list', payload),
     reviewDecide: (payload) => ipcRenderer.invoke('project-videos:review-decide', payload),
     reviewRetry: (payload) => ipcRenderer.invoke('project-videos:review-retry', payload),
+    scriptSwitchGet: (payload) => ipcRenderer.invoke('videos:script-switch-get', payload),
+    scriptSwitchSet: (payload) => ipcRenderer.invoke('videos:script-switch-set', payload),
     onChanged: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('project-pages:changed', listener);

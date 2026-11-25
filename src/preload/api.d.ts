@@ -2265,6 +2265,26 @@ export type VideoReviewRetryResult =
   | { ok: true; slug: string; epicId: string; entryId?: string | null; stage?: string }
   | { ok: false; error: string; activeSlug?: string };
 
+// ────────────────────────────────────────────── Project Pages: 'Scripts may run Demo Video' switch
+// Mirrors src/main/lib/project-pages/videoScriptPress.cjs (getVideoScriptSwitch) and
+// src/main/lib/project-pages/videoScriptSwitchIpc.cjs (videos:script-switch-get / script-switch-set).
+
+export interface VideoScriptSwitchGetPayload {
+  cwd: string;
+}
+
+export interface VideoScriptSwitchSetPayload {
+  cwd: string;
+  enabled: boolean;
+}
+
+/** One project's switch; changedAt/by are null when it was never set. Same attribution shape as TaskSwitchBy. */
+export interface VideoScriptSwitchState {
+  enabled: boolean;
+  changedAt: string | null;
+  by: TaskSwitchBy | null;
+}
+
 // ────────────────────────────────────────────── Voices screen
 // Mirrors src/main/lib/demo-video-kit/voiceLibrary.cjs (listVoices) and
 // src/main/lib/project-pages/voicesIpc.cjs (voices:list / preview / approve / unapprove / delete).
@@ -3576,6 +3596,10 @@ export interface SessionManagerAPI {
     reviewDecide: (payload: VideoReviewDecidePayload) => Promise<VideoReviewDecideResult>;
     /** Re-dispatch the final stage of an approved entry whose final run failed (canRetry), reusing the recorded approval and inputs. Desktop only (never via the phone relay); one in-flight decide/retry per entry. */
     reviewRetry: (payload: VideoReviewRetryPayload) => Promise<VideoReviewRetryResult>;
+    /** Read this project's 'Scripts may run Demo Video' switch; off with null changedAt/by when never set. Rejects on an invalid cwd. */
+    scriptSwitchGet: (payload: VideoScriptSwitchGetPayload) => Promise<VideoScriptSwitchState>;
+    /** A human click: turn the switch on/off, recorded as by { via: 'ui' } plus one audit event. Desktop only. Rejects on a bad payload. */
+    scriptSwitchSet: (payload: VideoScriptSwitchSetPayload) => Promise<VideoScriptSwitchState>;
     /** Fires whenever a watched cwd's knowledge/videos library is added/changed/removed, carrying the freshly read library result. */
     onChanged: (handler: (payload: { cwd: string } & ProjectPagesGetResult) => void) => () => void;
   };

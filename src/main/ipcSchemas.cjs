@@ -1152,6 +1152,10 @@ const projectVideosReviewDecide = z.object({
   note: z.string().max(2000).optional(),
 }).strict();
 const projectVideosReviewRetry = z.object({ cwd: z.string().min(1).max(4096), entryId }).strict();
+// 'Scripts may run Demo Video' switch (project-pages/videoScriptSwitchIpc.cjs): renderer IPC only,
+// the human-click writer (by.via 'ui').
+const videosScriptSwitchGet = z.object({ cwd: z.string().min(1).max(4096) }).strict();
+const videosScriptSwitchSet = z.object({ cwd: z.string().min(1).max(4096), enabled: z.boolean() }).strict();
 // Voices screen (project-pages/voicesIpc.cjs): renderer IPC only — the sole writer of
 // voice approvals and deletions. voiceId follows voiceLibrary.VOICE_ID_RE (voiceLibraryId, declared
 // above macrosDispatchJob); text is TEXT_MAX (300).
@@ -2009,6 +2013,8 @@ module.exports = {
     projectVideosReviewList,
     projectVideosReviewDecide,
     projectVideosReviewRetry,
+    videosScriptSwitchGet,
+    videosScriptSwitchSet,
     voicesList,
     voicesPreview,
     voicesApprove,

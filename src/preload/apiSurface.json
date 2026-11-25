@@ -1934,6 +1934,20 @@
  },
  {
   "ns": "projectPages",
+  "method": "scriptSwitchGet",
+  "channel": "videos:script-switch-get",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "projectPages",
+  "method": "scriptSwitchSet",
+  "channel": "videos:script-switch-set",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "projectPages",
   "method": "onChanged",
   "channel": "project-pages:changed",
   "kind": "on",

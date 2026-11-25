@@ -632,6 +632,11 @@ require('./lib/persona-macro/macroJobIpc.cjs').registerMacroJobIpc(ipcMain, macr
 // Project Video review step: list + human decide (approve / ask for changes). Same deps
 // as macroJobIpc — a decision dispatches through runToolJob. Renderer IPC only.
 require('./lib/project-pages/videoReviewIpc.cjs').registerVideoReviewIpc(ipcMain, macroJobIpcDeps);
+// 'Scripts may run Demo Video' switch: get + the human-click set (by.via 'ui'). Renderer IPC only.
+require('./lib/project-pages/videoScriptSwitchIpc.cjs').registerVideoScriptSwitchIpc(ipcMain, {
+  schemas,
+  validatePath: require('./config.cjs').validatePath,
+});
 // Voices screen: list/preview + the ONLY writer of voice approvals and deletions.
 // Renderer IPC only — no admin route or MCP tool approves, changes or deletes a voice.
 require('./lib/project-pages/voicesIpc.cjs').registerVoicesIpc(ipcMain, {

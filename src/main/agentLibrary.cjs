@@ -24,6 +24,7 @@ const os = require('node:os');
 const { splitFrontmatter } = require('./lib/prd/prdFrontmatter.cjs');
 const { resolveMergedPersona, PERSONA_NAME_RE } = require('./lib/persona-macro/personaMerge.cjs');
 const { isNonClaudeAgentCli, isAgentCliModel } = require('./lib/agent-cli/agentCliEvents.cjs');
+const { loadoutState, encodeLoadout } = require('./lib/persona-macro/personaLoadout.cjs');
 const configMgr = require('./config.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 
@@ -125,10 +126,12 @@ function extractUnmanagedLines(raw, managed) {
   return out;
 }
 
-function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, agentCli, agentCliModel, mcpServers, packs, environment, body, preservedLines }) {
+function serializePersona({ name, description, tools, loadout, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, agentCli, agentCliModel, mcpServers, packs, environment, body, preservedLines }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
-  if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
+  // `loadout` (bare/unbound/equipped/undecided) wins; absent, `tools` is the decision (['none'] = bare, ['*'] = unbound).
+  const toolsValue = loadout ? encodeLoadout(loadout, tools) : (tools && tools.length ? tools.join(', ') : null);
+  if (toolsValue) lines.push(`tools: ${toolsValue}`);
   if (model && model !== 'inherit') lines.push(`model: ${model}`);
   if (effort && effort !== 'inherit') lines.push(`effort: ${effort}`);
   if (isNonClaudeAgentCli(agentCli)) {
@@ -492,6 +495,7 @@ async function listPersonas({
       name: fm.name || fallbackName,
       description: fm.description || null,
       tools: parseTools(fm.tools),
+      loadout: loadoutState(fm),
       model: fm.model || null,
       effort: fm.effort || null,
       color: fm.color || null,

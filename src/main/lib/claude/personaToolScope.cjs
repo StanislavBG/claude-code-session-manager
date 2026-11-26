@@ -44,10 +44,12 @@ function buildPersonaToolScope(tools, { disallowed = [], structuredOutput = fals
     .map((t) => t.trim())
     .filter(Boolean);
   if (names.length === 0 || names.includes('*')) return null;
+  // Bare (`tools: none`, personaLoadout.cjs): no granted tools, only the floor.
+  const bare = names.length === 1 && names[0].toLowerCase() === 'none';
   const blocked = new Set(disallowed);
   const out = [];
   const extra = structuredOutput === true ? ['StructuredOutput'] : [];
-  for (const name of [...names, ...HEADLESS_TOOL_FLOOR, ...extra]) {
+  for (const name of [...(bare ? [] : names), ...HEADLESS_TOOL_FLOOR, ...extra]) {
     if (blocked.has(name) || out.includes(name)) continue;
     out.push(name);
   }

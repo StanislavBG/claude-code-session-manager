@@ -422,3 +422,13 @@ test('agentCli/agentCliModel: round-trip, carry-over on undefined, claude remove
   await savePersona({ ...base, name: 'bad' });
   expect(await raw('bad')).not.toContain('agentCli');
 });
+
+test('listPersonas entries carry the loadout state', async () => {
+  const globalDir = await mkTmp('sm-agent-library-loadout-');
+  for (const [name, tools] of [['l-undecided', []], ['l-bare', ['none']], ['l-equipped', ['Read']], ['l-unbound', ['*']]]) {
+    await savePersona({ ...base, name, description: 'd', body: 'B.', globalDir, tools });
+  }
+  const list = await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: identityValidatePath });
+  const by = Object.fromEntries(list.map((p) => [p.name, p.loadout]));
+  expect(by).toMatchObject({ 'l-undecided': 'undecided', 'l-bare': 'bare', 'l-equipped': 'equipped', 'l-unbound': 'unbound' });
+});

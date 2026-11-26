@@ -146,3 +146,14 @@ describe('seed personas that save through an MCP tool', () => {
     });
   }
 });
+
+describe('loadout states', () => {
+  it('Bare (tools: none) is floor-only', () => {
+    const scope = buildPersonaToolScope(['none']);
+    assert.deepEqual(scope.tools, [...HEADLESS_TOOL_FLOOR]);
+  });
+
+  it('Unbound (tools: *) is unscoped', () => {
+    assert.equal(buildPersonaToolScope(['*']), null);
+  });
+});

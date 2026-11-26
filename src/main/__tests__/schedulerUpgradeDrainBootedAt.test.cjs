@@ -35,8 +35,8 @@ afterAll(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-function writePredatingRequest() {
-  const requestedAt = new Date(Date.parse(scheduler.SCHEDULER_BOOTED_AT) - 60_000).toISOString();
+function writeRequestAt(offsetMs) {
+  const requestedAt = new Date(Date.parse(scheduler.SCHEDULER_BOOTED_AT) + offsetMs).toISOString();
   fs.writeFileSync(schedulerPaths.restartRequestPath(), JSON.stringify({ reason: 't', requestedBy: 'test', requestedAt }));
 }
 
@@ -61,7 +61,7 @@ test('clearStaleDrainAtBoot passes bootedAt: SCHEDULER_BOOTED_AT to bootDrainAct
 });
 
 test('a request predating boot is aborted by one driveUpgradeDrain pass', async () => {
-  writePredatingRequest();
+  writeRequestAt(-60_000);
   const before = auditKinds().length;
   await scheduler.__driveUpgradeDrain({ jobs: [], drain: null });
   expect(fs.existsSync(schedulerPaths.restartRequestPath())).toBe(false);
@@ -71,11 +71,6 @@ test('a request predating boot is aborted by one driveUpgradeDrain pass', async 
   const state = await scheduler._mutateForTests((s) => ({ drain: s.drain ?? null }));
   expect(state?.drain ?? null).toBeNull();
 });
-
-function writeRequestAt(offsetMs) {
-  const requestedAt = new Date(Date.parse(scheduler.SCHEDULER_BOOTED_AT) + offsetMs).toISOString();
-  fs.writeFileSync(schedulerPaths.restartRequestPath(), JSON.stringify({ reason: 't', requestedBy: 'test', requestedAt }));
-}
 
 test('clearStaleDrainAtBoot with an active drain and a request predating boot retires it and clears the drain', async () => {
   writeRequestAt(-60_000);

@@ -22,3 +22,39 @@ test('negatives', () => {
   expect(detectSandboxEnvironmentLimit('')).toBeNull();
   expect(detectSandboxEnvironmentLimit(null)).toBeNull();
 });
+
+// ── sandboxLimitFromStreamJson ──
+const { sandboxLimitFromStreamJson, environmentLimitStamp, ENVIRONMENT_LIMIT_MESSAGE } = require('../sandboxEnvironmentLimit.cjs');
+const nodefs = require('node:fs');
+const nodepath = require('node:path');
+const j = (o) => JSON.stringify(o);
+const bashUse = (id) => j({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Bash', input: {} }] } });
+const readUse = (id) => j({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Read', input: {} }] } });
+const toolRes = (id, content, is_error = true) => j({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error, content }] } });
+
+test('stream: PRD_AUTHORING sandbox section read via Read -> null', () => {
+  const doc = nodefs.readFileSync(nodepath.join(__dirname, '../../../templates/PRD_AUTHORING.md'), 'utf8');
+  const i = doc.indexOf('Job sandbox limits');
+  expect(i).toBeGreaterThan(-1);
+  const section = doc.slice(i, i + 3000);
+  const log = [readUse('r1'), toolRes('r1', section, false)].join('\n');
+  expect(sandboxLimitFromStreamJson(log)).toBeNull();
+});
+test('stream: Bash error tool_result -> unix-socket', () => {
+  const log = [bashUse('b1'), toolRes('b1', [{ type: 'text', text: 'Traceback\nPermissionError: [Errno 1] Operation not permitted on socket(AF_UNIX)\n' }])].join('\n');
+  expect(sandboxLimitFromStreamJson(log).kind).toBe('unix-socket');
+});
+test('stream: final result FAIL reason -> claude-dir-write', () => {
+  const log = ['not json', j({ type: 'result', result: 'done\nSCHEDULER_VERDICT: FAIL sandbox blocks writes under .claude/skills, so the git mv could not run' })].join('\n');
+  expect(sandboxLimitFromStreamJson(log).kind).toBe('claude-dir-write');
+});
+test('stream: assistant text quoting the strings -> null', () => {
+  const log = j({ type: 'assistant', message: { content: [{ type: 'text', text: 'sandbox blocks writes under .claude/skills\nOperation not permitted socket(AF_UNIX)' }] } });
+  expect(sandboxLimitFromStreamJson(log)).toBeNull();
+});
+test('environmentLimitStamp', () => {
+  const lim = { kind: 'unix-socket', evidence: 'x' };
+  expect(environmentLimitStamp(lim, 'failed')).toEqual({ environmentLimit: lim, error: ENVIRONMENT_LIMIT_MESSAGE });
+  expect(environmentLimitStamp(lim, 'completed').environmentLimit).toBeNull();
+  expect(environmentLimitStamp(null, 'failed').environmentLimit).toBeNull();
+});

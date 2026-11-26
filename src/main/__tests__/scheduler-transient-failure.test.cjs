@@ -147,3 +147,12 @@ test('classifyFailureOutcome: launchError fails the launch before any transient 
   });
   assert.deepStrictEqual(decision, { action: 'fail-launch', launchError: 'argv_too_large' });
 });
+
+test('classifyFailureOutcome: environmentLimit beats transient retry; absent -> investigate', () => {
+  const base = { exitCode: 1, networkError: true, durationMs: 1000, transientRetries: 0, newlyDirtyCount: 0 };
+  const lim = { kind: 'unix-socket', evidence: 'x' };
+  const withLimit = classifyFailureOutcome({ ...base, environmentLimit: lim });
+  assert.equal(withLimit.action, 'fail-environment');
+  assert.equal(withLimit.environmentLimit, lim);
+  assert.equal(classifyFailureOutcome({ ...base, networkError: false }).action, 'investigate');
+});

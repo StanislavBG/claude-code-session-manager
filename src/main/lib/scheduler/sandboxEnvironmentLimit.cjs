@@ -28,4 +28,71 @@ function detectSandboxEnvironmentLimit(text) {
   return null;
 }
 
-module.exports = { detectSandboxEnvironmentLimit, ENVIRONMENT_LIMIT_MESSAGE };
+/** Run the per-line matcher over each decoded physical line of `text`. */
+function detectPerLine(text) {
+  if (typeof text !== 'string' || !text) return null;
+  for (const line of text.split(/\r?\n/)) {
+    const hit = detectSandboxEnvironmentLimit(line);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Detect a sandbox refusal in a stream-json log tail. Only text the sandbox
+ * itself produced is considered: decoded Bash tool_result content, and the
+ * executor's `SCHEDULER_VERDICT: FAIL <reason>` from the final result text.
+ * Text a job merely read (Read tool_result) or quoted (assistant text) is ignored.
+ * @param {string} text
+ * @returns {null | { kind: 'claude-dir-write'|'unix-socket'|'readonly-tmp', evidence: string }}
+ */
+function sandboxLimitFromStreamJson(text) {
+  if (typeof text !== 'string' || !text) return null;
+  const bashIds = new Set();
+  let hit = null;
+  let resultText = null;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line[0] !== '{') continue;
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; }
+    if (!ev || typeof ev !== 'object') continue;
+    if (ev.type === 'result' && typeof ev.result === 'string') { resultText = ev.result; continue; }
+    const content = ev.message && Array.isArray(ev.message.content) ? ev.message.content : null;
+    if (!content) continue;
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue;
+      if (ev.type === 'assistant' && item.type === 'tool_use' && item.name === 'Bash' && item.id) {
+        bashIds.add(item.id);
+      } else if (ev.type === 'user' && item.type === 'tool_result' && bashIds.has(item.tool_use_id)) {
+        if (hit) continue;
+        const body = typeof item.content === 'string'
+          ? item.content
+          : Array.isArray(item.content)
+            ? item.content.filter((b) => b && b.type === 'text').map((b) => b.text ?? '').join('')
+            : '';
+        hit = detectPerLine(body);
+      }
+    }
+  }
+  if (hit) return hit;
+  if (resultText) {
+    // Lazy require: runVerify.cjs is large.
+    const { scanSentinelReason } = require('../../runVerify.cjs');
+    return detectPerLine(scanSentinelReason({ resultText }, []));
+  }
+  return null;
+}
+
+/**
+ * Finalize stamp/clear decision for a job row.
+ * @returns {{ environmentLimit: object|null, error: string|null }}
+ */
+function environmentLimitStamp(sandboxLimit, status) {
+  if (sandboxLimit && (status === 'failed' || status === 'needs_review')) {
+    return { environmentLimit: sandboxLimit, error: ENVIRONMENT_LIMIT_MESSAGE };
+  }
+  return { environmentLimit: null, error: null };
+}
+
+module.exports = { detectSandboxEnvironmentLimit, sandboxLimitFromStreamJson, environmentLimitStamp, ENVIRONMENT_LIMIT_MESSAGE };

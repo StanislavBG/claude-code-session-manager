@@ -69,7 +69,7 @@ const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/cl
 // as the authoritative guarantee.
 ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/scheduler/launchFailure.cjs');
-const { detectSandboxEnvironmentLimit, ENVIRONMENT_LIMIT_MESSAGE } = require('./lib/scheduler/sandboxEnvironmentLimit.cjs');
+const { sandboxLimitFromStreamJson, environmentLimitStamp, ENVIRONMENT_LIMIT_MESSAGE } = require('./lib/scheduler/sandboxEnvironmentLimit.cjs');
 const { decideVerifyDowngrade } = require('./lib/scheduler/refireCap.cjs');
 const { finalizeReasonFor } = require('./lib/scheduler/finalizeReason.cjs');
 const { shouldRunFlatSweep, FLAT_SWEEP_INTERVAL_MS } = require('./lib/scheduler/flatSweepThrottle.cjs');
@@ -6995,7 +6995,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         removeSandboxTmp();
         // Only the OS-sandboxed run can hit a sandbox refusal; stamped at finalize if the row ends failed/needs_review.
         const sandboxLimit = sandboxMeta.level === 'os-sandbox'
-          ? detectSandboxEnvironmentLimit(readTail(logPath, 16384)) : null;
+          ? sandboxLimitFromStreamJson(readTail(logPath, 16384)) : null;
         resolve({
           exitCode: effectiveCode, durationMs, rateLimited, networkError, sandboxLimit, launchFailure: launchFailed, resultStats,
           leakedDescendants: leaked, sessionId, killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
@@ -9576,9 +9576,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // attribute" via its Array.isArray guard, same as an empty array.
           applyLeftoverFields(s.jobs[i2], newlyDirtyAll);
 
-          if (res.sandboxLimit && (effectiveStatus === 'failed' || effectiveStatus === 'needs_review')) {
-            s.jobs[i2].environmentLimit = res.sandboxLimit;
-            s.jobs[i2].error = ENVIRONMENT_LIMIT_MESSAGE;
+          const envStamp = environmentLimitStamp(res.sandboxLimit, effectiveStatus);
+          if (envStamp.environmentLimit) {
+            s.jobs[i2].environmentLimit = envStamp.environmentLimit;
+            s.jobs[i2].error = envStamp.error;
           } else {
             delete s.jobs[i2].environmentLimit;
           }

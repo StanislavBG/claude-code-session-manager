@@ -308,3 +308,47 @@ test('startObserved: an unheld tick then a held tick writes startObserved true',
   expect(ev).toHaveLength(1);
   expect(ev[0]).toMatchObject({ kind: 'auto_dispatch_hold_started', startObserved: true });
 });
+
+test('drift: resetsAt moving 40 s later on each of five held ticks writes one started event and no ended', async () => {
+  const base = minuteReset(7 * DAY + HOUR);
+  await reading(95, base);
+  queueOne();
+  await scheduler.tickQueue();
+  for (let i = 1; i <= 5; i += 1) {
+    await reading(95, base + i * 40_000);
+    await scheduler.tickQueue();
+  }
+  expect(holdEvents().map((e) => e.kind)).toEqual(['auto_dispatch_hold_started']);
+  const open = scheduler._getOpenAutoDispatchHoldForTests();
+  expect(open.resetsAt).toBe(new Date(base).toISOString());
+  expect(open.lastResetsAt).toBe(new Date(base + 5 * 40_000).toISOString());
+  expect(open.heldTicks).toBe(6);
+  const sidecar = JSON.parse(fs.readFileSync(schedulerPaths.schedulerStatePath(), 'utf8'));
+  expect(sidecar.openAutoDispatchHold.lastResetsAt).toBe(new Date(base + 5 * 40_000).toISOString());
+
+  await reading(10, base);
+  await scheduler.tickQueue();
+  const ended = holdEvents()[1];
+  expect(ended).toMatchObject({
+    kind: 'auto_dispatch_hold_ended',
+    resetsAt: new Date(base).toISOString(),
+    lastResetsAt: new Date(base + 5 * 40_000).toISOString(),
+  });
+});
+
+test('drift: a restored open hold without lastResetsAt continues under its resetsAt', async () => {
+  const reset = minuteReset(7 * DAY + HOUR);
+  await reading(96, reset);
+  queueOne();
+  await scheduler.tickQueue();
+  const p = schedulerPaths.schedulerStatePath();
+  const sidecar = JSON.parse(fs.readFileSync(p, 'utf8'));
+  delete sidecar.openAutoDispatchHold.lastResetsAt;
+  fs.writeFileSync(p, JSON.stringify(sidecar));
+  scheduler._forgetOpenAutoDispatchHoldForTests();
+  scheduler.loadSchedulerState();
+  expect(scheduler._getOpenAutoDispatchHoldForTests().lastResetsAt).toBe(new Date(reset).toISOString());
+  await reading(96, reset + 30_000);
+  await scheduler.tickQueue();
+  expect(holdEvents().map((e) => e.kind)).toEqual(['auto_dispatch_hold_started']);
+});

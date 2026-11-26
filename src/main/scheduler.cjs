@@ -1108,6 +1108,7 @@ function restoreOpenAutoDispatchHold(v) {
     window: typeof v.window === 'string' ? v.window : null,
     threshold: Number.isFinite(v.threshold) ? v.threshold : null,
     resetsAt: typeof v.resetsAt === 'string' ? v.resetsAt : null,
+    lastResetsAt: typeof v.lastResetsAt === 'string' ? v.lastResetsAt : (typeof v.resetsAt === 'string' ? v.resetsAt : null),
     startedAt: v.startedAt,
     maxPercent: Number.isFinite(v.maxPercent) ? v.maxPercent : null,
     heldTicks: Number.isFinite(v.heldTicks) ? v.heldTicks : 0,
@@ -1135,7 +1136,7 @@ function continuesOpenHold(open, hold) {
   if (!open || !hold) return false;
   if ((open.reason ?? null) !== (hold.reason ?? null)) return false;
   if ((open.window ?? null) !== (hold.window ?? null)) return false;
-  const a = open.resetsAt ?? null;
+  const a = open.lastResetsAt ?? open.resetsAt ?? null;
   const b = hold.resetsAt ?? null;
   const ta = a == null ? NaN : Date.parse(String(a));
   const tb = b == null ? NaN : Date.parse(String(b));
@@ -1157,6 +1158,8 @@ function trackAutoDispatchHoldAudit(hold, pending) {
     if (open && continuesOpenHold(open, hold)) {
       if (Number.isFinite(hold.percent) && (open.maxPercent == null || hold.percent > open.maxPercent)) open.maxPercent = hold.percent;
       open.heldTicks += 1;
+      open.lastResetsAt = hold.resetsAt ?? open.lastResetsAt;
+      persistSchedulerState();
       return;
     }
     if (open) {
@@ -1165,6 +1168,7 @@ function trackAutoDispatchHoldAudit(hold, pending) {
         window: open.window,
         threshold: open.threshold,
         resetsAt: open.resetsAt,
+        lastResetsAt: open.lastResetsAt ?? open.resetsAt,
         holdKey: open.holdKey,
         startedAt: open.startedAt,
         endedAt: new Date().toISOString(),
@@ -1194,6 +1198,7 @@ function trackAutoDispatchHoldAudit(hold, pending) {
         threshold: hold.threshold ?? null,
         baseThreshold: hold.baseThreshold ?? null,
         resetsAt: hold.resetsAt ?? null,
+        lastResetsAt: hold.resetsAt ?? null,
         startedAt: new Date().toISOString(),
         maxPercent: Number.isFinite(hold.percent) ? hold.percent : null,
         heldTicks: 1,
@@ -1259,6 +1264,7 @@ function persistSchedulerState() {
           window: openAutoDispatchHold.window,
           threshold: openAutoDispatchHold.threshold,
           resetsAt: openAutoDispatchHold.resetsAt,
+          lastResetsAt: openAutoDispatchHold.lastResetsAt,
           startedAt: openAutoDispatchHold.startedAt,
           maxPercent: openAutoDispatchHold.maxPercent,
           heldTicks: openAutoDispatchHold.heldTicks,

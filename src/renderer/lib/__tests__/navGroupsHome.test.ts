@@ -5,10 +5,10 @@ import type { NavFace } from '../navFace'
 const VALID_FACES: NavFace[] = ['home', 'project']
 
 describe('navGroups Home swap', () => {
-  it('first Workspace item is overview labeled Dashboard', () => {
+  it('first Workspace item is overview labeled Guild Hall', () => {
     const workspace = NAV_ITEMS.filter((item) => item.group === 'Workspace')
     expect(workspace[0]?.key).toBe('overview')
-    expect(workspace[0]?.label).toBe('Dashboard')
+    expect(workspace[0]?.label).toBe('Guild Hall')
   })
 
   it('project-home is labeled Project Home', () => {
@@ -47,7 +47,7 @@ describe('getNavItemsForFace', () => {
   })
 })
 
-describe('overview (Dashboard) is home-only', () => {
+describe('overview (Guild Hall) is home-only', () => {
   it('NAV_ITEMS tags overview with faces: [home]', () => {
     const item = NAV_ITEMS.find((i) => i.key === 'overview')
     expect(item?.faces).toEqual(['home'])

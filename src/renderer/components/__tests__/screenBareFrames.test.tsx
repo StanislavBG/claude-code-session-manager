@@ -21,6 +21,11 @@ describe('bare Claude config frames', () => {
     expect(hasSectionFrame(node)).toBe(false)
   })
 
+  it('app-settings renders inside SectionFrame', () => {
+    const node = renderScreenComponent('app-settings', ctx)
+    expect(isValidElement(node) && node.type).toBe(SectionFrame)
+  })
+
   it('history still renders inside SectionFrame', () => {
     const node = renderScreenComponent('history', ctx)
     expect(isValidElement(node) && node.type).toBe(SectionFrame)

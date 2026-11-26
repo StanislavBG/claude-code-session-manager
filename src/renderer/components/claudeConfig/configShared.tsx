@@ -132,8 +132,8 @@ export function ConfigSearchResults({ groups, loading, activeIndex, tabs, onChoo
                 onMouseEnter={() => onHover(i)}
                 className={`w-full text-left px-3.5 py-1.5 flex items-baseline gap-2 min-w-0 ${active ? 'bg-bg-elev' : ''}`}
               >
-                <span className="text-[13px] font-medium text-fg truncate">{item.title}</span>
-                {item.detail && <span className="text-[11.5px] text-fg-dim truncate">{item.detail}</span>}
+                <span className="text-[13px] font-medium text-fg shrink-0">{item.title}</span>
+                {item.detail && <span className="text-[11.5px] text-fg-dim min-w-0 truncate">{item.detail}</span>}
               </button>
             )
           })}

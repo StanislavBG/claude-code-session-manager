@@ -86,6 +86,17 @@ describe('ConfigSearchResults', () => {
     expect(container.textContent).toContain('No matches')
   })
 
+  it('keeps the title whole and truncates only the detail', () => {
+    act(() => {
+      root.render(<ConfigSearchResults groups={groups} loading={false} activeIndex={0} tabs={TABS} onChoose={vi.fn()} onHover={vi.fn()} />)
+    })
+    const [title, detail] = Array.from(container.querySelectorAll('[role="option"]')[0].querySelectorAll('span'))
+    expect(title.className).toContain('shrink-0')
+    expect(title.className).not.toContain('truncate')
+    expect(detail.className).toContain('truncate')
+    expect(detail.className).toContain('min-w-0')
+  })
+
   it('clicking a row chooses its item', () => {
     const onChoose = vi.fn()
     act(() => {

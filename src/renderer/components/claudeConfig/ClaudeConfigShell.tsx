@@ -97,103 +97,103 @@ export function ClaudeConfigShell<K extends string>({
   return (
     <div data-testid={testId} className="h-full w-full flex bg-bg text-fg">
       <div className="relative shrink-0 h-full">
-      <nav
-        data-testid="config-rail"
-        className="w-[264px] shrink-0 h-full bg-fg text-bg-hi flex flex-col"
-      >
-        <div className="flex flex-col gap-1 px-5 pt-6 pb-4">
-          <span className="text-[10.5px] font-semibold tracking-[0.1em] text-bg-hi/60">{eyebrow}</span>
-          <span className="font-serif text-[22px] font-medium leading-[1.15] text-bg-hi">{title}</span>
-          <span
-            data-testid="config-rail-path"
-            title={scopePath}
-            className="block font-mono text-xs text-rhythm whitespace-nowrap"
-          >
-            {compactScopePath(scopePath, RAIL_PATH_MAX_CHARS)}
-          </span>
-        </div>
-
-        <div className="relative px-5 pb-4">
-          <label className="flex items-center gap-2.5 w-full h-10 px-3 rounded-[10px] bg-bg/[0.08] border border-bg/[0.14] text-[13px] text-bg-hi/60 focus-within:border-bg/30">
-            <AlmanacIcon name="search" size={15} className="shrink-0" />
-            <input
-              ref={searchInputRef}
-              type="search"
-              aria-label="Search all config"
-              placeholder="Search all config"
-              value={searchQuery}
-              onChange={(e) => onSearch(e.target.value)}
-              onFocus={() => { setFocused(true); onSearchFocus() }}
-              onBlur={() => setFocused(false)}
-              onKeyDown={onFieldKeyDown}
-              className="flex-1 min-w-0 bg-transparent outline-none text-bg-hi placeholder:text-bg-hi/60"
-            />
-            <kbd className="font-mono text-[11px] px-1.5 py-px rounded border border-bg/20">/</kbd>
-          </label>
-        </div>
-
-        <div data-testid="config-rail-scroll" className="flex-1 min-h-0 overflow-y-auto px-5 py-1">
-        <div role="tablist" aria-orientation="vertical" aria-label={title} className="flex flex-col gap-1">
-          {tabs.map((tab, i) => {
-            const active = tab.key === activeKey
-            return (
-              <button
-                key={tab.key}
-                ref={(el) => { tabRefs.current[i] = el }}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                tabIndex={active ? 0 : -1}
-                data-testid={`config-rail-tab-${tab.key}`}
-                onClick={() => onSelect(tab.key)}
-                onKeyDown={(e) => onTabKeyDown(e, i)}
-                className={`w-full h-10 flex items-center gap-2.5 px-3 rounded-xl border border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-butter ${
-                  active ? 'bg-bg text-fg shadow-sm' : 'text-bg-elev hover:bg-bg/10'
-                }`}
-              >
-                <AlmanacIcon name={tab.icon} size={18} stroke={1.7} className={active ? 'text-fg' : 'text-rhythm'} />
-                <span data-testid="config-rail-tab-label" className="flex-1 min-w-0 truncate text-left text-[14px] font-semibold">{tab.label}</span>
-                {tab.count !== undefined && (
-                  <span
-                    data-testid="config-rail-count"
-                    className={`shrink-0 whitespace-nowrap font-mono text-xs px-[7px] py-0.5 rounded-md ${chipClass(active, !!tab.warn)}`}
-                  >
-                    {tab.count}
-                  </span>
-                )}
-                {tab.attention && (
-                  <span
-                    data-testid="config-rail-attention"
-                    aria-label="needs attention"
-                    className="w-[7px] h-[7px] rounded-full bg-butter"
-                  />
-                )}
-              </button>
-            )
-          })}
-        </div>
-        </div>
-
-        <div className="shrink-0 px-5 pt-2 pb-6">
-          <button
-            type="button"
-            onClick={() => setLearnOpen((v) => !v)}
-            className="text-[11px] font-semibold tracking-[0.08em] text-butter hover:underline"
-          >
-            LEARN
-          </button>
-        </div>
-      </nav>
-          {showPanel && (
-            <div
-              data-testid="config-search-panel"
-              // Keep focus in the field while a row is pressed, so the click still lands.
-              onMouseDown={(e) => e.preventDefault()}
-              className={`absolute left-full top-4 ml-2 w-[380px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-bg-hi text-fg shadow-lg whitespace-normal ${Z.dialog}`}
+        <nav
+          data-testid="config-rail"
+          className="w-[264px] shrink-0 h-full bg-fg text-bg-hi flex flex-col"
+        >
+          <div className="flex flex-col gap-1 px-5 pt-6 pb-4">
+            <span className="text-[10.5px] font-semibold tracking-[0.1em] text-bg-hi/60">{eyebrow}</span>
+            <span className="font-serif text-[22px] font-medium leading-[1.15] text-bg-hi">{title}</span>
+            <span
+              data-testid="config-rail-path"
+              title={scopePath}
+              className="block font-mono text-xs text-rhythm whitespace-nowrap"
             >
-              <ConfigSearchResults {...search.panelProps} tabs={tabs} />
+              {compactScopePath(scopePath, RAIL_PATH_MAX_CHARS)}
+            </span>
+          </div>
+
+          <div className="relative px-5 pb-4">
+            <label className="flex items-center gap-2.5 w-full h-10 px-3 rounded-[10px] bg-bg/[0.08] border border-bg/[0.14] text-[13px] text-bg-hi/60 focus-within:border-bg/30">
+              <AlmanacIcon name="search" size={15} className="shrink-0" />
+              <input
+                ref={searchInputRef}
+                type="search"
+                aria-label="Search all config"
+                placeholder="Search all config"
+                value={searchQuery}
+                onChange={(e) => onSearch(e.target.value)}
+                onFocus={() => { setFocused(true); onSearchFocus() }}
+                onBlur={() => setFocused(false)}
+                onKeyDown={onFieldKeyDown}
+                className="flex-1 min-w-0 bg-transparent outline-none text-bg-hi placeholder:text-bg-hi/60"
+              />
+              <kbd className="font-mono text-[11px] px-1.5 py-px rounded border border-bg/20">/</kbd>
+            </label>
+          </div>
+
+          <div data-testid="config-rail-scroll" className="flex-1 min-h-0 overflow-y-auto px-5 py-1">
+            <div role="tablist" aria-orientation="vertical" aria-label={title} className="flex flex-col gap-1">
+              {tabs.map((tab, i) => {
+                const active = tab.key === activeKey
+                return (
+                  <button
+                    key={tab.key}
+                    ref={(el) => { tabRefs.current[i] = el }}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    tabIndex={active ? 0 : -1}
+                    data-testid={`config-rail-tab-${tab.key}`}
+                    onClick={() => onSelect(tab.key)}
+                    onKeyDown={(e) => onTabKeyDown(e, i)}
+                    className={`w-full h-10 flex items-center gap-2.5 px-3 rounded-xl border border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-butter ${
+                      active ? 'bg-bg text-fg shadow-sm' : 'text-bg-elev hover:bg-bg/10'
+                    }`}
+                  >
+                    <AlmanacIcon name={tab.icon} size={18} stroke={1.7} className={active ? 'text-fg' : 'text-rhythm'} />
+                    <span data-testid="config-rail-tab-label" className="flex-1 min-w-0 truncate text-left text-[14px] font-semibold">{tab.label}</span>
+                    {tab.count !== undefined && (
+                      <span
+                        data-testid="config-rail-count"
+                        className={`shrink-0 whitespace-nowrap font-mono text-xs px-[7px] py-0.5 rounded-md ${chipClass(active, !!tab.warn)}`}
+                      >
+                        {tab.count}
+                      </span>
+                    )}
+                    {tab.attention && (
+                      <span
+                        data-testid="config-rail-attention"
+                        aria-label="needs attention"
+                        className="w-[7px] h-[7px] rounded-full bg-butter"
+                      />
+                    )}
+                  </button>
+                )
+              })}
             </div>
-          )}
+          </div>
+
+          <div className="shrink-0 px-5 pt-2 pb-6">
+            <button
+              type="button"
+              onClick={() => setLearnOpen((v) => !v)}
+              className="text-[11px] font-semibold tracking-[0.08em] text-butter hover:underline"
+            >
+              LEARN
+            </button>
+          </div>
+        </nav>
+        {showPanel && (
+          <div
+            data-testid="config-search-panel"
+            // Keep focus in the field while a row is pressed, so the click still lands.
+            onMouseDown={(e) => e.preventDefault()}
+            className={`absolute left-full top-4 ml-2 w-[380px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-bg-hi text-fg shadow-lg whitespace-normal ${Z.dialog}`}
+          >
+            <ConfigSearchResults {...search.panelProps} tabs={tabs} />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 min-w-0 h-full flex flex-col">

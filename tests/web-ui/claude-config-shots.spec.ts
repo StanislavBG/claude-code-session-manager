@@ -269,7 +269,8 @@ async function shortPane(page: Page) {
 
 /**
  * Short viewport: at 1592x560 the rail's content can overflow and scrolls vertically. End selects
- * the last tab; its box plus 2px (focus ring / shadow) must sit inside the rail's client box.
+ * the last tab; its box plus 2px (focus ring / shadow) must sit inside the `config-rail-scroll` box (the
+ * scrolling tab list), not the rail's client box.
  * Runs after every PNG of the face is written and writes none itself.
  */
 async function shortViewportTabs(page: Page) {
@@ -333,6 +334,8 @@ async function searchPanelShot(page: Page, face: Face, query: string, written: s
     return !!hit && el.contains(hit)
   })).toBe(true)
   expect(await rail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  const firstTitle = panel.locator('[role="option"]').first().locator('span').first()
+  expect(await firstTitle.evaluate((el) => el.scrollWidth <= el.clientWidth), 'first result title clipped').toBe(true)
   const labels = await rail.getByTestId('config-rail-tab-label').evaluateAll((els) => els.map((e) => [e.textContent, e.scrollWidth, e.clientWidth]))
   for (const [text, sw, cw] of labels) expect(sw as number, `label ${text}`).toBeLessThanOrEqual(cw as number)
   await page.waitForTimeout(200)

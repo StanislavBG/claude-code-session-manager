@@ -165,6 +165,17 @@ describe('scheduler_create_prds', () => {
     reply = { ok: false, applied: false, error: 'invalid PRD batch payload', details: 'not an array' };
     expect(textOf(await call({ prds: [prd('a')] }))).toContain('- [-1] (no slug): invalid PRD batch payload');
   });
+
+  it('prints the errors lines, not the details lines, when a refusal carries both', async () => {
+    reply = { ok: false, applied: false, error: 'invalid PRD batch payload',
+      errors: [{ index: 1, slug: 'b', error: 'dependsOn cycle' }],
+      details: [{ path: ['prds', 0, 'goal'], message: 'Required' }] };
+    const r = await call({ prds: [prd('a'), prd('b')] });
+    const t = textOf(r);
+    expect(r.isError).toBe(true);
+    expect(t).toContain('- [1] b: dependsOn cycle');
+    expect(t).not.toContain('goal: Required');
+  });
 });
 
 describe('scheduler_create_prd zod details', () => {
@@ -176,5 +187,27 @@ describe('scheduler_create_prd zod details', () => {
     const t = textOf(r);
     expect(calls[0].url).toBe('http://127.0.0.1:4321/admin/scheduler/create-prd');
     expect(t).toContain('- fixes[0].reason: String must contain at most 200 character(s)');
+  });
+
+  it('returns an ok:false refusal as isError with the JSON, detail lines and help pointer', async () => {
+    reply = { ok: false, error: 'invalid PRD payload', details: [
+      { path: ['goal'], message: 'Required' },
+    ] };
+    const r = await handleCallTool({ params: { name: 'scheduler_create_prd', arguments: prd('solo') } });
+    const t = textOf(r);
+    expect(r.isError).toBe(true);
+    expect(t).toContain(JSON.stringify(reply));
+    expect(t).toContain('- goal: Required');
+    expect(t).toMatch(/call session_manager_help[^\n]*$/);
+    expect(t).not.toContain('PRD file written');
+  });
+
+  it('returns successful creates (incl. alreadyExisted) as non-errors', async () => {
+    for (const r0 of [{ ok: true, filename: '7-solo.md' }, { ok: true, alreadyExisted: true, filename: '7-solo.md' }]) {
+      reply = r0;
+      const r = await handleCallTool({ params: { name: 'scheduler_create_prd', arguments: prd('solo') } });
+      expect(r.isError).toBeUndefined();
+      expect(textOf(r)).toBe(`${JSON.stringify(r0)} — PRD file written; the queue row is derived on the next scheduler reconcile pass, not by this call.`);
+    }
   });
 });

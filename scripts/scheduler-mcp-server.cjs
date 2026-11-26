@@ -2025,6 +2025,8 @@ async function handleCallTool(request) {
       if (issueLines) {
         text += `\nFix these fields and call again:\n${issueLines.join('\n')}`;
       }
+      // A refusal wrote nothing: return it as an error like scheduler_create_prds does.
+      if (result?.ok === false) return errorResult(text);
       return { content: [{ type: 'text', text }] };
     }
     if (name === 'scheduler_create_prds') {

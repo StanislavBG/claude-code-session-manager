@@ -2310,6 +2310,67 @@ describe('NewEpicCard last-used Agent default', () => {
     expect(sel(el, 'architect')).not.toBe('true')
   })
 
+  const wroteLast = () => cfg().writeJson.mock.calls.some(([, data]) => data && 'lastEpicAgent' in data)
+  const clickId = (el: HTMLElement, id: string) => act(() => (el.querySelector(`[data-testid="${id}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+  it('(g2) new-mode Save draft with a non-architect Agent never records lastEpicAgent', async () => {
+    lib()
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    pickAgent(el, 'builder')
+    act(() => setNativeValue(el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement, 'Half-written'))
+    clickId(el, 'new-epic-save-draft')
+    await act(async () => {})
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    expect(wroteLast()).toBe(false)
+  })
+
+  it('(h2) autosave on switch-out with a non-architect Agent never records lastEpicAgent', async () => {
+    lib()
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    pickAgent(el, 'builder')
+    act(() => setNativeValue(el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement, 'typed then left'))
+    act(() => root!.unmount())
+    root = createRoot(document.createElement('div'))
+    await act(async () => {})
+    expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    expect(createPromptSessionSpy.mock.calls[0][3]).toBe('NewEpicCard autosave')
+    expect(wroteLast()).toBe(false)
+  })
+
+  it('(i2) edit-mode Save draft never records lastEpicAgent', async () => {
+    lib()
+    const { composeEpicIntake } = await import('../../../lib/epicIntake')
+    const intake = composeEpicIntake({ title: 'T', goal: 'G', referencePaths: [], tag: undefined, agentName: 'builder', contextInjections: { 'delegate-implementation': false } as never })
+    const draft = { id: 'draft-7', cwd: CWD, goalText: intake.goalText, claudeSessionId: 'c7', status: 'proposed', createdAt: new Date().toISOString(), completedAt: null, agentType: 'builder', developLoop: false, openingPrompt: intake.openingPrompt, sections: intake.sections, source: 'NewEpicCard' } as never
+    const updateSpy = vi.fn(async () => ({}))
+    usePromptSessions.setState({ updateProposedDraft: updateSpy } as never)
+    const el = mount(<NewEpicCard draftEpic={draft} onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    act(() => setNativeValue(el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement, 'G v2'))
+    clickId(el, 'new-epic-save-draft')
+    await act(async () => {})
+    expect(updateSpy).toHaveBeenCalledTimes(1)
+    expect(wroteLast()).toBe(false)
+  })
+
+  it('(j) after Start with builder the reset card shows builder without a new prefs read', async () => {
+    lib()
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    pickAgent(el, 'builder')
+    // A card re-read after Start would pick this different stored value (the write's own merge-read is harmless).
+    prefsWith('dev-lead')
+    await start(el)
+    await act(async () => {})
+    expect(cfg().writeJson).toHaveBeenCalledWith(PREFS, expect.objectContaining({ lastEpicAgent: 'builder' }), 'ui-prefs')
+    expect((el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement).value).toBe('')
+    expect(sel(el, 'builder')).toBe('true')
+    expect(sel(el, 'architect')).not.toBe('true')
+    expect(sel(el, 'dev-lead')).not.toBe('true')
+  })
+
   it('(f) Start under just Claude writes nothing', async () => {
     lib()
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)

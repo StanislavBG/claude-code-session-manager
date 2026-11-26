@@ -47,7 +47,7 @@ const { isNonClaudeAgentCli } = require('../agent-cli/agentCliEvents.cjs');
 
 /**
  * The persona (body + model) this turn runs with — see the header's "Persona pin".
- * @returns {{ source: 'snapshot'|'live', agentSnapshotId: string|null, body: string|null, model: string, snapshotMissing?: true } | null}
+ * @returns {{ source: 'snapshot'|'live', agentSnapshotId: string|null, body: string|null, model: string, snapshot?: any, snapshotMissing?: true } | null}
  */
 function resolveTurnPersona(cwd, claudeSessionId, epic, deps) {
   if (epic && isNonClaudeAgentCli(epic.agentCli)) return null;
@@ -70,6 +70,8 @@ function resolveTurnPersona(cwd, claudeSessionId, epic, deps) {
     agentSnapshotId: id,
     body: typeof snap.body === 'string' && snap.body ? snap.body : null,
     model: model || modelResolve.FALLBACK_MODEL,
+    // The pinned snapshot itself: chatRunner reads gearBindsChat/loadout/tools/mcpServers/packs from it.
+    snapshot: snap,
   };
 }
 

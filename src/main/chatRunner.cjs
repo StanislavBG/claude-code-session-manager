@@ -56,6 +56,7 @@ const { developLoopOffSettingsArgs } = require('./lib/epic/developLoopSpawn.cjs'
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { planEpicSpawn, resolveEpicTurnModel } = require('./lib/epic/epicSpawnPlan.cjs');
+const { buildPersonaToolScope, personaToolScopeArgs, skillDenyArgs } = require('./lib/claude/personaToolScope.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const epicDepsSync = require('./lib/epic/epicDepsSync.cjs');
 const logs = require('./logs.cjs');
@@ -927,6 +928,29 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       ? cleanChildEnv({ PATH: pathWithUserBins(), SM_CHAT_SESSION_ID: sessionId, SM_PROJECT_ROOT: cwd, ...artifactsEnv, ...agentPlan.envExtra })
       : null;
 
+    // Gear binds chat (stamped snapshots only): same tool/MCP/pack/skill scope a job gets.
+    let gearArgs = [];
+    if (!isAgentCli && plan.persona && plan.persona.snapshot) {
+      try {
+        const gear = gearChatArgs({ snapshot: plan.persona.snapshot });
+        gearArgs = gear.args;
+        // Persona-declared packs load with the Epic's (as for jobs); known ones only.
+        const snapPacks = (Array.isArray(plan.persona.snapshot.packs) ? plan.persona.snapshot.packs.map(String) : [])
+          .filter((p) => !(agentEpic?.packs || []).map(String).includes(p));
+        if (gear.args.length && snapPacks.length) {
+          const extra = packSpawnArgs.composePackSpawnArgs({ packIds: snapPacks });
+          packPluginDirArgs = [...packPluginDirArgs, ...(Array.isArray(extra.pluginDirArgs) ? extra.pluginDirArgs : [])];
+          if (extra.laws) packLaws = packLaws ? `${packLaws}\n\n${extra.laws}` : extra.laws;
+        }
+        for (const message of gear.errors) {
+          try {
+            opsErrorLog.appendError({ cwd, scope: 'chatRunner', level: 'warn', code: 'capability_unknown', tabId, tags: [], message, meta: { sessionId } });
+          } catch { /* logging must never fail a turn */ }
+          if (!silent) broadcast('chat:run:notice', { tabId, sessionId, message });
+        }
+      } catch { gearArgs = []; }
+    }
+
     const useResume = plan.useResume;
     if (!agentPlan && useResume !== !!resume) {
       try {
@@ -949,6 +973,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         '--dangerously-skip-permissions',
         ...loopOffArgs,
         ...packPluginDirArgs,
+        ...gearArgs,
         ...(packLaws ? ['--append-system-prompt', packLaws] : []),
         '--output-format', 'stream-json',
         '--verbose',
@@ -1662,6 +1687,76 @@ function registerChatHandlers() {
 
 }
 
+const undecidedLogged = new Set();
+
+/**
+ * Gear for a chat turn (PRD 4768): the argv that gives an Epic whose pinned snapshot carries
+ * `gearBindsChat` the same scope a job gets — persona tools, strict MCP with the declared servers,
+ * packs' skill allow-list. HEADLESS_DISALLOWED_TOOLS is deliberately NOT applied to chat.
+ * Unstamped (older) snapshots and Unbound personas add nothing; Undecided runs unscoped.
+ * An unknown declared server/pack never crashes the turn: it is dropped and reported in `errors`.
+ * Pure apart from reading the pack catalog / seeded MCP entry (injectable for tests).
+ * @param {{ snapshot: any, deps?: { knownMcpServers?: Record<string, object>, listPacks?: () => { packs: any[] }, listUnpackedSkills?: () => string[], log?: (msg: string) => void } }} opts
+ * @returns {{ args: string[], errors: string[] }}
+ */
+function gearChatArgs({ snapshot, deps = {} }) {
+  const none = { args: [], errors: [] };
+  if (!snapshot || snapshot.gearBindsChat !== true) return none;
+  const loadout = snapshot.loadout;
+  if (loadout === 'unbound') return none;
+  if (loadout === 'undecided') {
+    const key = String(snapshot.name || '');
+    if (!undecidedLogged.has(key)) {
+      undecidedLogged.add(key);
+      try { (deps.log || ((m) => logs.writeLine({ scope: 'chatRunner', level: 'info', message: m })))(`persona "${key}" is undecided about gear; chat runs unscoped`); } catch { /* logging must never fail a turn */ }
+    }
+    return none;
+  }
+  let known = deps.knownMcpServers;
+  if (!known) {
+    try {
+      const seed = require('./seedSchedulerMcp.cjs');
+      known = { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
+    } catch { known = {}; }
+  }
+  let catalog = [];
+  try { catalog = (deps.listPacks || require('./lib/packs/packCatalog.cjs').listPacks)().packs || []; } catch { catalog = []; }
+  let unpacked = [];
+  try { unpacked = (deps.listUnpackedSkills || require('./lib/packs/packCatalog.cjs').listUnpackedSkills)(); } catch { unpacked = []; }
+  const packs = Array.isArray(snapshot.packs) ? snapshot.packs.map(String) : [];
+  const knownPackIds = new Set(catalog.map((p) => String(p.id)));
+  const declared = Array.isArray(snapshot.mcpServers) ? snapshot.mcpServers.map(String) : [];
+  const scope = buildPersonaToolScope(snapshot.tools, { loadout, disallowed: [] });
+  const attempt = personaToolScopeArgs(scope, { mcpServers: known, declaredServers: declared, packs, knownPacks: [...knownPackIds] });
+  /** @type {string[]} */ const errors = [];
+  let scopeArgs = attempt.args;
+  let equipped = packs;
+  if (attempt.refusal) {
+    // Run without the unknown capability instead of failing the turn: drop it and re-derive.
+    const bad = new Set();
+    let r = attempt.refusal;
+    let guard = 0;
+    let curDeclared = declared;
+    let curPacks = packs;
+    let curScope = scope;
+    let cur = attempt;
+    while (r && guard++ < 50) {
+      bad.add(r.name);
+      errors.push(`Gear: "${r.name}" is not available; this turn runs without it.`);
+      curDeclared = curDeclared.filter((d) => d !== r.name);
+      curPacks = curPacks.filter((p) => p !== r.name);
+      curScope = curScope ? { tools: curScope.tools.filter((t) => !(t.startsWith('mcp__') && t.slice(5).split('__')[0] === r.name) && t !== r.name) } : curScope;
+      cur = personaToolScopeArgs(curScope, { mcpServers: known, declaredServers: curDeclared, packs: curPacks, knownPacks: [...knownPackIds] });
+      r = cur.refusal;
+    }
+    scopeArgs = cur.args;
+    equipped = curPacks;
+  }
+  const installedSkills = [...new Set([...catalog.flatMap((p) => p.skills || []), ...unpacked].map(String))];
+  const deny = skillDenyArgs({ installedSkills, equippedPacks: equipped, packCatalog: catalog, loadout });
+  return { args: [...scopeArgs, ...deny], errors };
+}
+
 module.exports = {
   run,
   cancel,
@@ -1673,6 +1768,7 @@ module.exports = {
   registerChatHandlers,
   noteChatRunOrigin,
   turnInstructionFor,
+  gearChatArgs,
   shouldFollowUp,
   parseStopSignal,
   splitStopSignal,

@@ -1,6 +1,5 @@
 /**
- * HomeClaudeConfig — Home's one "Claude config" page over `~/.claude`: the dark
- * ConfigBand plus six tabs, each mounting the existing page for that area at
+ * HomeClaudeConfig — Home's one "Claude config" page over `~/.claude`: the ClaudeConfigShell rail plus six tabs, each mounting the existing page for that area at
  * user scope (design-mocks/claude-config/DESIGN_SPEC.md §1.2, §2). The four
  * retired Home rows (system-prompt / settings / extensions / agent-library)
  * route here through lib/navGroups.ts's NAV_KEY_ALIASES.
@@ -8,19 +7,17 @@
  * Per-tab redesign is NOT here — each tab renders today's page as it is.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ClaudeConfigShell } from '../claudeConfig/ClaudeConfigShell'
 import {
-  ConfigBand,
-  ConfigSearchResults,
   useConfigSearch,
   claudeMdChip,
   countClaudeMdFiles,
   countSettingsKeys,
   mcpNeedsAttention,
-  type ConfigBandTab,
-} from '../claudeConfig/ConfigBand'
+  type ConfigTabSpec,
+} from '../claudeConfig/configShared'
 import { loadConfigSearchItems, type ConfigSearchItem } from '../../lib/configSearch'
 import { useConfigSearchFocus } from '../../state/configSearchFocus'
-import { LearningBody } from '../LearningPanel'
 import { LEARNING_CONTENT } from '../learningContent'
 import { useLayout } from '../../state/layout'
 import { useExtensionCounts } from '../../lib/useExtensionCounts'
@@ -92,7 +89,6 @@ const loadHomeSearchItems = () => loadConfigSearchItems({ scope: 'home', cwd: nu
 function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: HomeConfigTab }) {
   const [tab, setTab] = useState<HomeConfigTab>(initialTab)
   const [drawer, setDrawer] = useState(false)
-  const [learnOpen, setLearnOpen] = useState(false)
   const [mcpCtx, setMcpCtx] = useState<McpAddContext>({ scope: 'user', cwd: null })
 
   const counts = useExtensionCounts()
@@ -115,7 +111,6 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
   const closeDrawer = useCallback(() => setDrawer(false), [])
   const add = useCallback(() => setDrawer(true), [])
   const addMcp = useCallback((ctx: McpAddContext) => { setMcpCtx(ctx); setDrawer(true) }, [])
-  const toggleLearn = useCallback(() => setLearnOpen((o) => !o), [])
   // A chosen search result opens its tab and leaves its id for that tab to select.
   const chooseResult = useCallback((item: ConfigSearchItem) => {
     if (!isHomeConfigTab(item.tab)) return
@@ -124,8 +119,8 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
   }, [selectTab])
   const search = useConfigSearch({ load: loadHomeSearchItems, loadKey: 'home', onChoose: chooseResult })
 
-  const bandTabs = useMemo<ConfigBandTab<HomeConfigTab>[]>(() => {
-    const extra: Record<HomeConfigTab, Partial<ConfigBandTab<HomeConfigTab>>> = {
+  const bandTabs = useMemo<ConfigTabSpec<HomeConfigTab>[]>(() => {
+    const extra: Record<HomeConfigTab, Partial<ConfigTabSpec<HomeConfigTab>>> = {
       'claude-md': claudeMdChip(files.claudeMd),
       settings: { count: asCount(files.settings) },
       mcp: { count: asCount(counts.mcp), attention: mcpAttention },
@@ -140,40 +135,34 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
   const drawerTab: DrawerTab | null = tab === 'skills' || tab === 'mcp' || tab === 'plugins' ? tab : null
 
   return (
-    <div className="h-full w-full flex flex-col bg-bg text-fg" data-testid="home-claude-config">
-      <ConfigBand
-        eyebrow="CLAUDE CODE · GLOBAL"
-        title="Claude config"
-        scopePath="~/.claude"
-        tabs={bandTabs}
-        activeKey={tab}
-        onSelect={selectTab}
-        onLearn={toggleLearn}
-        {...search.bandProps}
-        searchPanel={<ConfigSearchResults {...search.panelProps} tabs={bandTabs} />}
-      />
-      {learnOpen && learn && (
-        <div className="shrink-0 border-b border-line bg-bg-elev px-7 py-4 max-h-[40vh] overflow-y-auto" data-testid="home-claude-config-learn">
-          <LearningBody content={learn} />
-        </div>
-      )}
-      <div className="flex-1 min-h-0 px-8 py-6" data-testid={`home-claude-config-panel-${tab}`}>
-        {tab === 'claude-md' && <SystemPrompt />}
-        {tab === 'settings' && <Settings scope="user" />}
-        {tab === 'mcp' && <McpServers onAdd={addMcp} scope="user" />}
-        {tab === 'skills' && <Skills onAdd={add} scope="user" />}
-        {/* A plugin card's skills/MCP chip switches to the tab that lists them. */}
-        {tab === 'plugins' && <Plugins onAdd={add} onJump={selectTab} />}
-        {tab === 'agents' && <AgentLibrary />}
-      </div>
-      {drawerTab && (
-        <HomeSessionDrawer open={drawer} onClose={closeDrawer} title={DRAWER_TITLE[drawerTab]} keyVals={[]}>
-          {drawerTab === 'skills' && <SkillsLibrary />}
-          {drawerTab === 'mcp' && <McpLibrary scope={mcpCtx.scope} cwd={mcpCtx.cwd} />}
-          {drawerTab === 'plugins' && <PluginsLibrary />}
-        </HomeSessionDrawer>
-      )}
-    </div>
+    <ClaudeConfigShell
+      testId="home-claude-config"
+      eyebrow="CLAUDE CODE · GLOBAL"
+      title="Claude config"
+      scopePath="~/.claude"
+      tabs={bandTabs}
+      activeKey={tab}
+      onSelect={selectTab}
+      search={search}
+      learn={learn}
+      drawer={
+        drawerTab && (
+          <HomeSessionDrawer open={drawer} onClose={closeDrawer} title={DRAWER_TITLE[drawerTab]} keyVals={[]}>
+            {drawerTab === 'skills' && <SkillsLibrary />}
+            {drawerTab === 'mcp' && <McpLibrary scope={mcpCtx.scope} cwd={mcpCtx.cwd} />}
+            {drawerTab === 'plugins' && <PluginsLibrary />}
+          </HomeSessionDrawer>
+        )
+      }
+    >
+      {tab === 'claude-md' && <SystemPrompt />}
+      {tab === 'settings' && <Settings scope="user" />}
+      {tab === 'mcp' && <McpServers onAdd={addMcp} scope="user" />}
+      {tab === 'skills' && <Skills onAdd={add} scope="user" />}
+      {/* A plugin card's skills/MCP chip switches to the tab that lists them. */}
+      {tab === 'plugins' && <Plugins onAdd={add} onJump={selectTab} />}
+      {tab === 'agents' && <AgentLibrary />}
+    </ClaudeConfigShell>
   )
 }
 

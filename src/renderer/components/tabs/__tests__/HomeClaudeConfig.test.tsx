@@ -94,7 +94,7 @@ const q = (id: string) => host.querySelector(`[data-testid="${id}"]`)
 describe('HomeClaudeConfig', () => {
   it('renders the band with the global eyebrow, title and ~/.claude path', () => {
     act(() => root.render(createElement(HomeClaudeConfig)))
-    const band = q('config-band')!
+    const band = q('config-rail')!
     expect(band.textContent).toContain('CLAUDE CODE · GLOBAL')
     expect(band.textContent).toContain('Claude config')
     expect(band.textContent).toContain('~/.claude')
@@ -109,7 +109,7 @@ describe('HomeClaudeConfig', () => {
     ['agents', 'AgentLibrary'],
   ])('tab %s mounts %s', (tab, page) => {
     act(() => root.render(createElement(HomeClaudeConfig)))
-    act(() => (q(`config-band-tab-${tab}`) as HTMLButtonElement).click())
+    act(() => (q(`config-rail-tab-${tab}`) as HTMLButtonElement).click())
     expect(q(`page-${page}`)).not.toBeNull()
     expect(host.querySelectorAll('[data-testid^="page-"]').length).toBe(1)
   })
@@ -117,19 +117,19 @@ describe('HomeClaudeConfig', () => {
   it('mounts Settings, MCP and Skills at user scope', () => {
     act(() => root.render(createElement(HomeClaudeConfig, { initialTab: 'settings' })))
     expect(q('page-Settings')?.getAttribute('data-scope')).toBe('user')
-    act(() => (q('config-band-tab-mcp') as HTMLButtonElement).click())
+    act(() => (q('config-rail-tab-mcp') as HTMLButtonElement).click())
     expect(q('page-McpServers')?.getAttribute('data-scope')).toBe('user')
-    act(() => (q('config-band-tab-skills') as HTMLButtonElement).click())
+    act(() => (q('config-rail-tab-skills') as HTMLButtonElement).click())
     expect(q('page-Skills')?.getAttribute('data-scope')).toBe('user')
   })
 
   it('tab counts come from the data hooks', () => {
     act(() => root.render(createElement(HomeClaudeConfig)))
-    const count = (tab: string) => q(`config-band-tab-${tab}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
+    const count = (tab: string) => q(`config-rail-tab-${tab}`)?.querySelector('[data-testid="config-rail-count"]')?.textContent
     expect([count('mcp'), count('skills'), count('plugins'), count('agents')]).toEqual(['3', '7', '2', '4'])
   })
 
-  const tabCount = (tab: string) => q(`config-band-tab-${tab}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
+  const tabCount = (tab: string) => q(`config-rail-tab-${tab}`)?.querySelector('[data-testid="config-rail-count"]')?.textContent
   const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)) }) }
 
   it("CLAUDE.md shows 'N files': the file plus its imports that resolve", async () => {
@@ -167,12 +167,12 @@ describe('HomeClaudeConfig', () => {
       },
     })
     act(() => root.render(createElement(HomeClaudeConfig)))
-    expect(q('config-band-tab-mcp')?.querySelector('[data-testid="config-band-attention"]') != null).toBe(dot)
+    expect(q('config-rail-tab-mcp')?.querySelector('[data-testid="config-rail-attention"]') != null).toBe(dot)
   })
 
   it('no MCP attention dot before any server is checked', () => {
     act(() => root.render(createElement(HomeClaudeConfig)))
-    expect(q('config-band-attention')).toBeNull()
+    expect(q('config-rail-attention')).toBeNull()
   })
 
   it('a deep link to a retired key opens Claude config on the matching tab', () => {

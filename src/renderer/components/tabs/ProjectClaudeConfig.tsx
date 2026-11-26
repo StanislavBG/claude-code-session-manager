@@ -2,7 +2,7 @@
  * ProjectClaudeConfig — the Project face's one home for this project's own Claude Code
  * files (NavKey `memory`, labeled "Claude config"). Home edits only ~/.claude; every file
  * the claude CLI reads from THIS project's directory is edited here. The page frame is the
- * shared dark ConfigBand (design-mocks/claude-config/DESIGN_SPEC.md §1.3, §2) with five
+ * shared ClaudeConfigShell left rail (design-mocks/claude-config/DESIGN_SPEC.md §1.3, §2) with five
  * tabs and live counts; Plugins and Agents are machine-wide and live on Home only. Each tab
  * reuses the component Home uses, with the project scope passed in; each tab's own left-column
  * file card names its real file and, where the tab has one, owns the Project/Local choice:
@@ -19,19 +19,17 @@
  * - Skills    — Skills at project scope (<cwd>/.claude/skills/).
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ClaudeConfigShell } from '../claudeConfig/ClaudeConfigShell'
 import {
-  ConfigBand,
-  ConfigSearchResults,
   useConfigSearch,
   claudeMdChip,
   countClaudeMdFiles,
   countSettingsKeys,
   mcpNeedsAttention,
-  type ConfigBandTab,
-} from '../claudeConfig/ConfigBand'
+  type ConfigTabSpec,
+} from '../claudeConfig/configShared'
 import { loadConfigSearchItems, type ConfigSearchItem } from '../../lib/configSearch'
 import { useConfigSearchFocus } from '../../state/configSearchFocus'
-import { LearningBody } from '../LearningPanel'
 import { LEARNING_CONTENT } from '../learningContent'
 import { shortenHome } from '../ui/SourceChip'
 import { EmptyState } from '../ui/EmptyState'
@@ -249,7 +247,6 @@ function ProjectClaudeConfigComponent() {
   const [mdScope, setMdScope] = useState<ProjectScope>('project')
   const [settingsScope, setSettingsScope] = useState<ProjectScope>('project')
   const [mcpAdd, setMcpAdd] = useState<McpAddContext | null>(null)
-  const [learnOpen, setLearnOpen] = useState(false)
   const counts = useProjectConfigCounts(cwd)
   const mcpResults = useMcpChecks(selectMcpCheckResults)
   const mcpAttention = useMemo(() => mcpNeedsAttention(mcpResults), [mcpResults])
@@ -261,7 +258,6 @@ function ProjectClaudeConfigComponent() {
   usePanelTabHint('memory', (t) => { if (isConfigTab(t)) selectTab(t) })
   const openMcpAdd = useCallback((ctx: McpAddContext) => setMcpAdd(ctx), [])
   const closeMcpAdd = useCallback(() => setMcpAdd(null), [])
-  const toggleLearn = useCallback(() => setLearnOpen((o) => !o), [])
   // A chosen search result opens its tab and leaves its id for that tab to select.
   const chooseResult = useCallback((item: ConfigSearchItem) => {
     if (!isConfigTab(item.tab)) return
@@ -274,8 +270,8 @@ function ProjectClaudeConfigComponent() {
   )
   const search = useConfigSearch({ load: loadSearchItems, loadKey: cwd ?? '', onChoose: chooseResult })
 
-  const bandTabs = useMemo<ConfigBandTab<ConfigTab>[]>(() => {
-    const countOf: Record<ConfigTab, Partial<ConfigBandTab<ConfigTab>>> = {
+  const bandTabs = useMemo<ConfigTabSpec<ConfigTab>[]>(() => {
+    const countOf: Record<ConfigTab, Partial<ConfigTabSpec<ConfigTab>>> = {
       memory: { count: asCount(counts.memory), attention: counts.memoryAttention },
       'claude-md': claudeMdChip(counts.claudeMd),
       settings: { count: asCount(counts.settings[settingsScope]) },
@@ -298,34 +294,28 @@ function ProjectClaudeConfigComponent() {
   const learn = LEARNING_CONTENT.memory
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-bg text-fg" data-testid="project-claude-config">
-      <ConfigBand
-        eyebrow="CLAUDE CODE · PROJECT"
-        title="Claude config"
-        scopePath={shortenHome(cwd, home)}
-        tabs={bandTabs}
-        activeKey={tab}
-        onSelect={selectTab}
-        onLearn={toggleLearn}
-        {...search.bandProps}
-        searchPanel={<ConfigSearchResults {...search.panelProps} tabs={bandTabs} />}
-      />
-      {learnOpen && learn && (
-        <div className="shrink-0 border-b border-line bg-bg-elev px-7 py-4 max-h-[40vh] overflow-y-auto" data-testid="project-claude-config-learn">
-          <LearningBody content={learn} />
-        </div>
-      )}
-      <div className="flex-1 min-h-0" data-testid={`project-claude-config-panel-${tab}`}>
-        {tab === 'memory' && <Memory />}
-        {tab === 'claude-md' && <ClaudeMdTab home={home} cwd={cwd} scope={mdScope} onScopeChange={setMdScope} />}
-        {tab === 'settings' && <SettingsTab scope={settingsScope} onScopeChange={setSettingsScope} />}
-        {tab === 'mcp' && <McpServers scope="project" onAdd={openMcpAdd} />}
-        {tab === 'skills' && <Skills scope="project" />}
-      </div>
-      <HomeSessionDrawer open={mcpAdd !== null} onClose={closeMcpAdd} title="Add MCP server" keyVals={[]}>
-        {mcpAdd && <McpLibrary scope={mcpAdd.scope} cwd={mcpAdd.cwd} />}
-      </HomeSessionDrawer>
-    </div>
+    <ClaudeConfigShell
+      testId="project-claude-config"
+      eyebrow="CLAUDE CODE · PROJECT"
+      title="Claude config"
+      scopePath={shortenHome(cwd, home)}
+      tabs={bandTabs}
+      activeKey={tab}
+      onSelect={selectTab}
+      search={search}
+      learn={learn}
+      drawer={
+        <HomeSessionDrawer open={mcpAdd !== null} onClose={closeMcpAdd} title="Add MCP server" keyVals={[]}>
+          {mcpAdd && <McpLibrary scope={mcpAdd.scope} cwd={mcpAdd.cwd} />}
+        </HomeSessionDrawer>
+      }
+    >
+      {tab === 'memory' && <Memory />}
+      {tab === 'claude-md' && <ClaudeMdTab home={home} cwd={cwd} scope={mdScope} onScopeChange={setMdScope} />}
+      {tab === 'settings' && <SettingsTab scope={settingsScope} onScopeChange={setSettingsScope} />}
+      {tab === 'mcp' && <McpServers scope="project" onAdd={openMcpAdd} />}
+      {tab === 'skills' && <Skills scope="project" />}
+    </ClaudeConfigShell>
   )
 }
 

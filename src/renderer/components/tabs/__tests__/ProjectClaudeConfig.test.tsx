@@ -105,11 +105,11 @@ async function mount(node: ReactNode = createElement(ProjectClaudeConfig)) {
 const q = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const chips = () => Array.from(container.querySelectorAll('[data-testid="source-chip-path"]')).map((c) => c.textContent)
 const tabLabel = (b: Element) => b.querySelector('span.font-semibold')?.textContent?.trim()
-/** Clicks a ConfigBand tab. */
+/** Clicks a rail tab. */
 async function pick(label: string) {
-  const band = Array.from(q('config-band')?.querySelectorAll('[role="tab"]') ?? []) as HTMLElement[]
+  const band = Array.from(q('config-rail')?.querySelectorAll('[role="tab"]') ?? []) as HTMLElement[]
   const b = band.find((x) => tabLabel(x) === label)
-  if (!b) throw new Error(`no band tab "${label}"`)
+  if (!b) throw new Error(`no rail tab "${label}"`)
   await act(async () => { b.click() })
   await flush()
 }
@@ -166,7 +166,7 @@ describe('ProjectClaudeConfig', () => {
     // The screen is lazy-loaded; give the chunk a few turns to resolve.
     for (let i = 0; i < 20 && !q('project-claude-config'); i++) await flush(1)
     expect(q('project-claude-config')).not.toBeNull()
-    expect(container.querySelector('h1, h2')?.textContent).toBe('Claude config')
+    expect(q('config-rail')?.textContent).toContain('Claude config')
   })
 
   it('renders ConfigBand over the project path with exactly Memory, CLAUDE.md, Settings, MCP, Skills and live counts', async () => {
@@ -185,17 +185,17 @@ describe('ProjectClaudeConfig', () => {
       entries: p.endsWith('/.claude/commands') ? [{ name: 'go.md', isDir: false }, { name: 'x.txt', isDir: false }] : [],
     }))
     await mount()
-    const band = q('config-band')!
+    const band = q('config-rail')!
     expect(band.textContent).toContain('CLAUDE CODE · PROJECT')
     expect(band.textContent).toContain('Claude config')
     expect(band.textContent).toContain(SHORT)
     const tabs = Array.from(band.querySelectorAll('[role="tab"]'))
     expect(tabs.map(tabLabel)).toEqual(['Memory', 'CLAUDE.md', 'Settings', 'MCP', 'Skills'])
     // Plugins and Agents are machine-wide: Home only.
-    expect(q('config-band-tab-plugins')).toBeNull()
-    expect(q('config-band-tab-agents')).toBeNull()
+    expect(q('config-rail-tab-plugins')).toBeNull()
+    expect(q('config-rail-tab-agents')).toBeNull()
     expect(tabs.some((t) => /Plugins|Agents/.test(t.textContent ?? ''))).toBe(false)
-    const countOf = (key: string) => q(`config-band-tab-${key}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
+    const countOf = (key: string) => q(`config-rail-tab-${key}`)?.querySelector('[data-testid="config-rail-count"]')?.textContent
     expect(countOf('memory')).toBe('3')
     expect(countOf('claude-md')).toBe('1 file')
     // The selected (Project) scope's .claude/settings.json sets two keys.
@@ -207,8 +207,8 @@ describe('ProjectClaudeConfig', () => {
     expect(q('project-claude-config-source')).toBeNull()
   })
 
-  const countOf = (key: string) => q(`config-band-tab-${key}`)?.querySelector('[data-testid="config-band-count"]')?.textContent
-  const dotOn = (key: string) => q(`config-band-tab-${key}`)?.querySelector('[data-testid="config-band-attention"]') != null
+  const countOf = (key: string) => q(`config-rail-tab-${key}`)?.querySelector('[data-testid="config-rail-count"]')?.textContent
+  const dotOn = (key: string) => q(`config-rail-tab-${key}`)?.querySelector('[data-testid="config-rail-attention"]') != null
 
   it("CLAUDE.md counts each present file plus its resolved @-imports as 'N files'", async () => {
     api.config.parseImports.mockImplementation(async (p: string) => ({
@@ -285,7 +285,7 @@ describe('ProjectClaudeConfig', () => {
   it('marks CLAUDE.md missing when neither project file exists', async () => {
     api.config.exists.mockResolvedValue(false)
     await mount()
-    expect(q('config-band-tab-claude-md')?.querySelector('[data-testid="config-band-count"]')?.textContent).toBe('missing')
+    expect(q('config-rail-tab-claude-md')?.querySelector('[data-testid="config-rail-count"]')?.textContent).toBe('missing')
   })
 
   it('mounts all five tabs with no source strip under the band; radio rows own the Project / Local choice', async () => {
@@ -393,7 +393,7 @@ describe('ProjectClaudeConfig', () => {
     useSessions.setState({ tabs: [], activeTabId: null })
     await mount()
     expect(container.textContent).toContain('no active project')
-    expect(q('config-band')).toBeNull()
+    expect(q('config-rail')).toBeNull()
   })
 
   describe('Search all config', () => {

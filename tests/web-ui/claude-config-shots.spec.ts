@@ -266,24 +266,24 @@ async function shortPane(page: Page) {
 }
 
 /**
- * Narrow tab strip (wave-9 Minor 4): at 1100px wide the band's tablist scrolls horizontally, and a
- * scroller clips at its padding box. Focus the active tab from the keyboard and check its box plus
- * 2px (the focus ring / shadow) sits inside the tablist's client box vertically. Runs after every
- * PNG is written and writes none itself.
+ * Short viewport: at 1592x560 the rail's content can overflow and scrolls vertically. End selects
+ * the last tab; its box plus 2px (focus ring / shadow) must sit inside the rail's client box.
+ * Runs after every PNG of the face is written and writes none itself.
  */
-async function narrowTabStrip(page: Page) {
-  await page.setViewportSize({ width: 1100, height: VIEWPORT.height })
-  const list = page.getByTestId('config-band').locator('[role="tablist"]')
-  const active = list.locator('[role="tab"][aria-selected="true"]')
-  await active.focus()
-  await page.keyboard.press('End') // keyboard focus → :focus-visible ring; End keeps the last tab active
-  await expect(list.locator('[role="tab"][aria-selected="true"]')).toBeFocused()
-  const box = await list.evaluate((el) => {
+async function shortViewportTabs(page: Page) {
+  await page.setViewportSize({ width: VIEWPORT.width, height: 560 })
+  const rail = page.getByTestId('config-rail')
+  await rail.locator('[role="tab"][aria-selected="true"]').focus()
+  await page.keyboard.press('End') // keyboard focus -> :focus-visible ring
+  const last = rail.locator('[role="tab"]').last()
+  await expect(last).toHaveAttribute('aria-selected', 'true')
+  await expect(last).toBeFocused()
+  await last.scrollIntoViewIfNeeded()
+  const box = await rail.evaluate((el) => {
     const r = el.getBoundingClientRect()
-    return { top: r.top + el.clientTop, bottom: r.top + el.clientTop + el.clientHeight, scrolls: el.scrollWidth > el.clientWidth }
+    return { top: r.top + el.clientTop, bottom: r.top + el.clientTop + el.clientHeight }
   })
-  expect(box.scrolls).toBe(true)
-  const tab = await list.locator('[role="tab"][aria-selected="true"]').boundingBox()
+  const tab = await last.boundingBox()
   expect(tab!.y - 2).toBeGreaterThanOrEqual(box.top)
   expect(tab!.y + tab!.height + 2).toBeLessThanOrEqual(box.bottom)
 }
@@ -294,7 +294,7 @@ async function narrowTabStrip(page: Page) {
  * read-only note, then shoot it. Leaves the Agents tab open again for the checks that follow.
  */
 async function homeImportShot(page: Page, written: string[]) {
-  await page.getByTestId('config-band-tab-claude-md').click()
+  await page.getByTestId('config-rail-tab-claude-md').click()
   const panel = page.getByTestId('home-claude-config-panel-claude-md')
   const first = panel.getByTestId('referenced-file-row').first()
   await expect(first).toContainText('git.md')
@@ -311,7 +311,7 @@ async function homeImportShot(page: Page, written: string[]) {
   const file = path.join(OUT, 'home-claude-md-import.png')
   await page.screenshot({ path: file })
   written.push(file)
-  await page.getByTestId('config-band-tab-agents').click()
+  await page.getByTestId('config-rail-tab-agents').click()
   await expect(page.getByTestId('home-claude-config-panel-agents')).toBeVisible()
 }
 
@@ -344,21 +344,33 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
       await page.goto(`http://fx.test/#${face}`)
       await page.addScriptTag({ content: bundle })
 
-      const band = page.getByTestId('config-band')
+      const band = page.getByTestId('config-rail')
+      const root = page.getByTestId(`${face}-claude-config`)
       await expect(band).toContainText(spec.eyebrow)
       await expect(band).toContainText(spec.scope)
       // Scope path shows whole (the last folder names the scope) — not clipped by CSS.
-      const scopePath = band.getByTestId('config-band-path')
+      const scopePath = band.getByTestId('config-rail-path')
       await expect(scopePath).toHaveText(spec.scope)
       await expect(scopePath).toHaveAttribute('title', spec.scope)
       const clip = await scopePath.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
       expect(clip.scroll).toBeLessThanOrEqual(clip.client)
       for (const [tab, count] of Object.entries(spec.counts)) {
-        await expect(page.getByTestId(`config-band-tab-${tab}`).getByTestId('config-band-count')).toHaveText(count)
+        await expect(page.getByTestId(`config-rail-tab-${tab}`).getByTestId('config-rail-count')).toHaveText(count)
+      }
+
+      // Rail geometry: left of the panel, nothing above it, tabs stacked vertically.
+      const railBox = (await band.boundingBox())!
+      const rootBox = (await root.boundingBox())!
+      expect(Math.abs(railBox.y - rootBox.y)).toBeLessThanOrEqual(1)
+      let prev: { y: number; height: number } | null = null
+      for (const el of await band.locator('[role="tab"]').all()) {
+        const tb = (await el.boundingBox())!
+        if (prev) expect(tb.y).toBeGreaterThanOrEqual(prev.y + prev.height - 1)
+        prev = tb
       }
 
       for (const t of spec.tabs) {
-        await page.getByTestId(`config-band-tab-${t.tab}`).click()
+        await page.getByTestId(`config-rail-tab-${t.tab}`).click()
         if (t.select) {
           const row = page.getByTestId(t.select)
           await (await row.count() ? row : page.getByTestId('skills-item').filter({ hasText: `/${t.select}` })).first().click()
@@ -367,11 +379,13 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
         await expect(band.getByText('Claude config', { exact: true })).toBeVisible()
         const selected = band.locator('[role="tab"][aria-selected="true"]')
         await expect(selected).toHaveCount(1)
-        await expect(selected).toHaveAttribute('data-testid', `config-band-tab-${t.tab}`)
+        await expect(selected).toHaveAttribute('data-testid', `config-rail-tab-${t.tab}`)
         await expect(selected).toContainText(t.label)
 
         const panel = page.getByTestId(`${face}-claude-config-panel-${t.tab}`)
         await expect(panel).toBeVisible()
+        const panelBox = (await panel.boundingBox())!
+        expect(railBox.x + railBox.width).toBeLessThanOrEqual(panelBox.x + 1)
         // Left file card eyebrow.
         const card = panel.getByTestId(t.card).first()
         await expect(card).toBeVisible()
@@ -391,8 +405,8 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
         await homeImportShot(page, written)
         await shortBodyFills(page)
         await shortPane(page)
-        await narrowTabStrip(page)
       }
+      await shortViewportTabs(page)
       await ctx.close()
     }
   } finally {

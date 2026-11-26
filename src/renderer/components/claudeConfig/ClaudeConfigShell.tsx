@@ -14,8 +14,8 @@ import {
   chipClass,
   compactScopePath,
   useConfigSearch,
-  type ConfigBandTab,
-} from './ConfigBand'
+  type ConfigTabSpec,
+} from './configShared'
 
 /** Rail width in px — the `w-[248px]` class below (Tailwind needs the literal; keep in step). */
 export const RAIL_W_PX = 248
@@ -29,7 +29,7 @@ export interface ClaudeConfigShellProps<K extends string> {
   eyebrow: string
   title: string
   scopePath: string
-  tabs: ReadonlyArray<ConfigBandTab<K>>
+  tabs: ReadonlyArray<ConfigTabSpec<K>>
   activeKey: K
   onSelect: (k: K) => void
   search: ReturnType<typeof useConfigSearch>

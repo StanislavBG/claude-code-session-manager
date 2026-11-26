@@ -3,12 +3,12 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ClaudeConfigShell } from './ClaudeConfigShell'
-import type { ConfigBandTab } from './ConfigBand'
+import type { ConfigTabSpec } from './configShared'
 import type { LearningContent } from '../learningContent'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-const TABS: ConfigBandTab[] = [
+const TABS: ConfigTabSpec[] = [
   { key: 'claude-md', label: 'CLAUDE.md', icon: 'file', count: 'missing', warn: true },
   { key: 'settings', label: 'Settings', icon: 'settings', count: 13 },
   { key: 'mcp', label: 'MCP', icon: 'mcp', count: 3, attention: true },
@@ -67,12 +67,11 @@ const press = (el: Element, key: string) =>
   act(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) })
 
 describe('ClaudeConfigShell', () => {
-  it('renders tabs in order with counts, attention and warn, and no config-band', () => {
+  it('renders tabs in order with counts, attention and warn, and no band header', () => {
     render()
     expect(tabs().map((t) => t.getAttribute('data-testid'))).toEqual(
       TABS.map((t) => `config-rail-tab-${t.key}`),
     )
-    expect(container.querySelector('[data-testid="config-band"]')).toBeNull()
     expect(container.querySelector('[data-testid="config-rail"]')).not.toBeNull()
     expect(container.querySelector('[role="tablist"]')?.getAttribute('aria-orientation')).toBe('vertical')
     expect(tabs()[1].textContent).toContain('13')

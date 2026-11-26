@@ -5,7 +5,7 @@
  */
 'use strict';
 
-const VERB_RE = /\bgit\s+(mv|rm)\b|(^|[\s`'"(;&|])rm\s/m;
+const VERB_RE = /\bgit\s+(mv|rm)\b|(^|[\s`'"(;&|])rm(?=$|[\s.,;:)`'"])/m;
 
 /** @param {unknown} p */
 function isClaudePath(p) {

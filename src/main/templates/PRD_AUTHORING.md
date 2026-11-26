@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v32 -->
+<!-- PRD_AUTHORING.md v33 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -156,7 +156,7 @@ Why: finished jobs left dev servers running for days, holding memory and ports.
 
 ### Job sandbox limits
 
-Rule: jobs run under the CLI OS sandbox, so a gate or step must not depend on any of these:
+Rule: jobs under the OS sandbox (dev-lead, validator, any `osSandboxRequired` environment) must not depend on any of these:
 - Bash writes under `.claude/` are refused (no `git mv`, `git rm` or `rm` there). Use the Write and Edit tools (Write the new file, Edit the old one into a shim), or leave a deletion to a human or non-sandboxed step.
 - AF_UNIX socket bind/connect is refused (`Operation not permitted`).
 - `/tmp` is read-only; only `$TMPDIR` (the job's private dir) is writable.

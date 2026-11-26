@@ -1,11 +1,16 @@
 /** Run: timeout 120 npx vitest run src/main/lib/prd/__tests__/prdSandboxWarnings.test.cjs */
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, afterAll } from 'vitest';
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const config = require('../../../config.cjs');
+// config.cjs has no removal API; evict it afterwards so later requirers in this
+// worker get a fresh module without our temp root (as 03866661 did).
+const CONFIG_PATH = require.resolve('../../../config.cjs');
+const hadConfigCached = Boolean(require.cache[CONFIG_PATH]);
+const config = require(CONFIG_PATH);
+afterAll(() => { if (!hadConfigCached) delete require.cache[CONFIG_PATH]; });
 const { sandboxWarnings } = require('../prdSandboxWarnings.cjs');
 const { createPrdBatch } = require('../prdCreate.cjs');
 
@@ -24,11 +29,11 @@ test('nested .claude dir matches', () => {
   expect(sandboxWarnings(base({ files: ['pkg/.claude/agents/'], goal: 'git rm it' }))).toHaveLength(1);
 });
 
-test.each(['rm -rf x', 'run `rm x`', 'git rm y', 'then; rm z'])('matches %s', (t) => {
+test.each(['rm -rf x', 'run `rm x`', 'git rm y', 'then; rm z', 'remove it with rm', 'use rm.', 'use rm, then', 'rm'])('matches %s', (t) => {
   expect(sandboxWarnings(base({ goal: t }))).toHaveLength(1);
 });
 
-test.each(['form', 'confirm', 'perform the rmdir', 'an rmx tool'])('no match for %s', (t) => {
+test.each(['form', 'confirm', 'perform the rmdir', 'an rmx tool', 'perform', 'rmdir'])('no match for %s', (t) => {
   expect(sandboxWarnings(base({ goal: t }))).toEqual([]);
 });
 
@@ -40,6 +45,7 @@ test('acceptance criteria text counts; no warning without .claude path or verb',
 
 test('createPrdBatch result carries the warning', async () => {
   const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-sandbox-warn-'));
+  try {
   const outDir = path.join(cwd, 'out');
   await fsp.mkdir(outDir, { recursive: true });
   config.addAllowedRoot(cwd);
@@ -60,4 +66,7 @@ test('createPrdBatch result carries the warning', async () => {
   ], remote, { cwd, sourcePromptId: 'epic-a' });
   expect(r.ok).toBe(true);
   expect(JSON.stringify(r)).toContain('refused by the job sandbox');
+  } finally {
+    await fsp.rm(cwd, { recursive: true, force: true });
+  }
 });

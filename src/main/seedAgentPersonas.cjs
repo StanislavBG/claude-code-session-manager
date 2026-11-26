@@ -13,8 +13,9 @@
  *    bundled file's own stamp. Same or higher stays untouched. Lower checks
  *    the installed file's body against every body this app has ever shipped
  *    for that persona (`lib/persona-macro/shippedPersonaSeeds.cjs`). No match means a
- *    person wrote or edited that file; it is left alone and the skip is
- *    logged. Why: a lower stamp alone does not prove the file is a stale
+ *    person wrote or edited that file; it is left alone, the skip is
+ *    logged, and the Agent Library shows it as a newer version available
+ *    (lib/persona-macro/personaUpgrade.cjs). Why: a lower stamp alone does not prove the file is a stale
  *    shipped copy — only a body match does. A match replaces the installed
  *    file with the bundled one. Frontmatter keys the user changed are kept,
  *    including a `model:` line the user removed entirely; keys the user
@@ -404,6 +405,9 @@ module.exports = {
   personaBodyHash,
   readSeedVersion,
   normalizeNewlines,
+  backupPathFor,
+  bundledSourceDir,
+  destAgentsDir,
   sameFmValue,
   markerPath,
   markerStatus,

@@ -312,6 +312,56 @@ describe('release-notes.cjs edge cases', () => {
   })
 })
 
+describe('release-notes.cjs fence rules', () => {
+  const { mapOutsideFences, openFenceAt, buildNotes } = require(SCRIPT)
+  const upper = (n) => mapOutsideFences(n, (l) => l.toUpperCase())
+
+  it('a four-backtick block containing ``` keeps inner lines and the line after the inner ```', () => {
+    const note = ['a', '````md', '```js', 'inner', '```', 'after inner', '````', 'b'].join('\n')
+    expect(upper(note)).toBe(['A', '````md', '```js', 'inner', '```', 'after inner', '````', 'B'].join('\n'))
+  })
+
+  it('a ``` line with an info string inside a fence does not close it', () => {
+    const note = ['```', '```js', 'still fenced', '```', 'out'].join('\n')
+    expect(upper(note)).toBe(['```', '```js', 'still fenced', '```', 'OUT'].join('\n'))
+  })
+
+  it('a closer must use the opener character', () => {
+    expect(upper(['~~~', '```', 'x', '~~~', 'y'].join('\n'))).toBe(['~~~', '```', 'x', '~~~', 'Y'].join('\n'))
+  })
+
+  it('openFenceAt reports the open fence or null', () => {
+    expect(openFenceAt('a\n````\n```\nx')).toEqual({ ch: '`', len: 4 })
+    expect(openFenceAt('```\nx\n```')).toBeNull()
+  })
+
+  it('truncation inside a fence ends with a closing fence, then the marker, within the cap', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-fence-'))
+    try {
+      const g = (...a) => execFileSync('git', ['-C', r, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...a], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+      g('init', '-q', '-b', 'main')
+      g('commit', '-q', '--allow-empty', '-m', 'feat: first')
+      g('tag', 'v1.0.0')
+      fs.mkdirSync(path.join(r, 'release-notes'))
+      const body = Array.from({ length: 200 }, (_, i) => `code line ${i}`).join('\n')
+      fs.writeFileSync(path.join(r, 'release-notes', 'after-v1.0.0.md'), 'intro\n\n````\n' + body + '\n````\n')
+      g('add', 'release-notes')
+      g('commit', '-q', '-m', 'docs: note')
+      g('tag', 'v1.1.0')
+      const max = 1000
+      const out = buildNotes({ repo: r, tag: 'v1.1.0', prev: 'v1.0.0', maxChars: max })
+      expect(out.length).toBeLessThanOrEqual(max)
+      const marker = '\n\n…(upgrade notes truncated)\n'
+      const idx = out.indexOf(marker)
+      expect(idx).toBeGreaterThan(0)
+      expect(out.slice(0, idx).endsWith('\n````')).toBe(true)
+      expect(openFenceAt(out.slice(0, idx))).toBeNull()
+    } finally {
+      fs.rmSync(r, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('release.yml finalize-release', () => {
   const wf = yaml.load(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'release.yml'), 'utf8'))
   const steps = wf.jobs['finalize-release'].steps

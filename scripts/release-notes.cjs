@@ -52,19 +52,34 @@ const INLINE_RE = /\]\(([^)\s]+)(\s+"[^"]*")?\)/g
 const REF_RE = /^(\s*\[[^\]]+\]:\s*)(\S+)/
 const isRelative = (target) => !/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith('#')
 
+// CommonMark fences: an opener is 3+ backticks or tildes; it closes only on a line of the same
+// character, at least as long, with nothing after it. Returns the next fence state for one line.
+function stepFence(fence, line) {
+  if (fence) {
+    const c = line.match(/^\s{0,3}(`{3,}|~{3,})\s*$/)
+    return c && c[1][0] === fence.ch && c[1].length >= fence.len ? null : fence
+  }
+  const o = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+  return o ? { ch: o[1][0], len: o[1].length } : null
+}
+
+// The fence still open after scanning text ({ ch, len }), or null.
+function openFenceAt(text) {
+  let fence = null
+  for (const line of text.split('\n')) fence = stepFence(fence, line)
+  return fence
+}
+
 // Apply fn to every line outside ``` / ~~~ fenced blocks; fenced lines pass through unchanged.
 function mapOutsideFences(note, fn) {
   let fence = null
   return note
     .split('\n')
     .map((line) => {
-      const m = line.match(/^\s*(`{3,}|~{3,})/)
-      if (m) {
-        if (!fence) fence = m[1][0]
-        else if (m[1][0] === fence) fence = null
-        return line
-      }
-      return fence ? line : fn(line)
+      const wasOpen = fence !== null
+      fence = stepFence(fence, line)
+      if (wasOpen || fence) return line // opener, fenced content, or closer
+      return fn(line)
     })
     .join('\n')
 }
@@ -143,11 +158,20 @@ function buildNotes({ repo = process.cwd(), tag, prev, maxChars = MAX_CHARS } = 
   head += `## Changes since ${prev}\n\n`
   if (head.length > maxChars) {
     const marker = '\n\n…(upgrade notes truncated)\n'
-    let cut = head.slice(0, Math.max(0, maxChars - marker.length - 200))
-    const nl = cut.lastIndexOf('\n')
-    // Keep the raw slice when the note has no line break to cut back to (one very long line).
-    if (nl > '## Upgrade notes\n\n'.length) cut = cut.slice(0, nl)
-    head = cut + marker
+    let reserve = 0
+    let cut
+    let close = ''
+    for (let i = 0; i < 4; i++) {
+      cut = head.slice(0, Math.max(0, maxChars - marker.length - 200 - reserve))
+      const nl = cut.lastIndexOf('\n')
+      // Keep the raw slice when the note has no line break to cut back to (one very long line).
+      if (nl > '## Upgrade notes\n\n'.length) cut = cut.slice(0, nl)
+      const open = openFenceAt(cut)
+      close = open ? '\n' + open.ch.repeat(open.len) : ''
+      if (close.length <= reserve) break
+      reserve = close.length
+    }
+    head = cut + close + marker
   }
 
   let body = head
@@ -202,4 +226,4 @@ function main(argv) {
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2))
 
-module.exports = { buildNotes, parseArgs, repoSlug, MAX_CHARS }
+module.exports = { buildNotes, mapOutsideFences, openFenceAt, parseArgs, repoSlug, MAX_CHARS }

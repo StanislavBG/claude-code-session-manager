@@ -142,6 +142,9 @@ const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSin
 const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const jobLeftovers = require('./lib/scheduler/jobLeftovers.cjs');
+const planReviewHold = require('./scheduler/planReviewHold.cjs');
+const planReviewStore = require('./lib/scheduler/planReviewStore.cjs');
+const { buildPlanReviewInput } = require('./lib/epic/planReviewInput.cjs');
 const { harvestPlanRecords, saveValidatorVerdicts } = require('./lib/scheduler/planRecordHarvest.cjs');
 const artifactStore = require('./lib/epic/artifactStore.cjs');
 const prdOutcomeRecord = require('./lib/scheduler/prdOutcomeRecord.cjs');
@@ -8101,6 +8104,142 @@ async function recordInterruptLeftovers(slug, runId, { dirtyPaths, salvagePatch 
   }
 }
 
+const PLAN_REVIEW_HELD_PREFIX = 'held: plan-review';
+const planReviewTimeoutNoticesSent = new Set();
+
+/** Parse one member PRD's text into the shape buildPlanReviewInput expects. */
+function planReviewMemberFromPrd(row, text, prdPath) {
+  let fm = {};
+  let body = String(text || '');
+  try { const p = parsePrdFile(body); fm = p.frontmatter || {}; body = p.body || ''; } catch { /* keep raw */ }
+  const section = (name) => {
+    const m = body.match(new RegExp(`^#{1,3}\\s*${name}[^\\n]*\\n([\\s\\S]*?)(?=^#{1,3}\\s|(?![\\s\\S]))`, 'im'));
+    return m ? m[1] : '';
+  };
+  const bullets = (txt) => txt.split('\n').map((l) => l.match(/^\s*(?:[-*]|\d+\.)\s+(?:\[[ xX]\]\s+)?(.*\S)\s*$/)?.[1]).filter(Boolean);
+  const gateTxt = section('Gate');
+  const gate = (gateTxt.match(/```[^\n]*\n([\s\S]*?)```/)?.[1] || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  return {
+    slug: row.slug,
+    title: fm.title || row.title || '',
+    prdPath: prdPath || `${row.slug}.md`,
+    goal: section('Goal').trim().split('\n')[0] || '',
+    acceptanceCriteria: bullets(section('Acceptance criteria')),
+    files: bullets(section('Files')).map((f) => f.replace(/^`|`$/g, '')),
+    gate,
+    dependsOn: Array.isArray(row.dependsOn) ? row.dependsOn : [],
+  };
+}
+
+/**
+ * Per-tick plan-review orchestration. Merges computePlanReviewHolds into the
+ * returned held Map, creates each missing plan-review PRD once (idempotent by
+ * slug), and releases + notifies on timeout. Pending member rows carry
+ * `heldReason` ('held: plan-review …') so epic settle and starvation see a known
+ * wait; the field is cleared when the hold ends. Never throws.
+ * deps: { now, holdMs, readReview, createPrd, recordRelease, notify, gitHead, readPrdTexts, audit, mutateRows }
+ */
+async function applyPlanReviewHolds(state, deps = {}) {
+  const held = new Map();
+  try {
+    const rows = state.jobs || [];
+    const now = deps.now ?? Date.now();
+    const holdMs = deps.holdMs ?? planReviewHold.holdMsFromEnv();
+    const readReview = deps.readReview || ((cwd, epicId, slug) => planReviewStore.readPlanReview(cwd, epicId, slug));
+    const createPrd = deps.createPrd || ((input) => prdCreate.createPrd(input, remote, { internalMint: true }));
+    const recordRelease = deps.recordRelease || ((a) => planReviewStore.recordPlanRelease(a));
+    const notify = deps.notify || ((cwd, epicId, text, extra) => appendResponseEventIfKnown(cwd, epicId, text, extra));
+    const gitHead = deps.gitHead || (async (cwd) => { try { return String(await execGitAt(cwd, ['rev-parse', 'HEAD'])).trim() || null; } catch { return null; } });
+    const readPrdTexts = deps.readPrdTexts || ((cwd, epicId, slugs) => prdPaths.readEpicPrdTexts(cwd, epicId, slugs));
+    const audit = deps.audit || ((k, d) => { try { appendAuditEvent(k, d); } catch { /* audit never breaks dispatch */ } });
+    const heldReasons = new Map();
+
+    const reviews = {};
+    const validators = rows.filter((r) => r && r.status === 'pending' && r.agentType === 'validator' && r.planReview === 'required');
+    for (const v of validators) {
+      const epicId = v.sourcePromptId || v.epicId;
+      if (!epicId || !v.cwd) continue;
+      const rec = readReview(v.cwd, epicId, v.slug);
+      if (rec) reviews[bareSlug(v.slug)] = { ...rec, released: !!rec.release || rec.released === true };
+    }
+    const { held: holds, needsReview, expired } = planReviewHold.computePlanReviewHolds(rows, reviews, { now, holdMs });
+    const expiredSet = new Set(expired);
+    const byVSlug = new Map(validators.map((v) => [v.slug, v]));
+
+    // Expired plans release by timeout; their members are not held this tick.
+    const releasedMembers = new Set();
+    for (const vslug of expired) {
+      const v = byVSlug.get(vslug);
+      if (!v) continue;
+      const epicId = v.sourcePromptId || v.epicId;
+      const members = planReviewHold.planMembers(v, rows);
+      try {
+        const out = await recordRelease({ cwd: v.cwd, epicId, validateSlug: v.slug, by: 'timeout' });
+        for (const m of members) releasedMembers.add(m.slug);
+        if (!out || !out.alreadyReleased) {
+          audit('plan_review_timeout', { validateSlug: v.slug, epicId, holdMs });
+          const key = `${epicId}:${v.slug}`;
+          if (!planReviewTimeoutNoticesSent.has(key)) {
+            planReviewTimeoutNoticesSent.add(key);
+            await notify(v.cwd, epicId, `PLAN REVIEW TIMED OUT — released without review. Plan ${bareSlug(v.slug)} waited ${Math.round(holdMs / 60000)} minutes for its independent review; its PRDs are now free to dispatch.`, { prdSlug: v.slug, validation: 'unvalidated', notice: 'plan-review-timeout', allowInactive: true });
+          }
+        }
+      } catch (e) {
+        console.error('[scheduler] plan review timeout release failed', vslug, e?.message || e);
+      }
+    }
+    for (const [slug, why] of holds) {
+      if (releasedMembers.has(slug)) continue;
+      held.set(slug, why);
+      heldReasons.set(slug, why);
+    }
+
+    // Create the review PRD for plans that have none yet (round 1), and r2 on request.
+    const wanted = [];
+    for (const vslug of needsReview) if (!expiredSet.has(vslug)) wanted.push({ vslug, round: 1 });
+    for (const v of validators) {
+      const rec = reviews[bareSlug(v.slug)];
+      if (rec && rec.rereviewRequested === true && !rec.release && !expiredSet.has(v.slug)) wanted.push({ vslug: v.slug, round: 2 });
+    }
+    for (const { vslug, round } of wanted) {
+      const v = byVSlug.get(vslug);
+      if (!v) continue;
+      const epicId = v.sourcePromptId || v.epicId;
+      const reviewSlug = `plan-review-${bareSlug(vslug)}${round >= 2 ? `-r${round}` : ''}`;
+      if (rows.some((r) => r && bareSlug(r.slug) === reviewSlug)) continue;
+      try {
+        const memberRows = planReviewHold.planMembers(v, rows);
+        const texts = await readPrdTexts(v.cwd, epicId, memberRows.map((m) => m.slug));
+        const members = memberRows.map((m) => planReviewMemberFromPrd(m, texts.get(m.slug), `${m.slug}.md`));
+        const baseSha = await gitHead(v.cwd);
+        const input = buildPlanReviewInput({ epicId, cwd: v.cwd, epicGoal: v.epicGoal || '', validateSlug: v.slug, members, baseSha, round });
+        const res = await createPrd(input);
+        if (res && res.ok === false) console.warn('[scheduler] plan review PRD not created', reviewSlug, res.error || res.reason || '');
+      } catch (e) {
+        console.error('[scheduler] plan review PRD create failed', reviewSlug, e?.message || e);
+      }
+    }
+
+    // Stamp / clear heldReason on pending rows so settle + starvation see a known wait.
+    const mutateRows = deps.mutateRows || ((fn) => mutate((s) => fn(s.jobs)));
+    const dirty = rows.some((r) => r && r.status === 'pending' && (
+      (heldReasons.has(r.slug) && !r.preflightHold && r.heldReason !== heldReasons.get(r.slug))
+      || (!heldReasons.has(r.slug) && typeof r.heldReason === 'string' && r.heldReason.startsWith(PLAN_REVIEW_HELD_PREFIX))));
+    if (dirty) {
+      await mutateRows((list) => {
+        for (const r of list) {
+          if (!r || r.status !== 'pending') continue;
+          if (heldReasons.has(r.slug) && !r.preflightHold) r.heldReason = heldReasons.get(r.slug);
+          else if (typeof r.heldReason === 'string' && r.heldReason.startsWith(PLAN_REVIEW_HELD_PREFIX)) delete r.heldReason;
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[scheduler] applyPlanReviewHolds error', e?.message || e);
+  }
+  return held;
+}
+
 function computePreflightHolds(jobs, now = Date.now()) {
   const held = new Map();
   for (const j of jobs || []) {
@@ -10495,6 +10634,10 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
     const heldSlugs = await computeLaunchHolds(state);
     for (const [slug, why] of computePreflightHolds(state.jobs)) if (!heldSlugs.has(slug)) heldSlugs.set(slug, why);
     for (const [slug, why] of computeInterruptHolds(state.jobs)) if (!heldSlugs.has(slug)) heldSlugs.set(slug, why);
+    if (planReviewHold.planReviewEnabled()) {
+      const prHeld = await applyPlanReviewHolds(state, {});
+      for (const [slug, why] of prHeld) if (!heldSlugs.has(slug)) heldSlugs.set(slug, why);
+    }
     if (stale()) return STALE_TICK;
     const satisfiedSlugsByCwd = await budget.computeDepHistorySatisfaction(state);
     lastSatisfiedSlugsByCwd = satisfiedSlugsByCwd;
@@ -10943,6 +11086,10 @@ function projectRowsFor(jobs, cwd) {
  * root — the scheduler re-checks those on its own backoff, so the project is
  * waiting on a precondition, not starved.
  */
+function isPlanReviewHeldRow(j) {
+  return !!j && j.status === 'pending' && typeof j.heldReason === 'string' && j.heldReason.startsWith(PLAN_REVIEW_HELD_PREFIX);
+}
+
 function starveRootFor(projectRows, oldestPendingSlug = null) {
   const roots = starvation.rootBlockersForProject(projectRows);
   const root = roots.find((r) => r.heldSlugs.includes(oldestPendingSlug)) ?? roots[0] ?? null;
@@ -10950,7 +11097,16 @@ function starveRootFor(projectRows, oldestPendingSlug = null) {
   if (roots.length > 0 && roots.every((r) => r.preflightHeld)) {
     const waiting = new Set(roots.flatMap((r) => r.heldSlugs));
     for (const r of roots) waiting.add(r.slug);
-    knownWait = projectRows.every((j) => j.status !== 'pending' || waiting.has(j.slug) || (j.preflightHold && typeof j.preflightHold === 'object'));
+    knownWait = projectRows.every((j) => j.status !== 'pending' || waiting.has(j.slug) || (j.preflightHold && typeof j.preflightHold === 'object') || isPlanReviewHeldRow(j));
+  }
+  // Every pending row is waiting on an independent plan review (or behind one that is).
+  if (!knownWait) {
+    const pending = projectRows.filter((j) => j.status === 'pending');
+    if (pending.some(isPlanReviewHeldRow)) {
+      const waiting = new Set(roots.flatMap((r) => [r.slug, ...r.heldSlugs]));
+      knownWait = roots.every((r) => r.preflightHeld || isPlanReviewHeldRow(projectRows.find((j) => j.slug === r.slug)))
+        && pending.every((j) => isPlanReviewHeldRow(j) || waiting.has(j.slug) || (j.preflightHold && typeof j.preflightHold === 'object'));
+    }
   }
   return { root, knownWait };
 }
@@ -15250,6 +15406,8 @@ queueOps.bindQueueAccess({
 
 module.exports = {
   PARK_ERRORS,
+  applyPlanReviewHolds,
+  starveRootFor,
   rescanArtifactEvidence,
   harvestJobArtifacts,
   jobArtifactRunId,

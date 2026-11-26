@@ -47,7 +47,7 @@ function evaluateEpicSettle({ epicId, cwd, events, jobs, now, horizonMs } = {}) 
   const heldReasonOf = (row, seen) => {
     if (!row || row.status !== 'pending') return null;
     if (heldMemo.has(row)) return heldMemo.get(row);
-    if (row.preflightHold) {
+    if (row.preflightHold || (typeof row.heldReason === 'string' && row.heldReason.startsWith('held: plan-review'))) {
       const reason = typeof row.heldReason === 'string' && row.heldReason ? row.heldReason : 'waiting on precondition';
       heldMemo.set(row, reason);
       return reason;

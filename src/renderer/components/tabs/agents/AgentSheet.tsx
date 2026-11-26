@@ -281,12 +281,81 @@ export function AgentSheet({
             </div>
             <div className="flex items-center gap-2 flex-wrap text-[13px]">
               <span className="font-serif italic text-fg-dim">{obj.description.split(/[.—]/)[0].trim() || 'No description yet'}</span>
+              <span className="text-[10.5px] uppercase tracking-[0.1em] text-fg-faint">class</span>
               {toKnownTags(obj.tags).map((t) => {
                 const tone = ticketTagTone(t)
                 return <span key={t} className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${tone.bg} ${tone.text}`}>#{t}</span>
               })}
             </div>
             <div className="text-[11px] text-fg-faint font-mono truncate">AGENT · USER · {compactPath(path, home)}</div>
+        <details data-testid="agent-details" open={isNew || undefined} hidden={inProject} className="group mt-1">
+          <summary className="cursor-pointer select-none flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">
+            <span>edit name · colour · tags</span>
+            <span className="normal-case tracking-normal font-normal font-mono text-fg-dim flex items-center gap-1.5">
+              {obj.color && <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: COLOR_SWATCH[obj.color] }} />}
+              {obj.color || 'no colour'} · {obj.tags.length ? obj.tags.map((t) => `#${t}`).join(' ') : 'no tags'}
+            </span>
+          </summary>
+          <div className="flex flex-col gap-3 pt-3">
+            <div className="flex items-start gap-3">
+              <RowLabel>name</RowLabel>
+              <div className="flex-1 min-w-0">
+                <input
+                  data-testid="agent-detail-name"
+                  aria-label="Name"
+                  value={obj.name}
+                  onChange={(e) => set({ name: e.target.value.toLowerCase() })}
+                  className="w-full max-w-sm bg-bg border border-line rounded px-2 py-1 text-xs text-fg font-mono"
+                />
+                <div className="text-[11px] text-fg-faint mt-1 leading-snug">Filename on disk — lowercase, hyphenated.</div>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <RowLabel>color</RowLabel>
+              <div className="flex gap-1.5 pt-0.5">
+                {COLORS.map((c) => (
+                  <button
+                    key={c || 'none'}
+                    type="button"
+                    title={c || 'none'}
+                    onClick={() => set({ color: c })}
+                    className="w-5 h-5 rounded"
+                    style={{
+                      background: c ? COLOR_SWATCH[c] : 'transparent',
+                      border: obj.color === c ? '2px solid var(--accent, #b85c34)' : '1px solid var(--line, #555)',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <RowLabel>tags</RowLabel>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap gap-1.5">
+                  {TAG_LIBRARY.map((t) => {
+                    const on = obj.tags.includes(t.tag)
+                    const tone = ticketTagTone(t.tag)
+                    return (
+                      <button
+                        key={t.tag}
+                        type="button"
+                        onClick={() => set({ tags: on ? obj.tags.filter((x) => x !== t.tag) : [...obj.tags, t.tag] })}
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-mono border ${
+                          on ? `${tone.bg} ${tone.text} ${tone.border ? 'border-current/30' : 'border-transparent'}` : 'bg-bg-hi text-fg-faint border-line'
+                        }`}
+                      >
+                        #{t.tag}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="text-[11px] text-fg-faint mt-1 leading-snug">
+                  Session mission tags this persona is associated with — shown as the default agent on the Tags tab.
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
           </div>
           <div className="shrink-0 flex items-center gap-2">
             <div role="group" aria-label="Scope" data-testid="agent-scope-switch" className="inline-flex items-center p-0.5 rounded bg-bg-hi border border-line">
@@ -395,7 +464,14 @@ export function AgentSheet({
                 </div>
                 <div className="min-w-0" data-overridden={overridden('effort') ? 'true' : undefined}>
                   {inProject && overridden('effort') && <div data-testid="agent-overridden-effort" className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-accent">overridden · global: {globalDraft.effort}</div>}
-                  <EffortSelect value={view.effort} model={view.model} onChange={(v) => editing({ effort: v })} />
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1 min-w-0"><EffortSelect value={view.effort} model={view.model} onChange={(v) => editing({ effort: v })} /></div>
+                  <div data-testid="agent-effort-pips" aria-hidden="true" className="shrink-0 pb-3 flex items-center gap-1">
+                    {EFFORT_PIPS.map((l, i) => (
+                      <span key={l} className={`w-1.5 h-1.5 rounded-full ${i <= EFFORT_PIPS.indexOf(view.effort) ? 'bg-fg-dim' : 'bg-line'}`} />
+                    ))}
+                  </div>
+                  </div>
                 </div>
                 {inProject ? (
                   <div className="min-w-0 text-[13px] font-mono text-fg-dim" data-testid="agent-runs-on-readonly">runs on {obj.agentCli} <span className="text-fg-faint">(global)</span></div>
@@ -416,84 +492,9 @@ export function AgentSheet({
                 </div>
                 )}
               </div>
-              <div data-testid="agent-effort-pips" aria-hidden="true" className="flex items-center gap-1">
-                {EFFORT_PIPS.map((l, i) => (
-                  <span key={l} className={`w-1.5 h-1.5 rounded-full ${i <= EFFORT_PIPS.indexOf(view.effort) ? 'bg-fg-dim' : 'bg-line'}`} />
-                ))}
-              </div>
             </section>
 
-            <section hidden={inProject} className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line flex flex-col gap-4">
-              {/* Name / colour / tags: still editable, folded away. A new draft opens it (its name is the one thing it must set). */}
-              <details data-testid="agent-details" open={isNew || undefined} hidden={inProject} className="group">
-                <summary className="cursor-pointer select-none flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">
-                  <span>details</span>
-                  <span className="normal-case tracking-normal font-normal font-mono text-fg-dim flex items-center gap-1.5">
-                    {obj.color && <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: COLOR_SWATCH[obj.color] }} />}
-                    {obj.color || 'no colour'} · {obj.tags.length ? obj.tags.map((t) => `#${t}`).join(' ') : 'no tags'}
-                  </span>
-                </summary>
-                <div className="flex flex-col gap-3 pt-3">
-                  <div className="flex items-start gap-3">
-                    <RowLabel>name</RowLabel>
-                    <div className="flex-1 min-w-0">
-                      <input
-                        data-testid="agent-detail-name"
-                        aria-label="Name"
-                        value={obj.name}
-                        onChange={(e) => set({ name: e.target.value.toLowerCase() })}
-                        className="w-full max-w-sm bg-bg border border-line rounded px-2 py-1 text-xs text-fg font-mono"
-                      />
-                      <div className="text-[11px] text-fg-faint mt-1 leading-snug">Filename on disk — lowercase, hyphenated.</div>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <RowLabel>color</RowLabel>
-                    <div className="flex gap-1.5 pt-0.5">
-                      {COLORS.map((c) => (
-                        <button
-                          key={c || 'none'}
-                          type="button"
-                          title={c || 'none'}
-                          onClick={() => set({ color: c })}
-                          className="w-5 h-5 rounded"
-                          style={{
-                            background: c ? COLOR_SWATCH[c] : 'transparent',
-                            border: obj.color === c ? '2px solid var(--accent, #b85c34)' : '1px solid var(--line, #555)',
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <RowLabel>tags</RowLabel>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap gap-1.5">
-                        {TAG_LIBRARY.map((t) => {
-                          const on = obj.tags.includes(t.tag)
-                          const tone = ticketTagTone(t.tag)
-                          return (
-                            <button
-                              key={t.tag}
-                              type="button"
-                              onClick={() => set({ tags: on ? obj.tags.filter((x) => x !== t.tag) : [...obj.tags, t.tag] })}
-                              className={`px-2 py-0.5 rounded-full text-[11px] font-mono border ${
-                                on ? `${tone.bg} ${tone.text} ${tone.border ? 'border-current/30' : 'border-transparent'}` : 'bg-bg-hi text-fg-faint border-line'
-                              }`}
-                            >
-                              #{t.tag}
-                            </button>
-                          )
-                        })}
-                      </div>
-                      <div className="text-[11px] text-fg-faint mt-1 leading-snug">
-                        Session mission tags this persona is associated with — shown as the default agent on the Tags tab.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </details>
-            </section>
+            <GearPanel obj={view} set={editing} />
 
             <section data-testid="agent-personality" data-busy={busy ? 'true' : undefined} className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
               <div className="flex items-center gap-2">
@@ -533,7 +534,6 @@ export function AgentSheet({
                 ))}
               </section>
             )}
-            <GearPanel obj={view} set={editing} />
             <ConstraintsPanel obj={view} set={editing} />
             <AppliesToCard />
           </div>

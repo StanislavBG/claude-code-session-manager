@@ -49,6 +49,11 @@ function builtinsOf(p: AgentPersona): string[] {
   return p.tools.filter((t) => t !== '*' && !t.startsWith('mcp__'))
 }
 
+export const LOADOUT_DOT: Record<LoadoutState, string> = { undecided: '#d3a23c', equipped: '#6f7d52', bare: '#9a9a9a', unbound: '#a3441f' }
+
+/** One-line loadout summary of a persona (list rows). */
+export function loadoutSummary(p: AgentPersona): string { return summaryOf(p, loadoutOf(p)) }
+
 function summaryOf(p: AgentPersona, state: LoadoutState): string {
   if (state === 'undecided') return 'Undecided — choose a loadout'
   if (state === 'unbound') return 'Unbound — every tool'
@@ -56,6 +61,8 @@ function summaryOf(p: AgentPersona, state: LoadoutState): string {
   const parts = [`${builtinsOf(p).length} tools`]
   const n = serversOf(p).length
   if (n) parts.push(`${n} server${n > 1 ? 's' : ''}`)
+  const packs = (p as AgentPersona & { packs?: string[] }).packs?.length ?? 0
+  if (packs) parts.push(`${packs} pack${packs > 1 ? 's' : ''}`)
   return parts.join(' · ')
 }
 

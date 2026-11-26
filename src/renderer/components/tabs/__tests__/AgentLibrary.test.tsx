@@ -293,7 +293,9 @@ describe('AgentLibrary', () => {
     const row = el.querySelector('[data-agent-row="builder"]')!
     expect(row.querySelector('[data-testid="agent-row-model"]')!.textContent).toBe('opus')
     expect(el.querySelector('[data-agent-row="debugger"] [data-testid="agent-row-model"]')!.textContent).toBe('inherit')
-    expect(row.textContent).toContain('Watch git history and drive the next publish.')
+    expect(row.textContent).toContain('Undecided — choose a loadout')
+    expect(row.textContent).not.toContain('Watch git history')
+    expect(row.querySelector('[data-testid="agent-row-loadout"]')).toBeTruthy()
   })
 
   it('detail header reads AGENT · USER · <path>, with Duplicate and ⋯ (Delete agent… confirms then deletes)', async () => {

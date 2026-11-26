@@ -46,6 +46,10 @@ const openSheet = (name: string) => async (page: Page) => {
   // GearPanel renders from the armory: wait for its floor chips + companions slot (frame 1b's gear area).
   await page.getByTestId('agent-floor-row').waitFor()
   await page.getByTestId('agent-companions-slot').waitFor()
+  // 1b layout: Gear sits in the centre column (before Personality); Constraints + Applies-to in the right column.
+  const top = async (id: string) => (await page.getByTestId(id).boundingBox())!
+  const gear = await top('agent-floor-row'); const pers = await top('agent-personality')
+  if (!(gear.y < pers.y)) throw new Error('gear must sit above personality (centre column)')
 }
 
 const FRAMES: Frame[] = [

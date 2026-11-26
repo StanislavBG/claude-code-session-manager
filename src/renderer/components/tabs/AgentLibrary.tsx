@@ -3,7 +3,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
 import { ConfigFileCard, ConfigListRow, ConfigListToolbar, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { TagLibrary } from './TagLibrary'
-import { AgentRoster } from './agents/AgentRoster'
+import { AgentRoster, loadoutOf, loadoutSummary, LOADOUT_DOT } from './agents/AgentRoster'
 import { BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject, type OverlayKeys } from './agents/AgentDetail'
 import { AgentSheet, AgentWorkbench, useAgentsListExpanded } from './agents/AgentSheet'
 import { toast } from '../../state/toast'
@@ -134,6 +134,7 @@ function AgentLibraryComponent() {
 
   // The Personas | Tags switch lives inside the AGENTS FOLDER card (DESIGN_SPEC.md §5.3), so the
   // card renders in both views; Tags swaps the list for nothing and the detail for TagLibrary.
+  const undecidedCount = (personas ?? []).filter((p) => loadoutOf(p) === 'undecided').length
   const folderCard = (
     <ConfigFileCard
       eyebrow="AGENTS FOLDER"
@@ -162,6 +163,7 @@ function AgentLibraryComponent() {
           </button>
         ))}
       </div>
+      {undecidedCount > 0 && <span data-testid="agent-folder-undecided" className="mt-1 text-[11px] text-fg-dim">{undecidedCount} undecided</span>}
     </ConfigFileCard>
   )
   if (view === 'tags') {
@@ -370,7 +372,7 @@ function AgentLibraryComponent() {
                   title={p.name}
                   selected={isSelected}
                   onSelect={() => pick(p.name)}
-                  meta={p.description || undefined}
+                  meta={<span data-testid="agent-row-loadout" className="inline-flex items-center gap-1.5"><span aria-hidden="true" className="w-2 h-2 rounded-full shrink-0" style={{ background: LOADOUT_DOT[loadoutOf(p)] }} />{loadoutSummary(p)}</span>}
                   trailing={
                     <span className="flex items-center gap-1.5">
                       {isDirty && <span className="text-[10px] font-semibold text-accent">unsaved</span>}

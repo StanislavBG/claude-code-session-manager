@@ -77,6 +77,14 @@ function registerAgentsHandlers({ ipcMain, getWindow }) {
   // (cwd, agentType). Read-only observer; never affects what a launch resolves.
   ipcMain.handle('agents:resolve-model-info', validated(schemas.agentsResolveModelInfo, (payload) =>
     resolveEffectiveModelInfo(payload)));
+
+  // Gear armory read model (agentArmory.cjs) for the character sheet. Read-only;
+  // bannedTools is the scheduler's headless disallow list (lazy-required: scheduler.cjs is heavy).
+  ipcMain.handle('agents:armory', validated(schemas.agentsArmory, (payload) =>
+    require('./lib/claude/agentArmory.cjs').buildArmory({
+      cwd: payload.cwd,
+      deps: { bannedTools: [...require('./scheduler.cjs').HEADLESS_DISALLOWED_TOOLS] },
+    })));
 }
 
 module.exports = { registerAgentsHandlers };

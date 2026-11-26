@@ -496,6 +496,13 @@
  },
  {
   "ns": "agents",
+  "method": "armory",
+  "channel": "agents:armory",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "agents",
   "method": "onChanged",
   "channel": "agents:changed",
   "kind": "on",

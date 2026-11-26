@@ -569,6 +569,30 @@ export type PacksListResult =
 /** `packs.terminalArgs` result — `--plugin-dir`/`--append-system-prompt` args, already composed by main. */
 export type PacksTerminalArgsResult = { ok: true; args: string[] };
 
+/** One armory entry (`agentArmory.cjs`). */
+export interface ArmoryItem {
+  id: string;
+  label: string;
+  badges: ('risky' | 'banned' | 'floor')[];
+}
+export interface ArmoryMcpItem extends ArmoryItem {
+  tools: ArmoryItem[];
+  status: 'not-checked' | 'checked' | 'failing';
+  scope: string;
+}
+export interface ArmoryPackItem extends ArmoryItem {
+  skills: string[];
+  source?: string;
+}
+export interface Armory {
+  builtins: ArmoryItem[];
+  bundledSkills: ArmoryItem[];
+  mcpServers: ArmoryMcpItem[];
+  packs: ArmoryPackItem[];
+  unpackedSkills: string[];
+  errors: string[];
+}
+
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */
 export interface AgentPersona {
   name: string;
@@ -3169,6 +3193,8 @@ export interface SessionManagerAPI {
       effort: string | null;
       source: 'persona' | 'persona-overlay' | 'inherit' | null;
     }>;
+    /** Gear armory read model (`agentArmory.cjs`): every equippable tool/skill/MCP/pack with badges. Never throws; source failures land in `errors`. */
+    armory: (payload: { cwd?: string }) => Promise<Armory>;
     /** Fires after any save/delete/removeOverride — subscribers should re-fetch listPersonas(). */
     onChanged: (handler: () => void) => () => void;
   };

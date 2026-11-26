@@ -146,6 +146,7 @@ contextBridge.exposeInMainWorld('api', {
     resolveModelInfo: (payload) => ipcRenderer.invoke('agents:resolve-model-info', payload),
     resolveEpicModel: (payload) => ipcRenderer.invoke('agents:resolve-epic-model', payload),
     resolveEpicEffort: (payload) => ipcRenderer.invoke('agents:resolve-epic-effort', payload),
+    armory: (payload) => ipcRenderer.invoke('agents:armory', payload),
     // Fired after any save/delete/removeOverride so every mounted
     // subscriber (Agent Library, Tag Library) re-fetches the same file.
     onChanged: (handler) => {

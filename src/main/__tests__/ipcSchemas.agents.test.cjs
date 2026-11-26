@@ -53,3 +53,23 @@ test('agentsIpc validates both delete channels before agentLibrary runs, and bro
   expect(rm).toHaveBeenCalledWith({ name: 'dev-lead', projectCwd: '/work/alpha' });
   expect(sent).toEqual(['agents:changed', 'agents:changed']);
 });
+
+test('agentsArmory accepts no cwd or a string cwd, rejects a bad cwd type and extra keys', () => {
+  const s = schemas.agentsArmory;
+  expect(parses(s, {})).toBe(true);
+  expect(parses(s, { cwd: '/work/alpha' })).toBe(true);
+  expect(parses(s, { cwd: 5 })).toBe(false);
+  expect(parses(s, { cwd: '/w', extra: 1 })).toBe(false);
+});
+
+test('agentsIpc agents:armory calls buildArmory with the cwd and the scheduler banned tools', async () => {
+  const armory = require('../lib/claude/agentArmory.cjs');
+  const spy = vi.spyOn(armory, 'buildArmory').mockResolvedValue({ builtins: [] });
+  const handlers = new Map();
+  registerAgentsHandlers({ ipcMain: { handle: (c, fn) => handlers.set(c, fn) }, getWindow: () => null });
+  const res = await handlers.get('agents:armory')({}, { cwd: '/work/alpha' });
+  expect(res).toEqual({ builtins: [] });
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect(spy.mock.calls[0][0].cwd).toBe('/work/alpha');
+  expect(Array.isArray(spy.mock.calls[0][0].deps.bannedTools)).toBe(true);
+});

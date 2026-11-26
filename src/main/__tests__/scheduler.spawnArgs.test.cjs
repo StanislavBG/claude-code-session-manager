@@ -114,3 +114,18 @@ test('jobRiskToolsClearance: PRD riskTools + persona MCP/Bash(...) tools, parseR
   expect(sched.jobRiskToolsClearance(undefined, null)).toEqual([]);
   expect(JSON.stringify(sched.jobRiskToolsClearance([], []))).toBe('[]');
 });
+
+test('buildClaudeSpawnArgs appends skill deny args for a persona without the carrying pack, omits them with it', async () => {
+  const { resolveSkillDeny } = require('../lib/claude/personaToolScope.cjs');
+  const deps = {
+    listPacks: () => ({ packs: [{ id: 'dev', skills: ['session-manager-dev:develop'] }] }),
+    listUnpackedSkills: () => [],
+    getBuiltinTools: async () => ({ tools: [], skills: [] }),
+  };
+  const deny = '--disallowedTools=Skill(session-manager-dev:develop)';
+  const without = await resolveSkillDeny({ packs: [], loadout: 'equipped', deps });
+  const withPack = await resolveSkillDeny({ packs: ['dev'], loadout: 'equipped', deps });
+  expect(sched.buildClaudeSpawnArgs({ ...BASE, skillDeny: without.args })).toContain(deny);
+  expect(sched.buildClaudeSpawnArgs({ ...BASE, skillDeny: withPack.args })).not.toContain(deny);
+  expect(sched.buildClaudeSpawnArgs({ ...BASE }).some((a) => a.includes('Skill('))).toBe(false);
+});

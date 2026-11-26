@@ -8284,7 +8284,7 @@ async function applyPlanReviewHolds(state, deps = {}) {
         const dir = await prdPaths.findPrdDirForJob({ ...m, cwd: m.cwd || cwd, epicId: m.epicId || epicId });
         if (dir) return path.join(dir, `${m.slug}.md`);
       } catch { /* fall through to the canonical live path */ }
-      return path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId, 'prds', `${m.slug}.md`);
+      return opsPath(cwd, 'scheduler', 'epics', epicId, 'prds', `${m.slug}.md`);
     });
     const heldReasons = new Map();
 

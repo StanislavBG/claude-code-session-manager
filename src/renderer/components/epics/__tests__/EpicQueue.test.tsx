@@ -146,4 +146,14 @@ describe('EpicQueue — started-by-script tag', () => {
     expect(tagOf('b')?.textContent).toBe('Started by script')
     expect(tagOf('c')).toBeNull()
   })
+  it('uses its own sky tone and keeps the full long label in the tooltip', async () => {
+    const pipeline = 'p'.repeat(40)
+    const long = epic('a', { startedBy: { kind: 'script', route: 'macro_press', caller: { pipeline, runId: 'r1' } } })
+    const el = mount(<EpicQueue {...baseProps()} epics={[long]} />)
+    await act(async () => {})
+    const tag = el.querySelector('[data-testid="epic-started-by"]')!
+    expect(tag.className).toContain('text-sky-300')
+    expect(tag.className).not.toContain('text-amber-300')
+    expect(tag.getAttribute('title')!.split('\n')[0]).toBe(`Started by script: ${pipeline}`)
+  })
 })

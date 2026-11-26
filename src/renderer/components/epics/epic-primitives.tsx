@@ -191,9 +191,9 @@ export function EpicStartedByTag({ epic, small }: { epic: PromptSession; small?:
     <span
       title={info.title}
       data-testid="epic-started-by"
-      className={`inline-flex items-center gap-1 font-mono font-semibold tracking-wide rounded ring-1 ring-inset whitespace-nowrap max-w-[10rem] ${
+      className={`inline-flex items-center gap-1 font-mono font-semibold tracking-wide rounded ring-1 ring-inset whitespace-nowrap max-w-[16rem] ${
         small ? 'px-1.5 py-0.5 text-[9.5px]' : 'px-[7px] py-[3px] text-[10.5px]'
-      } text-amber-300 ring-amber-400/40`}
+      } text-sky-300 ring-sky-400/40`}
     >
       <span className="truncate">{info.label}</span>
     </span>

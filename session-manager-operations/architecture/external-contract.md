@@ -897,7 +897,7 @@ window, not here); `403` for `sas_mismatch`.
 
 Callers: the CLI line `claude-code-session-manager service pair-local --state-dir <dir> --name <name> --home <cwd> --tools a,b,c [--project-root <dir>] [--timeout <seconds>]`
 ([`serviceStdioBridge.cjs`](../../src/main/lib/feedback-remote/serviceStdioBridge.cjs)) starts, redeems, and confirms in one run; the
-`service_pair_local` MCP tool (arguments `stateDir`, `name`, `homeCwd`, `tools`) does the same for an agent in a
+`service_pair_local` MCP tool (arguments `stateDir`, `name`, `homeCwd`, `tools`, and optional `projectRoot` — needed with `project_create`) does the same for an agent in a
 Session Manager chat or terminal session (refused inside a scheduled job). The pairing is identical to the window one:
 the same scope, `homeCwd`, `projectRoot`, revoke and kill-switch rules apply, and the audit log marks it `paired-locally`.
 

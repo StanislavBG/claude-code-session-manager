@@ -56,7 +56,8 @@ const FRAMES: Frame[] = [
   { name: 'sheet-list-expanded', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-list-toggle').click(); await page.locator('[data-agent-row="builder"]').waitFor() } },
   // 1e: sheet + the Armory drawer open (Open Armory in the Gear header). The mid-drag ghost is a native HTML5 drag image and is not shot.
   { name: 'armory-drag', testid: 'agent-roster', reference: '1e-armory-mid-drag.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-open-armory').click(); await page.getByTestId('agent-armory').waitFor() } },
-  { name: 'mcp-powers', testid: 'agent-mcp-powers', reference: '1f-mcp-powers.png' },
+  // 1f: blender-artist's sheet with the blender server's Powers panel open.
+  { name: 'mcp-powers', testid: 'agent-roster', reference: '1f-mcp-powers.png', setUp: async (page) => { await openSheet('blender-artist')(page); await page.locator('[data-testid="agent-mcp-item"][data-server="blender"] [data-testid="agent-mcp-powers-open"]').click(); await page.getByTestId('agent-mcp-powers').waitFor() } },
   { name: 'undecided', testid: 'agent-undecided-choice', reference: '1g-undecided-first-run.png' },
   { name: 'project-override', testid: 'agent-project-override', reference: '1h-project-override.png' },
 ]

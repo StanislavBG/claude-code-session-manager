@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useToast } from '../../../state/toast'
 import type { Armory, ArmoryItem, ArmoryMcpItem, ArmoryPackItem } from '../../../../preload/api'
 import { TOOLS, type Draft } from './AgentDetail'
+import { McpPowers } from './McpPowers'
 import { ArmoryDrawer, type ArmoryKind } from './ArmoryDrawer'
 
 /**
@@ -68,6 +69,7 @@ const STATUS: Record<ArmoryMcpItem['status'], { dot: string; text: string }> = {
 export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft>) => void }) {
   const [armory, setArmory] = useState<Armory | null>(null)
   const [open, setOpen] = useState(false)
+  const [powersOf, setPowersOf] = useState<string | null>(null)
   const [dragging, setDragging] = useState<{ kind: ArmoryKind; id: string } | null>(null)
 
   useEffect(() => {
@@ -112,6 +114,18 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
   const removeServer = (id: string) => {
     const base = unbound ? [...builtins.map((b) => b.id), ...floor.map((f) => f.id)] : obj.tools
     set({ tools: base.filter((t) => !t.startsWith(MCP_PREFIX(id))), mcpServers: servers.filter((x) => x !== id) })
+  }
+
+  // Powers panel: a subset writes exactly those tool ids, all = whole-server grant, none = unequip.
+  const setPowers = (s: ArmoryMcpItem, ids: string[]) => {
+    if (ids.length === 0) {
+      if (typeof window.confirm === 'function' && !window.confirm(`Unequip ${s.id}? Choosing no powers removes the server from this agent.`)) return
+      removeServer(s.id)
+      setPowersOf(null)
+      return
+    }
+    const base = unbound ? [...builtins.map((b) => b.id), ...floor.map((f) => f.id), ...obj.tools.filter((t) => t.startsWith('mcp__'))] : obj.tools
+    set({ tools: [...new Set([...base.filter((t) => !t.startsWith(MCP_PREFIX(s.id))), ...ids])], mcpServers: servers.includes(s.id) ? servers : [...servers, s.id] })
   }
 
   // ---- Packs
@@ -218,7 +232,8 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
             const total = a?.tools.length ?? 0
             const have = unbound ? total : obj.tools.filter((t) => t.startsWith(MCP_PREFIX(id))).length
             return (
-              <div key={id} data-testid="agent-mcp-item" data-server={id} className="rounded-[12px] border border-line bg-bg px-3 py-2 flex items-center gap-2 min-w-0">
+              <div key={id}>
+              <div data-testid="agent-mcp-item" data-server={id} className="rounded-[12px] border border-line bg-bg px-3 py-2 flex items-center gap-2 min-w-0">
                 <div className="min-w-0 flex-1">
                   <div title={id} className="font-mono text-[13px] font-semibold text-fg truncate">{id}<Badges badges={a?.badges ?? []} /></div>
                   <div className="text-[11.5px] text-fg-dim flex items-center gap-1.5">
@@ -233,7 +248,14 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
                     </div>
                   )}
                 </div>
+                {a && (
+                  <button type="button" data-testid="agent-mcp-powers-open" aria-expanded={powersOf === id} onClick={() => setPowersOf(powersOf === id ? null : id)} className="text-[12px] text-fg-dim hover:text-fg px-1">Powers ›</button>
+                )}
                 <button type="button" aria-label={`Remove ${id}`} data-testid="agent-mcp-remove" onClick={() => removeServer(id)} className="text-fg-faint hover:text-fg px-1">×</button>
+              </div>
+              {a && powersOf === id && (
+                <McpPowers server={a} chosen={unbound ? a.tools.map((t) => t.id) : obj.tools} onChange={(ids) => setPowers(a, ids)} onClose={() => setPowersOf(null)} />
+              )}
               </div>
             )
           })}

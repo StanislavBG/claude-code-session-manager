@@ -67,6 +67,8 @@ const api = {
     removeOverride: ok,
     onChanged: () => () => {},
   },
+  toolRisk: { read: async () => ({ ok: true, marks: {} }) },
+  claudeConfig: { read: async () => ({ ok: true, data: { permissions: { allow: [], deny: [] } } }) },
   environments: {
     list: async () => ({
       ok: true,

@@ -27,6 +27,9 @@ const { __test, billingReadingForPause, reapDeadRunningJobs } = require('../sche
 const billing = require('../usage.cjs');
 const schedulerPaths = require('../lib/scheduler/schedulerPaths.cjs');
 const { writeRunLog } = require('./_helpers/schedulerHarness.cjs');
+const { PRO_RATE_CEILING } = require('../scheduler/utilizationHold.cjs');
+// Five-hour window, 4 h left (f = 0.8): base 90 pro-rates 28% of the way to the ceiling.
+const FIVE_HOUR_EXPECTED = 90 + (PRO_RATE_CEILING - 90) * 0.28;
 
 const { bindingWindowPauseThreshold } = __test;
 const HOUR = 3_600_000;
@@ -42,22 +45,22 @@ async function withUsage(limits, fn) {
   }
 }
 
-test('weekly_all reset 41 h ahead with base 90 -> 100', () => {
+test('weekly_all reset 41 h ahead with base 90 -> PRO_RATE_CEILING', () => {
   const t = bindingWindowPauseThreshold(90, { window: 'weekly_all', resetsAt: new Date(NOW + 41 * HOUR).toISOString() }, NOW);
-  assert.strictEqual(t, 100);
+  assert.strictEqual(t, PRO_RATE_CEILING);
 });
 
-test('five_hour reset 4 h ahead with a weekly cached name -> the five-hour value (~92.8), not the weekly one', async () => {
+test('five_hour reset 4 h ahead with a weekly cached name -> the five-hour value (~92.5), not the weekly one', async () => {
   // Seed the cache with a weekly binding window.
   await withUsage(
     [{ kind: 'weekly_all', percent: 64, resets_at: new Date(NOW + 41 * HOUR).toISOString(), scope: null, is_active: true }],
     () => billingReadingForPause(),
   );
   const resetsAt = new Date(NOW + 4 * HOUR).toISOString();
-  // Cached name alone (weekly) with this reset would pro-rate to 100.
-  assert.strictEqual(bindingWindowPauseThreshold(90, { window: 'weekly_all', resetsAt }, NOW), 100);
+  // Cached name alone (weekly) with this reset would pro-rate to the ceiling.
+  assert.strictEqual(bindingWindowPauseThreshold(90, { window: 'weekly_all', resetsAt }, NOW), PRO_RATE_CEILING);
   const t = bindingWindowPauseThreshold(90, { window: 'five_hour', resetsAt }, NOW);
-  assert.ok(Math.abs(t - 92.8) < 0.01, `threshold ${t}`);
+  assert.ok(Math.abs(t - FIVE_HOUR_EXPECTED) < 0.01, `threshold ${t}`);
 });
 
 test('billingReadingForPause pairs the refreshed window name with its reset', async () => {
@@ -72,7 +75,7 @@ test('billingReadingForPause pairs the refreshed window name with its reset', as
   );
   assert.deepStrictEqual(reading, { window: 'five_hour', resetsAt });
   const t = bindingWindowPauseThreshold(90, reading, NOW);
-  assert.ok(Math.abs(t - 92.8) < 0.01, `threshold ${t}`);
+  assert.ok(Math.abs(t - FIVE_HOUR_EXPECTED) < 0.01, `threshold ${t}`);
 });
 
 test('no reading passed -> the cached pair', async () => {
@@ -81,11 +84,11 @@ test('no reading passed -> the cached pair', async () => {
     [{ kind: 'weekly_all', percent: 64, resets_at: resetsAt, scope: null, is_active: true }],
     () => billingReadingForPause(),
   );
-  assert.strictEqual(bindingWindowPauseThreshold(90, null, NOW), 100);
+  assert.strictEqual(bindingWindowPauseThreshold(90, null, NOW), PRO_RATE_CEILING);
   assert.strictEqual(bindingWindowPauseThreshold('x', null, NOW), 'x');
 });
 
-test('rate_limit reap pause end to end: weekly cached name + refreshed five_hour reading 4 h before reset, base 90 -> the five-hour value (~92.8) decides', async () => {
+test('rate_limit reap pause end to end: weekly cached name + refreshed five_hour reading 4 h before reset, base 90 -> the five-hour value (~92.5) decides', async () => {
   const now = Date.now();
   // Cache a weekly binding window name (and its far reset).
   await withUsage(
@@ -118,8 +121,8 @@ test('rate_limit reap pause end to end: weekly cached name + refreshed five_hour
   fs.mkdirSync(path.dirname(machinePath), { recursive: true });
   fs.writeFileSync(machinePath, JSON.stringify({ config: { utilizationThreshold: 90 } }, null, 2));
 
-  // Refreshed reading: five_hour at 93% (above the five-hour pro-rated ~92.8,
-  // below the weekly pro-rated 100), resetting 4 h from now.
+  // Refreshed reading: five_hour at 93% (above the five-hour pro-rated ~92.5,
+  // below the weekly pro-rated ceiling), resetting 4 h from now.
   const fiveHourReset = new Date(now + 4 * HOUR).toISOString();
   await withUsage(
     [{ kind: 'five_hour', percent: 93, resets_at: fiveHourReset, scope: null, is_active: true }],
@@ -128,10 +131,10 @@ test('rate_limit reap pause end to end: weekly cached name + refreshed five_hour
 
   const machine = JSON.parse(fs.readFileSync(machinePath, 'utf8'));
   assert.strictEqual(machine.paused?.reason, 'rate_limit', JSON.stringify(machine.paused));
-  // Weekly pairing (threshold 100) would reject 93% and arm the 30-minute
-  // fallback; the five-hour pairing (~92.8) accepts it and pauses to its reset.
+  // Weekly pairing (threshold = ceiling) would reject 93% and arm the 30-minute
+  // fallback; the five-hour pairing (~92.5) accepts it and pauses to its reset.
   assert.strictEqual(machine.paused.resumeAt, fiveHourReset, JSON.stringify(machine.paused));
   // The scheduler's own threshold for that same reading, at the pause instant.
   const t = bindingWindowPauseThreshold(90, { window: 'five_hour', resetsAt: fiveHourReset }, now);
-  assert.ok(Math.abs(t - 92.8) < 0.05, `threshold ${t}`);
+  assert.ok(Math.abs(t - FIVE_HOUR_EXPECTED) < 0.05, `threshold ${t}`);
 });

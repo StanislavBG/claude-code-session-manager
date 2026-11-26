@@ -36,7 +36,8 @@ afterAll(() => {
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
-test('weekly_all 100% held 41 h before reset: heartbeat utilizationHold carries threshold 100 and baseThreshold 90', async () => {
+test('weekly_all 100% held 41 h before reset: heartbeat utilizationHold carries the PRO_RATE_CEILING threshold and baseThreshold 90', async () => {
+  const { PRO_RATE_CEILING } = require('../scheduler/utilizationHold.cjs');
   const reset = new Date(Date.now() + 41 * 3_600_000).toISOString();
   const sessionReset = new Date(Date.now() + 2 * 3_600_000).toISOString();
   billing.fetchUsage = async () => ({
@@ -58,7 +59,7 @@ test('weekly_all 100% held 41 h before reset: heartbeat utilizationHold carries 
   const hbPath = schedulerPaths.heartbeatPath();
   fs.mkdirSync(path.dirname(hbPath), { recursive: true });
   const entry = scheduler.heartbeatTick({ readQueueSync: () => ({ jobs: [], unreadable: true, paused: null }) });
-  expect(entry.utilizationHold).toMatchObject({ window: 'weekly_all', percent: 100, threshold: 100, baseThreshold: 90 });
+  expect(entry.utilizationHold).toMatchObject({ window: 'weekly_all', percent: 100, threshold: PRO_RATE_CEILING, baseThreshold: 90 });
   const line = JSON.parse(fs.readFileSync(hbPath, 'utf8').trim().split('\n').pop());
-  expect(line.utilizationHold).toMatchObject({ threshold: 100, baseThreshold: 90 });
+  expect(line.utilizationHold).toMatchObject({ threshold: PRO_RATE_CEILING, baseThreshold: 90 });
 });

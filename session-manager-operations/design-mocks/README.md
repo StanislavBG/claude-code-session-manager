@@ -21,6 +21,7 @@ either a closed historical record or a still-relevant template.
 | `project-home-v2/` | **ACTIVE 2026-11.** Claude Design prototype of Project Home as Pages / Videos / Tools (`project-home-prototype.dc.html` + `support.js`), reference `renders/`, and `DESIGN_SPEC.md` mapping it onto the Project Home code. |
 | `extensions-3a/` | **ACTIVE 2026-11.** Claude Design 3a of Home ▸ Extensions (folder tabs, Skills / MCP Servers / Plugins main areas): `extensions-3a-prototype.dc.html` + `support.js`, reference `renders/`, and `DESIGN_SPEC.md` mapping it onto the Extensions code. |
 | `claude-config/` | **ACTIVE 2026-11.** Claude Design Final of the merged Claude config page (Home + Project): `.dc.html` sources + `support.js`, `config-data.js`, 18 reference `renders/`, and `DESIGN_SPEC.md` mapping it onto the code. |
+| `agent-character-sheet/` | **ACTIVE 2026-11.** Claude Design first pass of the Agents tab as D&D character sheets (roster, sheet workbench 1b, armory drag, MCP powers, first-run, project override): `.dc.html` sources + `support.js`, fonts, 8 reference `renders/`, and `DESIGN_SPEC.md` mapping it onto the Agents tab code. |
 
 ## Who writes here
 

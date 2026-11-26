@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<sc-if value="{{ open }}" hint-placeholder-val="{{ true }}">
+<div style="width:316px;height:100%;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:18px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden;font-family:Geist,system-ui,sans-serif;line-height:1.5;color:#2a221a;-webkit-font-smoothing:antialiased">
+  <div style="padding:13px 16px;border-radius:14px;background:#fbf6ec;border:1px solid #e0d3b8;display:flex;flex-direction:column;gap:7px">
+    <div style="display:flex;align-items:center"><span style="flex:1;font-size:10.5px;font-weight:600;letter-spacing:.1em;color:#8a7a60">AGENTS FOLDER</span><span style="font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:9999px;background:rgba(111,125,82,.15);color:#4e5739">12</span></div>
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">~/.claude/agents/</span>
+    <div style="display:flex;align-items:center;gap:8px"><span style="display:inline-flex;padding:2px;border-radius:6px;background:#f6efe1;border:1px solid #e0d3b8"><span style="padding:1px 10px;border-radius:4px;font-size:11px;font-weight:500;background:#fbf6ec;box-shadow:0 1px 1px rgba(42,34,26,.08)">Personas</span><span style="padding:1px 10px;font-size:11px;color:#5b4a36">Tags</span></span><span style="flex:1"></span><span style="font-size:11.5px;font-weight:600;color:#7b560e">3 undecided</span></div>
+  </div>
+  <div style="display:flex;gap:8px;white-space:nowrap"><div style="flex:1;display:flex;align-items:center;gap:9px;height:38px;box-sizing:border-box;padding:0 12px;border-radius:10px;background:#fbf6ec;border:1px solid #e0d3b8;font-size:13px;color:#8a7a60"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8a7a60" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"></circle><path d="M16 16l4 4"></path></svg>Filter</div><span style="height:38px;display:inline-flex;align-items:center;padding:0 16px;border-radius:10px;background:#b85c34;color:#fbf6ec;font-size:13.5px;font-weight:600">+ New</span></div>
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <sc-for list="{{ rows }}" as="r" hint-placeholder-count="12"><div style="padding:7px 10px;border-radius:12px;border:1px solid {{ r.bd }};background:{{ r.bg }};box-shadow:{{ r.sh }};display:flex;gap:10px;align-items:flex-start">
+      <span style="width:26px;height:26px;flex-shrink:0;margin-top:2px;border-radius:7px;background:{{ r.crest }};color:{{ r.crestFg }};display:flex;align-items:center;justify-content:center;font-family:Newsreader,Georgia,serif;font-size:14px;font-weight:600">{{ r.initial }}</span>
+      <span style="flex:1;min-width:0">
+        <span style="display:flex;align-items:center;gap:8px"><span style="flex:1;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:{{ r.fw }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.name }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:{{ r.modelW }};color:{{ r.modelFg }}">{{ r.model }}</span></span>
+        <span style="display:flex;align-items:center;gap:6px;margin-top:1px;font-size:12px;color:{{ r.subFg }};white-space:nowrap;overflow:hidden"><span style="width:7px;height:7px;flex-shrink:0;box-sizing:border-box;border-radius:50%;background:{{ r.dot }};box-shadow:{{ r.dotRing }}"></span><span style="overflow:hidden;text-overflow:ellipsis">{{ r.sub }}</span></span>
+      </span>
+    </div></sc-for>
+  </div>
+</div>
+</sc-if>
+<sc-if value="{{ rail }}" hint-placeholder-val="{{ false }}">
+<div style="width:64px;height:100%;box-sizing:border-box;background:#efe6d3;border-right:1px solid #d4ccb8;padding:16px 0;display:flex;flex-direction:column;align-items:center;gap:10px;overflow:hidden;font-family:Geist,system-ui,sans-serif">
+  <span title="Show the agent list" style="width:34px;height:34px;box-sizing:border-box;border-radius:9px;border:1px solid #d4ccb8;background:#fbf6ec;display:flex;align-items:center;justify-content:center;color:#5b4a36;font-size:15px">»</span>
+  <span style="width:28px;height:1px;background:#d4ccb8;margin:2px 0"></span>
+  <sc-for list="{{ rows }}" as="r" hint-placeholder-count="12"><span title="{{ r.name }}" style="position:relative;width:34px;height:34px;flex-shrink:0;border-radius:9px;background:{{ r.crest }};color:{{ r.crestFg }};display:flex;align-items:center;justify-content:center;font-family:Newsreader,Georgia,serif;font-size:17px;font-weight:600;box-shadow:{{ r.ring }};opacity:{{ r.op }}">{{ r.initial }}<span style="position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;box-sizing:border-box;border-radius:50%;border:2px solid #efe6d3;background:{{ r.railDot }}"></span></span></sc-for>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:316,&quot;height&quot;:956},&quot;selected&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;architect&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;collapsed&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;unsaved&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;selSub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const sel = this.props.selected ?? 'architect';
+    const rail = !!this.props.collapsed;
+    const unsaved = !!this.props.unsaved;
+    const selSub = this.props.selSub ?? '';
+    const DOT = { undecided: ['#d3a23c', 'none'], bare: ['#fbf6ec', 'inset 0 0 0 1.5px #8a7a60'], equipped: ['#6f7d52', 'none'], unbound: ['#a3441f', '0 0 0 2px rgba(163,68,31,.22)'] };
+    const RAIL = { undecided: '#d3a23c', bare: '#b8a98a', equipped: '#6f7d52', unbound: '#a3441f' };
+    const R = [
+      ['architect', '#b85c34', 'opus', 'equipped', '6 tools · 1 server · 1 pack'],
+      ['bilko-ceo', '#c0392b', 'opus', 'undecided', 'Undecided — choose a loadout'],
+      ['bilko-host-publisher', '#6f7d52', 'sonnet', 'unbound', 'Unbound — every tool'],
+      ['blender-artist', '#7a6a8a', 'opus', 'equipped', '6 tools · 1 server'],
+      ['builder', '#3f8f8a', 'sonnet', 'undecided', 'Undecided — choose a loadout'],
+      ['competitive-analyst', '#c0392b', 'sonnet', 'equipped', '3 tools'],
+      ['competitive-researcher', '#4a6fa5', 'haiku', 'undecided', 'Undecided — choose a loadout'],
+      ['demo-video-builder', '#b45a80', 'sonnet', 'equipped', '7 tools · 1 server'],
+      ['dev-lead', '#4a6fa5', 'opus', 'equipped', '7 tools · 1 pack'],
+      ['project-home-builder', '#c9a227', 'sonnet', 'equipped', '6 tools · 1 server'],
+      ['rubber-duck', '#c9a227', 'haiku', 'bare', 'Bare — floor only'],
+      ['validator', '#6f7d52', 'sonnet', 'equipped', '4 tools']
+    ];
+    const rows = R.map(([name, crest, model, st, sub]) => {
+      const on = name === sel;
+      return {
+        name, crest, crestFg: crest === '#c9a227' ? '#2a221a' : '#fbf6ec', initial: name[0].toUpperCase(),
+        model: on && unsaved ? 'unsaved' : model, modelFg: on && unsaved ? '#b85c34' : '#8a7a60', modelW: on && unsaved ? 600 : 400,
+        sub: on && selSub ? selSub : sub,
+        subFg: st === 'undecided' ? '#7b560e' : st === 'unbound' ? '#a3441f' : '#8a7a60',
+        dot: DOT[st][0], dotRing: DOT[st][1], railDot: RAIL[st],
+        bg: on ? '#fbf6ec' : 'transparent', bd: on ? '#e0d3b8' : 'transparent', sh: on ? '0 1px 2px rgba(42,34,26,.06)' : 'none', fw: on ? 600 : 500,
+        ring: on ? '0 0 0 2px #efe6d3,0 0 0 4px #b85c34' : 'inset 0 0 0 1.5px rgba(251,246,236,.22)', op: on ? 1 : 0.8
+      };
+    });
+    return { open: !rail, rail, rows };
+  }
+}
+</script>
+</body>
+</html>

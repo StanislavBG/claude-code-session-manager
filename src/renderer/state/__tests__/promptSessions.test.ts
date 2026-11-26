@@ -163,6 +163,16 @@ describe('promptSessions.ts', () => {
     expect(api.promptSessions.create.mock.calls.at(-1)?.[0]).not.toHaveProperty('source')
   })
 
+  it('createPromptSession sends source.startedBy only when runtime.startedBy is set', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const startedBy = { kind: 'script' as const, route: 'admin-macro-run' }
+    await usePromptSessions.getState().createPromptSession('/proj', 'S', undefined, undefined, undefined, undefined, undefined, { startedBy })
+    expect((api.promptSessions.create.mock.calls.at(-1)?.[0] as { source?: unknown }).source).toEqual({ producer: 'new-epic-ui', startedBy })
+    await usePromptSessions.getState().createPromptSession('/proj', 'S', undefined, undefined, undefined, undefined, undefined, { macroId: 'm1' })
+    expect((api.promptSessions.create.mock.calls.at(-1)?.[0] as { source?: object }).source).not.toHaveProperty('startedBy')
+  })
+
   it('createPromptSession forwards runtime.agentCli and runtime.agentCliModel only when set', async () => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')

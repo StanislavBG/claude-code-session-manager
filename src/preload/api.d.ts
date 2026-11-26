@@ -3759,6 +3759,13 @@ export interface SessionManagerAPI {
         /** Set when main awaits the result; echo it back via `reportExternalNewSessionResult`. */
         requestId?: string;
         via?: 'script';
+        /** Set by main only for via 'script' (epic/scriptStartedBy.cjs); never on a human press. */
+        startedBy?: {
+          kind: 'script';
+          route: string;
+          caller?: { pipeline?: string; runId?: string; step?: string; attempt?: number };
+          [k: string]: unknown;
+        };
         effort?: string;
         /** Scripted job press: build a review cut first. */
         reviewStage?: boolean;

@@ -16,9 +16,10 @@ import type { EpicIntakeSection } from '../lib/epicIntake'
  * from or shared with any SessionTab.
  */
 /** Structured trace of which surface minted an Epic — replaces burying that
- *  info as markdown frontmatter text inside openingPrompt. An Epic is only
- *  ever created by a human pressing New Epic ('new-epic-ui', epicMint.cjs's
- *  SINGLE-CREATOR LAW); 'scheduler-dispatch' appears only on join-only calls
+ *  info as markdown frontmatter text inside openingPrompt. 'new-epic-ui' is
+ *  the mint authority (epicMint.cjs's SINGLE-CREATOR LAW) for a human press
+ *  and for scripted presses (admin macro run, Demo Video script press), which
+ *  carry startedBy; 'scheduler-dispatch' appears only on join-only calls
  *  kept for audit symmetry. 'cross-project-feedback' is the one other minting
  *  producer: a session in ANOTHER project deposited this Epic here as a
  *  'proposed' feedback proposal (src/main/lib/feedback-remote/crossProjectFeedback.cjs). It
@@ -348,7 +349,7 @@ interface PromptSessionsState {
     sections?: EpicIntakeSection[],
     /** New Session card's per-Epic runtime overrides — forwarded as IPC fields; main writes the record.
      *  restoreSessionId adopts that existing CLI session instead of minting one (main marks it restoredSession). */
-    runtime?: { model?: string; effort?: string; macroId?: string; externalRef?: string; developLoop?: boolean; restoreSessionId?: string; agentCli?: import('../../preload/api').PromptSessionsCreateEpicPayload['agentCli']; agentCliModel?: string; packs?: string[] },
+    runtime?: { model?: string; effort?: string; macroId?: string; externalRef?: string; startedBy?: EpicSource['startedBy']; developLoop?: boolean; restoreSessionId?: string; agentCli?: import('../../preload/api').PromptSessionsCreateEpicPayload['agentCli']; agentCliModel?: string; packs?: string[] },
   ) => Promise<PromptSession>
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
@@ -664,11 +665,12 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       ...(runtime?.model ? { model: runtime.model } : {}),
       ...(runtime?.effort ? { effort: runtime.effort } : {}),
       ...(runtime?.developLoop === false ? { developLoop: false } : {}),
-      ...(runtime?.macroId || runtime?.externalRef
+      ...(runtime?.macroId || runtime?.externalRef || runtime?.startedBy
         ? { source: {
             producer: 'new-epic-ui' as const,
             ...(runtime.macroId ? { macroId: runtime.macroId } : {}),
             ...(runtime.externalRef ? { externalRef: runtime.externalRef } : {}),
+            ...(runtime.startedBy ? { startedBy: runtime.startedBy } : {}),
           } }
         : {}),
       ...(runtime?.restoreSessionId ? { restoreSessionId: runtime.restoreSessionId } : {}),

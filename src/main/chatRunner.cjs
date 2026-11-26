@@ -57,6 +57,7 @@ const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { planEpicSpawn, resolveEpicTurnModel } = require('./lib/epic/epicSpawnPlan.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
+const epicDepsSync = require('./lib/epic/epicDepsSync.cjs');
 const logs = require('./logs.cjs');
 const chatInflight = require('./lib/chatInflight.cjs');
 const { feedChildStdin } = require('./lib/process/childStdin.cjs');
@@ -902,6 +903,11 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       }
       settle();
       return;
+    }
+    // Long-lived Epic worktree: refresh its node_modules links from the project checkout
+    // (fire-and-forget, throttled) so packages added to main later are visible this turn.
+    if (plan.execCwd && plan.execCwd !== cwd) {
+      epicDepsSync.syncEpicWorktreeDeps({ projectCwd: cwd, worktreeCwd: plan.execCwd });
     }
     // Agent-CLI turn plan (agentCliTurn.cjs): command, argv, stdin, auth env, parser, transcript.
     let agentPlan = null;

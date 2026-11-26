@@ -198,3 +198,35 @@ test('cancel during a pending mint never spawns', async () => {
     fs.rmSync(wt, { recursive: true, force: true });
   }
 });
+
+test('executeRun refreshes the Epic worktree node_modules links with the project cwd and the worktree cwd', async () => {
+  const depsSync = require('../lib/epic/epicDepsSync.cjs');
+  const spy = vi.spyOn(depsSync, 'syncEpicWorktreeDeps').mockReturnValue(true);
+  const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-deps-main-'));
+  const worktreeCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-deps-wt-'));
+  const sessionId = `deps-sess-${process.pid}`;
+  writeActiveIndexWithWorktree(mainCwd, { epicId: 'epic-deps', claudeSessionId: sessionId, worktreeDir: worktreeCwd });
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  try {
+    cr.run({ tabId: 'tab-deps', sessionId, prompt: 'hello', cwd: mainCwd, resume: false });
+    await waitForFile(path.join(worktreeCwd, 'ran-here.marker'));
+    expect(spy).toHaveBeenCalledWith({ projectCwd: mainCwd, worktreeCwd });
+  } finally {
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+    fs.rmSync(worktreeCwd, { recursive: true, force: true });
+  }
+});
+
+test('executeRun does not sync deps when the spawn cwd is the project cwd', async () => {
+  const depsSync = require('../lib/epic/epicDepsSync.cjs');
+  const spy = vi.spyOn(depsSync, 'syncEpicWorktreeDeps').mockReturnValue(true);
+  const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-deps-plain-'));
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  try {
+    cr.run({ tabId: 'tab-deps-plain', sessionId: `deps-plain-${process.pid}`, prompt: 'hello', cwd: mainCwd, resume: false });
+    await waitForFile(path.join(mainCwd, 'ran-here.marker'));
+    expect(spy).not.toHaveBeenCalled();
+  } finally {
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+  }
+});

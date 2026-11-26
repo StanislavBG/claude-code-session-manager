@@ -25,6 +25,7 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
 const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const { resolveEpicSpawnCwd } = require('./lib/epic/epicSpawnCwd.cjs');
+const epicDepsSync = require('./lib/epic/epicDepsSync.cjs');
 const telemetryCounters = require('./lib/telemetry/telemetryCounters.cjs');
 const artifactStore = require('./lib/epic/artifactStore.cjs');
 const artifactNotice = require('./lib/epic/artifactNotice.cjs');
@@ -338,6 +339,8 @@ class PtyManager {
     }
     if (spawnCwd !== cwd) {
       console.log(`[pty] tabId=${tabId} isolated in worktree ${spawnCwd}`);
+      // Refresh the worktree's node_modules links (fire-and-forget, throttled).
+      epicDepsSync.syncEpicWorktreeDeps({ projectCwd: cwd, worktreeCwd: spawnCwd });
     }
     let proc;
     try {

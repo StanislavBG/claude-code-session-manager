@@ -280,3 +280,29 @@ test('planEpicSpawn with a REAL on-disk index: project-root caller resumes, vani
   expect(refused.message).toContain(deadWt);
   expect(refused.message).toMatch(/project cwd/);
 });
+
+test('spawn() refreshes the Epic worktree node_modules links with the project cwd and the worktree cwd', () => {
+  const depsSync = require('../lib/epic/epicDepsSync.cjs');
+  const calls = [];
+  const orig = depsSync.syncEpicWorktreeDeps;
+  depsSync.syncEpicWorktreeDeps = (opts) => { calls.push(opts); return true; };
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-deps-main-'));
+  const worktreeCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-pty-deps-wt-'));
+  const sessionId = 'epic-session-deps';
+  writeActiveIndexWithWorktree(mainCwd, { epicId: 'epic-deps', claudeSessionId: sessionId, worktreeDir: worktreeCwd });
+  const cap = captureSpawn();
+  try {
+    manager.spawn({ tabId: sessionId, cwd: mainCwd, cols: 80, rows: 24 });
+    expect(cap.opts.cwd).toBe(worktreeCwd);
+    expect(calls).toEqual([{ projectCwd: mainCwd, worktreeCwd }]);
+    // Plain tab (spawn cwd = project cwd): no sync.
+    const plainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-deps-plain-'));
+    manager.spawn({ tabId: 'plain-deps-tab', cwd: plainCwd, cols: 80, rows: 24 });
+    expect(calls).toHaveLength(1);
+    manager.kill('plain-deps-tab');
+  } finally {
+    depsSync.syncEpicWorktreeDeps = orig;
+    manager.kill(sessionId);
+    fs.rmSync(worktreeCwd, { recursive: true, force: true });
+  }
+});

@@ -137,7 +137,11 @@ test('project_create: inline description, schema shape, POST /admin/projects/cre
   expect(s.type).toBe('object');
   expect(s.required).toEqual(['name', 'externalRef']);
   expect(Object.keys(s.properties).sort()).toEqual(['externalRef', 'github', 'name', 'parentDir']);
-  expect(s.properties.github.type).toBe('object');
+  expect(s.properties.github.type).toEqual(['boolean', 'object']);
+  expect(s.properties.github.description).toMatch(/true/);
+  expect(s.properties.github.description).toMatch(/false/);
+  expect(s.properties.github.description).toMatch(/\{ private: true, owner\? \}/);
+  expect(tool.toRequest({ name: 'foo', externalRef: 'k-1', github: true }).body.github).toBe(true);
   expect(s.properties.github.properties.private.type).toBe('boolean');
   expect(s.properties.github.properties.owner.type).toBe('string');
   expect(s.properties.parentDir.type).toBe('string');

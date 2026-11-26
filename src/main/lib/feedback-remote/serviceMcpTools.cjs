@@ -176,8 +176,9 @@ const PROJECT_CREATE_INPUT_SCHEMA = {
       description: 'Your own id for this project. A repeat call with the same externalRef creates nothing new and answers status existing.',
     },
     github: {
-      type: 'object',
-      description: 'Optional: also create a GitHub repo and set it as origin.',
+      type: ['boolean', 'object'],
+      description: 'Optional: also create a GitHub repo and set it as origin. Pass true (create the repo with defaults), '
+        + 'false (no repo, same as omitting it), or { private: true, owner? } (create it private, optionally under a given owner).',
       properties: {
         private: { type: 'boolean', description: 'Create the repo private (true).' },
         owner: { type: 'string', description: 'Optional: GitHub user or org to own the repo; defaults to the signed-in account.' },

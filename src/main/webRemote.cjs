@@ -1308,7 +1308,7 @@ async function handleServiceHello(envelope, device, client, peerPubKey) {
  * Owner confirmed a pending service's SAS: check it against that client's own
  * SAS, then pin the key via store.confirmPending. Returns { ok, service } or { ok:false, error }.
  */
-async function confirmServiceSas(pairingId, sas) {
+async function confirmServiceSas(pairingId, sas, { via } = {}) {
   const target = _clients.values().find((c) => c.role === 'service' && c.pendingPairingId === pairingId) || null;
   if (!target) return { ok: false, error: 'no_pending_service' };
   if (target.e2e.state !== 'pending_sas' || typeof target.e2e.pendingSas !== 'string') return { ok: false, error: 'wrong_state' };
@@ -1330,7 +1330,7 @@ async function confirmServiceSas(pairingId, sas) {
   target.e2e = confirmSasLogic(target.e2e).next;
   target.service = service;
   target.pendingPairingId = null;
-  await auditLog(new Date().toISOString(), 'service:confirm-sas', target.deviceId, undefined, `ok:service=${auditToken(service.serviceId)}`, target);
+  await auditLog(new Date().toISOString(), 'service:confirm-sas', target.deviceId, undefined, `${via === 'local' ? 'ok:paired-locally:' : 'ok:'}service=${auditToken(service.serviceId)}`, target);
   finalizeE2eAuthenticated('paired service authenticated — SAS confirmed by owner', target);
   return { ok: true, service };
 }
@@ -1424,11 +1424,7 @@ async function confirmServiceSasLocal(pairingId, sas) {
   if ((await loadConfig()).remoteEnabled !== true) return { ok: false, error: 'web_remote_off' };
   const pending = getServiceStore().listPending().find((p) => p.pairingId === pairingId);
   if (!pending || pending.pairedVia !== 'local') return { ok: false, error: 'not_local_pairing' };
-  const r = await confirmServiceSas(pairingId, sas);
-  if (r.ok) {
-    await auditLog(new Date().toISOString(), 'service:confirm-sas', undefined, undefined, `ok:paired-locally:service=${auditToken(r.service.serviceId)}`, null);
-  }
-  return r;
+  return confirmServiceSas(pairingId, sas, { via: 'local' });
 }
 
 async function servicesList() {

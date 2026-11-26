@@ -368,7 +368,10 @@ describe('paired service clients', () => {
     expect(ok.ok).toBe(true)
     expect(ok.service.pairedVia).toBe('local')
     expect(store.findByPubKey(kp.e2ePublicKey).pairedVia).toBe('local')
-    expect(await readAudit()).toMatch(/service:confirm-sas.*result=ok:paired-locally:service=/)
+    const rows = (await readAudit()).split('\n').filter((l) => l.includes('service:confirm-sas') && l.includes(ok.service.serviceId.slice(0, 8)))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatch(/result=ok:paired-locally:service=/)
+    expect(rows[0]).not.toMatch(/deviceId=-/)
     // revoke works the same for a local pairing
     expect(store.findByPubKey(kp.e2ePublicKey)).toBeTruthy()
     const r = await handlers.get('webRemote:service-revoke')({}, { serviceId: ok.service.serviceId })
@@ -385,11 +388,43 @@ describe('paired service clients', () => {
     expect(await webRemote.confirmServiceSasLocal(pairingId, sas)).toEqual({ ok: false, error: 'not_local_pairing' })
     expect(await webRemote.confirmServiceSasLocal('missing', sas)).toEqual({ ok: false, error: 'not_local_pairing' })
     expect((await webRemote.confirmServiceSas(pairingId, sas)).service.pairedVia).toBe('window')
+    expect(await readAudit()).toMatch(/service:confirm-sas.*result=ok:service=/)
 
     await writeConfig({ remoteEnabled: false, remoteControlEnabled: false, devices: [device] })
     webRemote.__test.invalidateConfigCache()
     expect(await webRemote.servicePairStartLocal({ name: 'K', homeCwd: HOME_CWD, scope: ['macro_list'] })).toEqual({ ok: false, error: 'web_remote_off' })
     expect(await webRemote.confirmServiceSasLocal(pairingId, sas)).toEqual({ ok: false, error: 'web_remote_off' })
     expect(store.listPending()).toEqual([])
+  })
+
+  it('pair-start audits ok:paired-locally for the local path and ok for the window path', async () => {
+    await setup()
+    const https = require('node:https')
+    const origRequest = https.request
+    https.request = (opts, cb) => {
+      const { EventEmitter } = require('node:events')
+      const req = new EventEmitter()
+      req.setTimeout = () => req
+      req.write = () => {}
+      req.destroy = (e) => req.emit('error', e)
+      req.end = () => setImmediate(() => {
+        const res = new EventEmitter()
+        res.statusCode = 200
+        cb(res)
+        res.emit('data', JSON.stringify({ code: 'AB12CD34' }))
+        res.emit('end')
+      })
+      return req
+    }
+    try {
+      const input = { name: 'K', homeCwd: HOME_CWD, scope: ['macro_list'] }
+      expect((await webRemote.servicePairStartLocal(input)).ok).toBe(true)
+      expect((await handlers.get('webRemote:service-pair-start')({}, input)).ok).toBe(true)
+    } finally {
+      https.request = origRequest
+    }
+    const rows = (await readAudit()).split('\n').filter((l) => l.includes('service:pair-start'))
+    expect(rows.some((l) => /result=ok:paired-locally$/.test(l.trim()))).toBe(true)
+    expect(rows.some((l) => /result=ok$/.test(l.trim()))).toBe(true)
   })
 })

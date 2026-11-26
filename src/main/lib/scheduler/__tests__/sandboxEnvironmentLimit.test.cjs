@@ -149,3 +149,17 @@ test('stream: chained tracebacks still classify (new header opens fresh block)',
     + '\nDuring handling of the above exception, another exception occurred:\n\n' + TB_SOCKET;
   expect(sandboxLimitFromStreamJson(stream(chained)).kind).toBe('unix-socket');
 });
+
+const CLAUDE_LINES = [
+  "OSError: [Errno 30] Read-only file system: '.claude/agents/page-overview.md'",
+  "touch: cannot touch '.claude/agents/x': Read-only file system",
+  'SCHEDULER_VERDICT: FAIL ac-2 not done: .claude/agents is a read-only filesystem in this sandbox, so page-overview.md could not be written',
+];
+test('claude-dir-write: read-only lines for .claude/agents', () => {
+  for (const l of CLAUDE_LINES) expect(detectSandboxEnvironmentLimit(l)?.kind).toBe('claude-dir-write');
+  expect(detectSandboxEnvironmentLimit('Read-only file system: /etc/hosts')).toBeNull();
+});
+test('stream: python traceback Errno 30 on .claude/agents -> claude-dir-write', () => {
+  const tb = 'Traceback (most recent call last):\n  File "x.py", line 1, in <module>\n    open(p, "w")\nOSError: [Errno 30] Read-only file system: \'.claude/agents/x.md\'\n';
+  expect(sandboxLimitFromStreamJson(stream(tb)).kind).toBe('claude-dir-write');
+});

@@ -70,3 +70,18 @@ test('createPrdBatch result carries the warning', async () => {
       await fsp.rm(cwd, { recursive: true, force: true });
   }
 });
+
+test('agents/commands paths warn with no verb, never recommend Write/Edit', () => {
+  for (const f of ['.claude/agents/page-overview.md', '.claude/commands/x.md', 'sub/.claude/commands/x.md']) {
+    const r = sandboxWarnings(base({ files: [f] }));
+    expect(r).toHaveLength(1);
+    expect(r[0]).toContain(f);
+    expect(r[0]).toMatch(/refused by the job sandbox/);
+    expect(r[0]).toMatch(/architect/);
+    expect(r[0]).toContain('PRD_AUTHORING.md#job-sandbox-limits');
+    expect(r[0]).not.toMatch(/Use the Write\/Edit/);
+  }
+});
+test('.claude/settings.json with no verb -> []', () => {
+  expect(sandboxWarnings(base({ files: ['.claude/settings.json'] }))).toEqual([]);
+});

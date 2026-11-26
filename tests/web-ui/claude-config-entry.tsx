@@ -131,6 +131,7 @@ const MEMORIES: Array<[string, string, number, number]> = [
   ['portfolio-habits-grow-independently', 'Owner 2026-11-12 values the Habit vs Number split — habits grow on their own track', 2.6, 1440],
   ['portfolio-plain-language', 'Owner 2026-11-19 - Portfolio records must be written in plain language', 1.2, 1440],
   ['human-for-hire-card-self-owned', '2026-11-19 owner - Human For Hire is pitched by Self and owned by Self', 3.0, 1440],
+  ['burrow-long-title-overflow-check-memory-name-that-keeps-going-well-past-the-panel-width', 'Stub entry for the search panel overflow check: burrow', 1.0, 1440],
   ['kiln-idea-tool', '2026-11-15 Epic 07f2a491: Kiln business-idea tool scope and first readings', 13.6, 5760],
 ]
 const MEM_BODY = [

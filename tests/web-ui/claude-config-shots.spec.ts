@@ -156,14 +156,14 @@ const TABS: Record<Face, { search: string; eyebrow: string; scope: string; count
     search: 'burrow',
     eyebrow: 'CLAUDE CODE · PROJECT',
     scope: '~/Projects/Self',
-    counts: { memory: '9', 'claude-md': 'missing', settings: '3', mcp: '5', skills: '13' },
+    counts: { memory: '10', 'claude-md': 'missing', settings: '3', mcp: '5', skills: '13' },
     tabs: [
       {
         tab: 'memory', label: 'Memory', card: 'config-file-card', eyebrow: 'MEMORY FOLDER',
         header: 'mx-reader-header', headerText: ['MODIFIED JUST NOW', 'portfolio-action-project-field'],
         extra: async (page, panel) => {
-          await expect(page.locator('[data-testid^="mx-list-row-"]')).toHaveCount(9)
-          await expect(page.getByTestId('mx-list-folder-count')).toHaveText('9 files')
+          await expect(page.locator('[data-testid^="mx-list-row-"]')).toHaveCount(10)
+          await expect(page.getByTestId('mx-list-folder-count')).toHaveText('10 files')
           // No inner page header, nav rail or path footer (finding 27).
           for (const id of ['mx-search-trigger', 'mx-learn', 'mx-nav', 'mx-index-footer']) await expect(panel.getByTestId(id)).toHaveCount(0)
           await expect(panel.getByText('CONFIGURE', { exact: true })).toHaveCount(0)
@@ -334,8 +334,9 @@ async function searchPanelShot(page: Page, face: Face, query: string, written: s
     return !!hit && el.contains(hit)
   })).toBe(true)
   expect(await rail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
-  const firstTitle = panel.locator('[role="option"]').first().locator('span').first()
+  const firstTitle = panel.locator('[role="option"] span[title]:not([title^="burrow-long"])').first()
   expect(await firstTitle.evaluate((el) => el.scrollWidth <= el.clientWidth), 'first result title clipped').toBe(true)
+  expect(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth), 'search panel overflows').toBe(true)
   const labels = await rail.getByTestId('config-rail-tab-label').evaluateAll((els) => els.map((e) => [e.textContent, e.scrollWidth, e.clientWidth]))
   for (const [text, sw, cw] of labels) expect(sw as number, `label ${text}`).toBeLessThanOrEqual(cw as number)
   await page.waitForTimeout(200)

@@ -130,9 +130,9 @@ export function ConfigSearchResults({ groups, loading, activeIndex, tabs, onChoo
                 aria-selected={active}
                 onClick={() => onChoose(item)}
                 onMouseEnter={() => onHover(i)}
-                className={`w-full text-left px-3.5 py-1.5 flex items-baseline gap-2 min-w-0 ${active ? 'bg-bg-elev' : ''}`}
+                className={`w-full text-left px-3.5 py-1.5 flex items-baseline gap-2 min-w-0 overflow-hidden ${active ? 'bg-bg-elev' : ''}`}
               >
-                <span className="text-[13px] font-medium text-fg shrink-0">{item.title}</span>
+                <span className="text-[13px] font-medium text-fg shrink-0 max-w-[60%] truncate" title={item.title}>{item.title}</span>
                 {item.detail && <span className="text-[11.5px] text-fg-dim min-w-0 truncate">{item.detail}</span>}
               </button>
             )

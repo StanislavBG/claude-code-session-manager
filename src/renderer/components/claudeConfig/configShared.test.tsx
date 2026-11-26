@@ -86,13 +86,16 @@ describe('ConfigSearchResults', () => {
     expect(container.textContent).toContain('No matches')
   })
 
-  it('keeps the title whole and truncates only the detail', () => {
+  it('caps the title at 60% and truncates both spans', () => {
     act(() => {
       root.render(<ConfigSearchResults groups={groups} loading={false} activeIndex={0} tabs={TABS} onChoose={vi.fn()} onHover={vi.fn()} />)
     })
     const [title, detail] = Array.from(container.querySelectorAll('[role="option"]')[0].querySelectorAll('span'))
     expect(title.className).toContain('shrink-0')
-    expect(title.className).not.toContain('truncate')
+    expect(title.className).toContain('max-w-[60%]')
+    expect(title.className).toContain('truncate')
+    expect(title.getAttribute('title')).toBe('model')
+    expect(container.querySelectorAll('[role="option"]')[0].className).toContain('overflow-hidden')
     expect(detail.className).toContain('truncate')
     expect(detail.className).toContain('min-w-0')
   })

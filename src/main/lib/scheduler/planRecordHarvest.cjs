@@ -67,6 +67,36 @@ function destExists(dest, fsImpl = fs) {
 }
 
 /**
+ * createExclusive(dest, text, fsImpl) → true when created, false when `dest`
+ * already existed (EEXIST). Writes a temp file beside `dest`, then hard-links
+ * it into place: link fails with EEXIST rather than overwriting, so create-only
+ * is one atomic step with no check-then-write gap. The temp file is always
+ * removed. Other errors throw.
+ * @param {string} dest @param {string} text @param {any} [fsImpl]
+ */
+function createExclusive(dest, text, fsImpl = fs) {
+  const link = fsImpl.linkSync || fs.linkSync;
+  const unlink = fsImpl.unlinkSync || fs.unlinkSync;
+  const mkdir = fsImpl.mkdirSync || fs.mkdirSync;
+  const write = fsImpl.writeFileSync || fs.writeFileSync;
+  const dir = path.dirname(dest);
+  mkdir(dir, { recursive: true });
+  const tmp = path.join(dir, `.${path.basename(dest)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
+  try {
+    write(tmp, text, { encoding: 'utf8', flag: 'wx' });
+    try {
+      link(tmp, dest);
+    } catch (e) {
+      if (e && /** @type {NodeJS.ErrnoException} */ (e).code === 'EEXIST') return false;
+      throw e;
+    }
+    return true;
+  } finally {
+    try { unlink(tmp); } catch { /* already gone */ }
+  }
+}
+
+/**
  * parseDeclaredPath(p) → { folder, name } | { reason }
  * A declared record must be exactly
  * `session-manager-operations/plan-records/<epic-folder>/<name>.md` (posix,
@@ -140,7 +170,11 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
 
       const text = fsImpl.readFileSync(src, 'utf8');
       if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) { skipped.push({ path: src, reason: 'oversize after read' }); return; }
-      if (createOnly && destExists(dest, fsImpl)) { skipped.push({ path: src, reason: CROSS_EPIC_EXISTS }); return; }
+      if (createOnly) {
+        if (!createExclusive(dest, text, fsImpl)) { skipped.push({ path: src, reason: CROSS_EPIC_EXISTS }); return; }
+        copied.push(dest);
+        return;
+      }
       writeTextAtomicSync(dest, text);
       copied.push(dest);
     } catch (e) {

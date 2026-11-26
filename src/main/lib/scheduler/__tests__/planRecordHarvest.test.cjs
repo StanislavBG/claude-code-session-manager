@@ -222,6 +222,31 @@ describe('harvestPlanRecords declaredPaths', () => {
     assert.deepEqual(fs.readFileSync(dest), original);
   });
 
+  it('(j2) a destination created by another writer just before the link is not overwritten, no temp left', () => {
+    writeSrc('v.md', 'mine\n', FOREIGN);
+    const dest = path.join(destDir(FOREIGN), 'v.md');
+    const fsImpl = {
+      ...fs,
+      linkSync: (a, b) => {
+        fs.writeFileSync(b, 'other writer\n'); // lands between any pre-check and the link
+        return fs.linkSync(a, b);
+      },
+    };
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'v.md')], fsImpl });
+    assert.deepEqual(res.copied, []);
+    assert.equal(res.skipped[0].reason, 'exists in another Epic folder; not overwritten');
+    assert.equal(fs.readFileSync(dest, 'utf8'), 'other writer\n');
+    assert.deepEqual(fs.readdirSync(destDir(FOREIGN)), ['v.md']);
+  });
+
+  it('(j3) a missing cross-Epic destination is created with the record bytes, no temp left', () => {
+    writeSrc('v.md', 'mine\n', FOREIGN);
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'v.md')] });
+    assert.deepEqual(res.skipped, []);
+    assert.equal(fs.readFileSync(path.join(destDir(FOREIGN), 'v.md'), 'utf8'), 'mine\n');
+    assert.deepEqual(fs.readdirSync(destDir(FOREIGN)), ['v.md']);
+  });
+
   it('(k) cross-Epic declared record does not follow a destination symlink', () => {
     fs.mkdirSync(destDir(FOREIGN), { recursive: true });
     const target = path.join(tmp, 'target.md');

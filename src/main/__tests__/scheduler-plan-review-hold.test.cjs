@@ -27,6 +27,7 @@ function deps(over = {}) {
     gitHead: async () => 'abc123',
     readPrdTexts: async () => new Map(),
     audit: vi.fn(),
+    readEpicGoal: () => 'Ship the widget\n\nMake it fast',
     mutateRows: async () => {},
     ...over,
   };
@@ -41,6 +42,9 @@ describe('applyPlanReviewHolds', () => {
     expect(d.createPrd).toHaveBeenCalledTimes(1);
     expect(d.createPrd.mock.calls[0][0].slug).toBe('plan-review-validate');
     expect(d.createPrd.mock.calls[0][0].implementationNotes).toContain('Base: abc123');
+    const notes = d.createPrd.mock.calls[0][0].implementationNotes;
+    expect(notes).toContain('Ship the widget');
+    expect(notes).toMatch(/PRD file: \/.*\/prds\/1-a\.md/);
     // the created row now exists in the queue → no second creation
     state.jobs.push(row('plan-review-validate', { agentType: 'plan-reviewer' }));
     await sched.applyPlanReviewHolds(state, d);

@@ -187,7 +187,6 @@ const agentSnapshot = require('./lib/claude/agentSnapshot.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv, resolvedMcpServerNames, resolveSkillDeny } = require('./lib/claude/personaToolScope.cjs');
 const { PLAN_REVIEW_SCHEMA, parsePlanReview, isAllOk: isAllOkPlanReview } = require('./lib/scheduler/planReviewSchema.cjs');
-const { reviewerModelFor } = require('./scheduler/planReviewHold.cjs');
 const { readSettingsModel } = require('./lib/claude/modelCatalog.cjs');
 const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured, expectedFromCriteria, formatCriteriaChecksSection } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
@@ -6590,7 +6589,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   if (isPlanReviewer) {
     const plannerModel = (packEpic && typeof packEpic.model === 'string' && packEpic.model.trim())
       || readSettingsModel(cwd) || 'opus';
-    spawnModel = reviewerModelFor(personaResolution.model, plannerModel);
+    spawnModel = planReviewHold.reviewerModelFor(personaResolution.model, plannerModel);
     job.model = spawnModel;
   }
   const personaToolScope = buildPersonaToolScope(personaResolution.tools, { loadout: personaResolution.loadout, disallowed: HEADLESS_DISALLOWED_TOOLS, structuredOutput: isValidator || isPlanReviewer });
@@ -8272,6 +8271,21 @@ async function applyPlanReviewHolds(state, deps = {}) {
     const gitHead = deps.gitHead || (async (cwd) => { try { return String(await execGitAt(cwd, ['rev-parse', 'HEAD'])).trim() || null; } catch { return null; } });
     const readPrdTexts = deps.readPrdTexts || ((cwd, epicId, slugs) => prdPaths.readEpicPrdTexts(cwd, epicId, slugs));
     const audit = deps.audit || ((k, d) => { try { appendAuditEvent(k, d); } catch { /* audit never breaks dispatch */ } });
+    const readEpicGoal = deps.readEpicGoal || ((cwd, epicId) => {
+      try {
+        const sessions = readActiveIndex(cwd).sessions;
+        const sess = sessions && Object.prototype.hasOwnProperty.call(sessions, epicId) ? sessions[epicId] : null;
+        const t = sess && typeof sess.goalText === 'string' ? sess.goalText.trim() : '';
+        return t;
+      } catch { return ''; }
+    });
+    const resolvePrdPath = deps.resolvePrdPath || (async (m, cwd, epicId) => {
+      try {
+        const dir = await prdPaths.findPrdDirForJob({ ...m, cwd: m.cwd || cwd, epicId: m.epicId || epicId });
+        if (dir) return path.join(dir, `${m.slug}.md`);
+      } catch { /* fall through to the canonical live path */ }
+      return path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId, 'prds', `${m.slug}.md`);
+    });
     const heldReasons = new Map();
 
     const reviews = {};
@@ -8330,9 +8344,11 @@ async function applyPlanReviewHolds(state, deps = {}) {
       try {
         const memberRows = planReviewHold.planMembers(v, rows);
         const texts = await readPrdTexts(v.cwd, epicId, memberRows.map((m) => m.slug));
-        const members = memberRows.map((m) => planReviewMemberFromPrd(m, texts.get(m.slug), `${m.slug}.md`));
+        const members = [];
+        for (const m of memberRows) members.push(planReviewMemberFromPrd(m, texts.get(m.slug), await resolvePrdPath(m, v.cwd, epicId)));
+        const epicGoal = String((await readEpicGoal(v.cwd, epicId)) || '');
         const baseSha = await gitHead(v.cwd);
-        const input = buildPlanReviewInput({ epicId, cwd: v.cwd, epicGoal: v.epicGoal || '', validateSlug: v.slug, members, baseSha, round });
+        const input = buildPlanReviewInput({ epicId, cwd: v.cwd, epicGoal, validateSlug: v.slug, members, baseSha, round });
         const res = await createPrd(input);
         if (res && res.ok === false) console.warn('[scheduler] plan review PRD not created', reviewSlug, res.error || res.reason || '');
       } catch (e) {

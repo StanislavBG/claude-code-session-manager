@@ -2796,7 +2796,7 @@ let utilizationHold = null;
 let lastAutoDispatchHoldKey = null;
 // The auto-dispatch hold currently open in audit-log.jsonl (one
 // auto_dispatch_hold_started written, its _ended not yet): { holdKey, reason,
-// window, threshold, resetsAt, startedAt, maxPercent, heldTicks, restored? },
+// window, threshold, resetsAt, lastResetsAt, startedAt, maxPercent, heldTicks, restored? },
 // continued under continuesOpenHold (same reason + window, resetsAt within
 // 60 s of the last-seen resetsAt, not the opening one) so percent changes and
 // reset jitter write nothing. Persisted in scheduler-state.json so a restart

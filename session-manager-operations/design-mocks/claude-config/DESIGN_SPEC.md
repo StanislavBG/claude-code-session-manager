@@ -30,7 +30,7 @@ screenshot `div[style*="width: 1910px; height: 1118px; border-radius: 12px"]` (2
 3. **Project tabs:** Memory · CLAUDE.md · Settings · MCP · Skills. Plugins and Agents are machine-wide →
    Home only. **Memory is project-only** (Claude Code keeps one memory folder per project).
    Project nav subtitle: `This project's own files — CLAUDE.md, CLAUDE.local.md, settings, MCP, skills`.
-4. **Color = palette B:** one dark band (`#2a221a`) at the top of the page; everything below is paper;
+4. **Color = palette B:** one dark left rail (`#2a221a`, `ClaudeConfigShell`: title, scope path, search, vertical tabs with count chips/attention dot, LEARN at the bottom); everything beside it is paper;
    the editor uses the app's paper code theme (`lib/monacoPaperTheme.ts`). No dark cards/chips/buttons.
 5. **Every tab = file card + list on the left, detail on the right.** Code/commands sit in cards;
    each setting shows where its value comes from (source chip: User / Project / Local / Default / Not set).
@@ -44,11 +44,11 @@ screenshot `div[style*="width: 1910px; height: 1118px; border-radius: 12px"]` (2
 
 ## 2. Page frame (ConfigWorkbench)
 
-- **Band** (dark, full width of main): eyebrow `CLAUDE CODE · GLOBAL` (Home) / project equivalent,
-  serif title `Claude config` + mono scope path (`~/.claude` or the project path), then the **tab strip**:
+- **Rail** (`ClaudeConfigShell`, dark, left, full height of main; replaces the mock's horizontal band): eyebrow
+  `CLAUDE CODE · GLOBAL` (Home) / project equivalent, serif title `Claude config` + mono scope path
+  (`~/.claude` or the project path), `Search all config  /` field, then the **vertical tabs**:
   icon + label + mono count chip per tab (CLAUDE.md shows `N files`; MCP shows a status dot when a
-  server needs attention). Active tab = raised paper card. Right side: `Search all config  /` field and
-  `LEARN` link (existing learn content).
+  server needs attention). Active tab = raised paper card. `LEARN` link (existing learn content) at the bottom.
 - **Left column** (~300px): a **file card** (eyebrow e.g. `PLUGINS` / `AGENTS FOLDER`, count pill, mono
   path, one-line note such as `On/off is saved in settings.json › enabledPlugins`), then Filter field +
   one accent primary (`+ Add` / `+ New`), then the list (mono name, meta line, toggle where relevant;
@@ -103,3 +103,4 @@ className. The band's dark `#2a221a` = `bg-fg` with `text-bg-hi`.
 7. Sample-data differences (names, counts, dates, descriptions) are never findings.
 8. **Memory list keeps its toolbar row** ("All memories N", Filter, "+ New", sort) under the chips: the same
    Filter + primary-action pattern every other tab's list column uses, so memories can still be created and sorted.
+9. **Band → left rail; no page header above it on either face (owner request)** (decided 2026-11-26).

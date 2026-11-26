@@ -18,11 +18,13 @@ First read session-manager-operations/architecture/page-stewards.md, then run `n
   the active project's cwd. Its own steward key is still PENDING in `scripts/check-page-stewards.cjs`; until it
   exists, this steward covers it.
 - Faces: as declared by `NAV_ITEMS` in `src/renderer/lib/navGroups.ts`
-- Frame: the shared dark `ConfigBand` (`src/renderer/components/claudeConfig/ConfigBand.tsx`) with one tab per
-  area and live counts; tab bodies reuse the existing per-area components.
+- Frame: the shared `ClaudeConfigShell` (`src/renderer/components/claudeConfig/ClaudeConfigShell.tsx`, helpers in
+  `configShared.tsx`): a dark left rail with title, scope path, search, one tab per area with live counts, and LEARN;
+  tab bodies reuse the existing per-area components. Both faces render bare (no `SectionFrame` header) — any
+  header above the rail is a finding.
 
 Visual source of truth: `session-manager-operations/design-mocks/claude-config/DESIGN_SPEC.md` (§1.2 Home, §1.3
-Project, §2 band). Check layout, copy and states against it; a deviation is a finding unless the spec names it as
+Project, §2 rail). Check layout, copy and states against it; a deviation is a finding unless the spec names it as
 deliberate. MCP and Skills list chrome still follows `session-manager-operations/design-mocks/extensions-3a/DESIGN_SPEC.md`.
 
 Home tabs (`HOME_CLAUDE_CONFIG_TABS` in `navGroups.ts`): CLAUDE.md, Settings, MCP, Skills, Plugins, Agents.
@@ -52,7 +54,7 @@ Reads (and writes, through the same paths):
 - Home edits only `~/.claude`; it never derives a project from the active top tab. Project files are edited only on
   the Project face. An Agents overlay's project is only the one chosen in that tab's project picker, sent as
   `projectCwd` (`session-manager-operations/architecture/domain-model.md`).
-- Each tab keeps one IPC surface per feature; band counts read through the same `window.api` readers the tab
+- Each tab keeps one IPC surface per feature; rail counts read through the same `window.api` readers the tab
   bodies use (`useExtensionCounts`, `useAgentPersonasState`, `useProjectConfigCounts`), never a parallel method.
 - CLAUDE.md draft and disk text live in the shared config store `src/renderer/state/config.ts`; save never forces,
   so the mtime conflict check refuses to overwrite a changed file. `@import` chains resolve in main

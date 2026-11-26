@@ -79,6 +79,23 @@ function normalizeRiskTools(value) {
 }
 const { sizingWarnings } = require('./prdSizing.cjs');
 const { sandboxWarnings } = require('./prdSandboxWarnings.cjs');
+const { mcpReachWarnings } = require('./prdMcpReachWarnings.cjs');
+
+/** Real deps for mcpReachWarnings: persona servers resolved the way the scheduler snapshot does. Never throws. */
+const mcpReachDeps = {
+  resolve: (o) => require('../claude/headlessMcpServers.cjs').resolveHeadlessMcpServers(o),
+  readPersonaServers: (input) => {
+    try {
+      const { readOverlayAwarePersona, DEFAULT_PRD_AGENT_TYPE: dflt } = require('../claude/agentModelResolve.cjs');
+      const { parseTools, parseCapabilityList } = require('../../agentLibrary.cjs');
+      const { resolvedMcpServerNames } = require('../claude/personaToolScope.cjs');
+      const fm = (readOverlayAwarePersona(input.agentType || dflt, { cwd: input.cwd }) || {}).fm;
+      if (!fm) return null;
+      const tools = parseTools(typeof fm.tools === 'string' ? fm.tools : '');
+      return resolvedMcpServerNames(tools, parseCapabilityList(fm.mcpServers));
+    } catch { return null; }
+  },
+};
 const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
 const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
@@ -1096,7 +1113,7 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     if (opts.dryRun) {
       return {
         ok: true, dryRun: true, slug, input, gateCommands, filesList,
-        inheritedPlanId, duplicateAllowed, warnings: [...extraWarnings, ...sizingWarnings(input), ...sandboxWarnings(input)],
+        inheritedPlanId, duplicateAllowed, warnings: [...extraWarnings, ...sizingWarnings(input), ...sandboxWarnings(input), ...mcpReachWarnings(input, mcpReachDeps)],
       };
     }
 
@@ -1188,7 +1205,7 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     // Advisory only (PRD 1403 sizing warnings + gate-and-files-in-PRD-body
     // absent/none-gate warnings) — never blocks the write. See prdSizing.cjs
     // and prdGateFiles.cjs.
-    warnings: [...extraWarnings, ...sizingWarnings(input), ...sandboxWarnings(input)],
+    warnings: [...extraWarnings, ...sizingWarnings(input), ...sandboxWarnings(input), ...mcpReachWarnings(input, mcpReachDeps)],
   };
 }
 

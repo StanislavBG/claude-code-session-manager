@@ -63,6 +63,7 @@ beforeEach(() => {
   }
   ;(window as unknown as { api: unknown }).api = {
     webRemote: api,
+    app: { homeDir: vi.fn(async () => "/home/test") },
   }
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
 })

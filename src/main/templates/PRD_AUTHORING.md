@@ -157,7 +157,7 @@ Why: finished jobs left dev servers running for days, holding memory and ports.
 ### Job sandbox limits
 
 Rule: jobs under the OS sandbox (dev-lead, validator, any `osSandboxRequired` environment) must not depend on any of these:
-- Bash writes under `.claude/` are refused (no `git mv`, `git rm` or `rm` there). Use the Write and Edit tools (Write the new file, Edit the old one into a shim), or leave a deletion to a human or non-sandboxed step.
+- Bash writes under `.claude/` are refused (no `git mv`, `git rm` or `rm` there). **Any** write to `.claude/agents/` or `.claude/commands/` is refused too, including by the Edit and Write tools (CLI mandatory write protections). A PRD must not list those paths in `# Files`; the architect edits them inline, outside the job sandbox. Why: PRD 4704 (2026-11-26) asked for an Edit on `.claude/agents/` and all three calls were denied.
 - AF_UNIX socket bind/connect is refused (`Operation not permitted`).
 - `/tmp` is read-only; only `$TMPDIR` (the job's private dir) is writable.
 

@@ -63,7 +63,7 @@ const TABS: Record<Face, { search: string; eyebrow: string; scope: string; count
     eyebrow: 'CLAUDE CODE · GLOBAL',
     scope: '~/.claude',
     // CLAUDE.md chip = the file + its two imports; Settings = top-level keys set in settings.json (finding 1).
-    counts: { 'claude-md': '3 files', settings: '3', mcp: '3', skills: '6', plugins: '4', agents: '9' },
+    counts: { 'claude-md': '3 files', settings: '3', mcp: '3', skills: '7', plugins: '4', agents: '9' },
     tabs: [
       {
         tab: 'claude-md', label: 'CLAUDE.md', card: 'claude-md-file-card', eyebrow: 'FILE + ITS IMPORTS',
@@ -107,8 +107,8 @@ const TABS: Record<Face, { search: string; eyebrow: string; scope: string; count
         tab: 'skills', label: 'Skills', select: 'pdf', card: 'config-file-card', eyebrow: 'SKILLS FOLDER',
         header: 'config-detail-header', headerText: ['SKILL · USER · ~/.claude/skills/pdf/SKILL.md', 'pdf'],
         extra: async (page, panel) => {
-          await expect(page.getByTestId('skills-item')).toHaveCount(6)
-          await expect(page.getByTestId('skills-folder-on')).toHaveText('6 on')
+          await expect(page.getByTestId('skills-item')).toHaveCount(7)
+          await expect(page.getByTestId('skills-folder-on')).toHaveText('7 on')
           await editorChrome(panel)
         },
       },
@@ -318,6 +318,12 @@ async function homeImportShot(page: Page, written: string[]) {
   await expect(page.getByTestId('home-claude-config-panel-agents')).toBeVisible()
 }
 
+/** Each face's full long stub title (must match the stubs in claude-config-entry.tsx), ≥80 chars. */
+const LONG_TITLE: Record<Face, string> = {
+  home: 'pdf-long-title-overflow-check-skill-name-that-keeps-going-well-past-the-panel-width',
+  project: 'burrow-long-title-overflow-check-memory-name-that-keeps-going-well-past-the-panel-width.md',
+}
+
 /** Search panel opens beside the rail, unclipped, over the content; rail has no horizontal range; no tab label truncates. */
 async function searchPanelShot(page: Page, face: Face, query: string, written: string[]) {
   const rail = page.getByTestId('config-rail')
@@ -339,12 +345,9 @@ async function searchPanelShot(page: Page, face: Face, query: string, written: s
   const shortIdx = fullTitles.findIndex((t) => t.length > 0 && t.length <= 20)
   expect(shortIdx, 'no short (<= 20 chars) result title in the search panel').toBeGreaterThanOrEqual(0)
   expect(await titles.nth(shortIdx).evaluate((el) => el.scrollWidth <= el.clientWidth), 'short result title clipped').toBe(true)
-  // Only the Project face searches memories, so only its query ('burrow') can surface the long-title stub row.
-  if (face === 'project') {
-    const longTitle = panel.locator('[role="option"] span[title^="burrow-long-title-overflow-check"]')
-    await expect(longTitle, 'long-title stub row missing from results').toHaveCount(1)
-    expect(await longTitle.evaluate((el) => el.scrollWidth > el.clientWidth), 'long title not truncated').toBe(true)
-  }
+  const longTitle = panel.locator(`[role="option"] span[title="${LONG_TITLE[face]}"]`)
+  await expect(longTitle, 'long-title stub row missing from results').toHaveCount(1)
+  expect(await longTitle.evaluate((el) => el.scrollWidth > el.clientWidth), 'long title not truncated').toBe(true)
   expect(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth), 'search panel overflows').toBe(true)
   const labels = await rail.getByTestId('config-rail-tab-label').evaluateAll((els) => els.map((e) => [e.textContent, e.scrollWidth, e.clientWidth]))
   for (const [text, sw, cw] of labels) expect(sw as number, `label ${text}`).toBeLessThanOrEqual(cw as number)

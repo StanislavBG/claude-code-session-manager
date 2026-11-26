@@ -61,6 +61,7 @@ const claudeJson = { numStartups: 42, mcpServers: homeServers }
 put(`${HOME}/.claude.json`, claudeJson, 15)
 
 // Home skills (G.skills); the first one carries G.skillSrc.
+const HOME_LONG_SKILL = 'pdf-long-title-overflow-check-skill-name-that-keeps-going-well-past-the-panel-width'
 const HOME_SKILLS: Array<[string, string]> = [
   ['pdf', 'Read, fill, split and merge PDF files. Use when a task involves a .pdf.'],
   ['docx', 'Create and edit Word documents, keeping tracked changes and comments.'],
@@ -68,6 +69,7 @@ const HOME_SKILLS: Array<[string, string]> = [
   ['pptx', 'Build and edit slide decks from an outline.'],
   ['skill-creator', 'Write a new skill: folder, SKILL.md and a first test run.'],
   ['webapp-testing', 'Drive a local web app in a real browser to check a change.'],
+  [HOME_LONG_SKILL, 'Stub skill for the search panel overflow check: pdf'],
 ]
 const PDF_BODY = ['', '# pdf', '', 'Work on PDF files with tools already on this machine.', '', '## Read', '', '- Text: `pdftotext -layout in.pdf -`', '- Scanned pages: run `ocrmypdf in.pdf out.pdf` first.', '', '## Fill a form', '', '1. List the fields: `python3 scripts/fields.py form.pdf`', '2. Put the values in `fields.json`.', '3. Fill: `python3 scripts/fill.py form.pdf fields.json out.pdf`', '', '## Split or merge', '', '```', 'qpdf in.pdf --pages . 1-3 -- part.pdf', 'qpdf --empty --pages a.pdf b.pdf -- merged.pdf', '```'].join('\n')
 for (const [name, description] of HOME_SKILLS) {

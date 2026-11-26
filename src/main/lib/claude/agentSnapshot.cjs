@@ -108,6 +108,23 @@ async function buildAgentSnapshot({ cwd, agentType, packs, deps = {} } = {}) {
     return { id: null, snapshot: null, refusal: { code: env.code, detail } };
   }
 
+  // Persona-declared capabilities (`mcpServers:` / `packs:`) are part of the snapshot, so every
+  // caller (epicMint, epicAgentRefresh, scheduler) records the same resolved set.
+  let declaredServers = [];
+  let declaredPacks = [];
+  if (fm) {
+    try {
+      const { parseCapabilityList } = require('../../agentLibrary.cjs');
+      declaredServers = parseCapabilityList(fm.mcpServers);
+      declaredPacks = parseCapabilityList(fm.packs);
+    } catch { /* no declared capabilities */ }
+  }
+  const mergedPacks = [];
+  for (const p of [...declaredPacks, ...(Array.isArray(packs) ? packs : [])]) {
+    const id = String(p);
+    if (!mergedPacks.includes(id)) mergedPacks.push(id);
+  }
+
   const body = resolved.systemPrompt || '';
   const tools = Array.isArray(resolved.tools) ? resolved.tools.map(String) : null;
   const snapshot = {
@@ -117,8 +134,8 @@ async function buildAgentSnapshot({ cwd, agentType, packs, deps = {} } = {}) {
     model: resolved.model || null,
     effort: effort || null,
     tools,
-    mcpServers: mcpServersFromTools(tools),
-    packs: Array.isArray(packs) ? packs.map(String) : [],
+    mcpServers: [...new Set([...declaredServers.map((d) => String(d).trim()).filter(Boolean), ...mcpServersFromTools(tools)])].sort(),
+    packs: mergedPacks,
     seedVersion,
     environment: { id: env.id, hash: env.hash },
     // Gear applies to chat turns only for snapshots stamped true; older snapshots lack the key (falsy).

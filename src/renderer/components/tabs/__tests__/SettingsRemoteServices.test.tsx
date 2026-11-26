@@ -97,6 +97,24 @@ afterEach(() => {
 })
 
 describe('SettingsRemoteServices', () => {
+  it('marks a locally paired service in its subtitle and keeps Revoke', async () => {
+    list = {
+      ok: true,
+      services: [
+        { ...service, serviceId: 'svc-w', name: 'Win' },
+        { ...service, serviceId: 'svc-l', name: 'Loc', pairedVia: 'local' as const },
+      ],
+      pending: [], relayOrphans: [],
+    }
+    await mount()
+    const rows = Array.from(document.querySelectorAll('[data-testid="remote-service-row"]'))
+    const date = new Date(service.pairedAt).toLocaleDateString()
+    expect(rows[0].textContent).toContain(`· paired ${date}`)
+    expect(rows[0].textContent).not.toContain('paired locally')
+    expect(rows[1].textContent).toContain(`· paired locally ${date}`)
+    expect(rows[1].querySelector('[data-testid="remote-service-revoke"]')).not.toBeNull()
+  })
+
   it('is collapsed by default: one Pair a service… button, no form', async () => {
     await mount()
     expect(q('remote-service-pair')?.textContent).toContain('Pair a service…')

@@ -436,7 +436,7 @@ export function SettingsRemoteServices({
                 <RemoteCard
                   icon="link"
                   title={s.name}
-                  subtitle={`${s.homeCwd} · ${s.scope.length} of ${SERVICE_TOOLS.length} tools · paired ${new Date(s.pairedAt).toLocaleDateString()}`}
+                  subtitle={`${s.homeCwd} · ${s.scope.length} of ${SERVICE_TOOLS.length} tools · paired${s.pairedVia === 'local' ? ' locally' : ''} ${new Date(s.pairedAt).toLocaleDateString()}`}
                   action={revokeAction(s.serviceId, 'remote-service-revoke', () => handleRevokeService(s.serviceId))}
                 />
                 {s.projectRoot && (

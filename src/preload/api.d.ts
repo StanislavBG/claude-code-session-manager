@@ -2944,6 +2944,8 @@ export interface WebRemoteService {
   relayClientId: string | null;
   pairedAt: number;
   lastSeenAt: number;
+  /** How the pairing was approved: owner window (default) or the loopback admin API. */
+  pairedVia?: 'window' | 'local';
 }
 
 export interface WebRemotePendingService {
@@ -2954,6 +2956,7 @@ export interface WebRemotePendingService {
   projectRoot: string | null;
   createdAt: number;
   expiresAt: number;
+  pairedVia?: 'window' | 'local';
 }
 
 /** A relay client no local service owns. */

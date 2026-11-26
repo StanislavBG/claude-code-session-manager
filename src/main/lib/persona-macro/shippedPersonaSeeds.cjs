@@ -112,6 +112,21 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, Task",
       },
     },
+    {
+      commit: "seed-v8",
+      bodySha256: "468d365253a94fb7c48ff181a90c1bea133743748a93290dc0f781dcd49fa6c8",
+      fm: {
+        description: "The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, does operations and small provable tweaks itself, queues substantial work as scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a queued PRD — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+        tools: "Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, Task",
+        model: "opus",
+        effort: "medium",
+        environment: "open-web",
+        tags: "feature, bug, discussion, art",
+        title: "Engineering — Architect",
+        mcpServers: "session-manager-scheduler",
+        packs: "session-manager-dev",
+      },
+    },
   ],
   "dev-lead": [
     {
@@ -242,6 +257,19 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         model: "sonnet",
         title: "Engineering — Software Engineer",
         tools: "Read, Grep, Glob, Bash, Edit, Write",
+      },
+    },
+    {
+      commit: "seed-v9",
+      bodySha256: "ca65b05026e3d9f603c5a6efeb0d456686d4413089080ad7596cb9f051162646",
+      fm: {
+        description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+        model: "sonnet",
+        effort: "medium",
+        title: "Engineering — Software Engineer",
+        packs: "session-manager-dev",
+        executorOnly: "true",
       },
     },
   ],

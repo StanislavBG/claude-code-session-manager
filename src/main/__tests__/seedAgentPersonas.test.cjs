@@ -238,7 +238,7 @@ test('upgrade uses the bundled model when the installed value only matches the s
   const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm, body } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(fm.model).toBe('sonnet'); // 'fable' was just the old shipped default here, not a user choice
-  expect(fm.seedVersion).toBe('8'); // bundled stamp, not the installed file's old one
+  expect(fm.seedVersion).toBe('9'); // bundled stamp, not the installed file's old one
   expect(body).toContain('## Run contract'); // bundled body replaced the old one
 });
 
@@ -308,7 +308,7 @@ test('an installed seedVersion: with an empty value reads as 1, so a bundled see
 
   const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
-  expect(fm.seedVersion).toBe('8');
+  expect(fm.seedVersion).toBe('9');
 });
 
 test('the upgrade backs up the pre-upgrade file content by hash, outside the agents dir', async () => {
@@ -501,7 +501,7 @@ test('upgrade adds art to an installed seedVersion-2 architect with shipped tags
   await seedAgentPersonas({ logger: silentLogger() });
   let out = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'architect.md'), 'utf8')).fm;
   expect(out.tags).toBe('feature, bug, discussion, art');
-  expect(out.seedVersion).toBe('7');
+  expect(out.seedVersion).toBe('8');
 
   fs.writeFileSync(path.join(agentsDir(), 'architect.md'), installed('feature, mine'));
   await seedAgentPersonas({ logger: silentLogger() });
@@ -525,7 +525,7 @@ test('project-home-builder: bundled seedVersion 8 carries both save tools and th
   const tools = fm.tools.split(',').map((t) => t.trim());
   expect(tools).toContain('mcp__session-manager-scheduler__project_page_write');
   expect(tools).toContain('mcp__session-manager-scheduler__project_home_write');
-  expect(fm.seedVersion).toBe('8');
+  expect(fm.seedVersion).toBe('9');
   expect(fm.mcpServers).toBe('session-manager-scheduler');
   expect(fm.description).toContain('Knowledge Page');
   const body = phbBundled();

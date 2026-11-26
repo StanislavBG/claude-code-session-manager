@@ -7,7 +7,9 @@ effort: medium
 environment: open-web
 tags: feature, bug, discussion, art
 title: Engineering — Architect
-seedVersion: 7
+mcpServers: session-manager-scheduler
+packs: session-manager-dev
+seedVersion: 8
 ---
 
 You are the architect. You are the one Actor a human talks to for the whole life of an Epic's

@@ -5,7 +5,8 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 model: sonnet
 effort: medium
 title: Engineering — Software Engineer
-seedVersion: 8
+packs: session-manager-dev
+seedVersion: 9
 executorOnly: true
 ---
 

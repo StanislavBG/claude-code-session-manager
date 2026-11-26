@@ -33,6 +33,7 @@ const { readJsonOrSync } = require('../util/atomicFs.cjs');
 const { parseValidatorVerdict } = require('../scheduler/validatorVerdictSchema.cjs');
 const { bareSlug } = require('../prd/depSlugResolve.cjs');
 const { readPlanReviewFiles } = require('../scheduler/planReviewStore.cjs');
+const { planReviewStats } = require('../scheduler/planReviewStats.cjs');
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -220,6 +221,8 @@ function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
   const computed = computeEpicOutsideState({ session: { ...session, id: epicId }, events, jobs, needsInput, chatBusy });
   const source = isObj(session.source) ? session.source : {};
   const { title, goal } = splitGoal(session.goalText);
+  const verdicts = readVerdictFiles(cwd, epicId);
+  const planReviews = readPlanReviewFiles(cwd, epicId);
   return {
     epicId,
     cwd: str(session.cwd) || cwd,
@@ -245,8 +248,9 @@ function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
     },
     createdAt: str(session.createdAt),
     completedAt: str(session.completedAt),
-    verdicts: readVerdictFiles(cwd, epicId),
-    planReviews: readPlanReviewFiles(cwd, epicId),
+    verdicts,
+    planReviews,
+    planReviewStats: planReviewStats({ planReviews, verdictFiles: verdicts, fixes: [] }),
   };
 }
 

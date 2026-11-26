@@ -107,6 +107,10 @@ test('an open Epic record joins session, events, jobs, needs-input and busy', as
     completedAt: null,
     verdicts: [],
     planReviews: [],
+    planReviewStats: {
+      reviewed: { plans: 0, acceptedFindings: 0, rejectedFindings: 0, validatorFindings: 0, refuted: 0, escapes: 0 },
+      unreviewed: { plans: 0, validatorFindings: 0, refuted: 0, escapes: 0 },
+    },
   });
 
   // chatBusy flips to working; needsInput from the exchanges log.

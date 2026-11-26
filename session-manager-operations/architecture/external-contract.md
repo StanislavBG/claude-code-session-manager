@@ -540,8 +540,8 @@ you need the project's own text.
 
 ## 6. Needs you
 
-An outside app can put one question in front of the owner. It shows in the Dashboard's **Needs you**
-list, next to Session Manager's own items. The owner answers there, or in the app behind the link. Code:
+An outside app can put one question in front of the owner. It shows on the Guild Hall's **Quest board**
+(Home), next to Session Manager's own items. The owner answers there, or in the app behind the link. Code:
 `src/main/lib/feedback-remote/needsYouAdminRoutes.cjs` (routes),
 `src/main/lib/feedback-remote/needsYouStore.cjs` (the store and its limits),
 `src/main/lib/feedback-remote/needsYouIpc.cjs` (the owner's answer).

@@ -1119,8 +1119,8 @@ function restoreOpenAutoDispatchHold(v) {
 /** Test-only seam: the open audit hold, and a reset that drops it from memory (a simulated process exit). */
 function _getOpenAutoDispatchHoldForTests() { return openAutoDispatchHold; }
 function _forgetOpenAutoDispatchHoldForTests() { openAutoDispatchHold = null; }
-/** Test-only seam: a fresh process — no unheld tick seen since boot. */
-function _resetSawUnheldTickForTests() { sawUnheldTickSinceBoot = false; }
+/** Test-only seam: a fresh process — no previous tick. */
+function _resetPreviousTickUnheldForTests() { previousTickUnheld = false; }
 
 const HOLD_RESET_CONTINUITY_MS = 60_000;
 
@@ -1151,7 +1151,7 @@ function continuesOpenHold(open, hold) {
  * @param {object | null} hold currentAutoDispatchHold() result
  * @param {number} pending pending-row count for the started event
  */
-function trackAutoDispatchHoldAudit(hold, pending) {
+function trackAutoDispatchHoldAudit(hold, pending, startObserved = false) {
   try {
     const identity = hold ? autoDispatchHold.holdIdentityKey(hold) : null;
     const open = openAutoDispatchHold;
@@ -1188,7 +1188,7 @@ function trackAutoDispatchHoldAudit(hold, pending) {
         resetsAt: hold.resetsAt ?? null,
         holdKey: identity,
         pending,
-        startObserved: sawUnheldTickSinceBoot,
+        startObserved,
         version: SCHEDULER_BUILD_IDENTITY.version,
       });
       openAutoDispatchHold = {
@@ -2802,10 +2802,10 @@ let lastAutoDispatchHoldKey = null;
 // scheduler-state.json so a restart neither re-opens nor loses it (the
 // heartbeat log keeps only ~18-37 h).
 let openAutoDispatchHold = null;
-// True once this process ran a tick with no auto-dispatch hold in force: a
-// hold that opens after that was seen to start (startObserved: true); one
-// already in force on the first tick after boot was not.
-let sawUnheldTickSinceBoot = false;
+// True when this process's immediately preceding tick found no auto-dispatch
+// hold: a hold opening now was seen to start (startObserved: true); one that
+// replaces another hold, or is in force on the first tick after boot, was not.
+let previousTickUnheld = false;
 // ms timestamp of the last FRESH reset observation (see recordObservedReset)
 // — distinct from Date.now(), so persistSchedulerState never re-stamps a
 // stale cachedNextReset as "just observed" on every poll cycle.
@@ -10404,8 +10404,9 @@ async function tickBody(gen, { bypassLoadGate, lastResort, human = false }) {
       const pendingCount = hold || openAutoDispatchHold
         ? state.jobs.filter((j) => j.status === 'pending' && !runningSet.has(j.slug)).length
         : 0;
-      if (hold || openAutoDispatchHold) trackAutoDispatchHoldAudit(hold, pendingCount);
-      if (!hold) sawUnheldTickSinceBoot = true;
+      const startObserved = previousTickUnheld;
+      previousTickUnheld = hold == null;
+      if (hold || openAutoDispatchHold) trackAutoDispatchHoldAudit(hold, pendingCount, startObserved);
       if (hold) {
         if (human) {
           bypassedHold = hold;
@@ -15226,7 +15227,7 @@ module.exports = {
   _auditHumanPressForTests: auditHumanPress,
   _forgetLastSeenConfigForTests,
   _forgetOpenAutoDispatchHoldForTests,
-  _resetSawUnheldTickForTests,
+  _resetPreviousTickUnheldForTests,
   computeDegradedBudget,
   utilizationReading,
   usageHoldThreshold,

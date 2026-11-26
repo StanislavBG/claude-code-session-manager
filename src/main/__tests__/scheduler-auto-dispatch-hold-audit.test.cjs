@@ -61,8 +61,8 @@ function queueOne() {
 /** A reset time on an exact minute (±0.5 s never crosses holdIdentityKey rounding); callers pass > 7 days so the pro-rated threshold stays at the 90 base. */
 function minuteReset(offsetMs) { return Math.round((Date.now() + offsetMs) / MINUTE) * MINUTE; }
 
-function weeklyAt(pct, resetMs) {
-  const session = { kind: 'session', percent: 10, resets_at: new Date(Date.now() + 2 * HOUR).toISOString(), scope: null };
+function weeklyAt(pct, resetMs, sessionPct = 10) {
+  const session = { kind: 'session', percent: sessionPct, resets_at: new Date(Date.now() + 2 * HOUR).toISOString(), scope: null };
   const limits = [session, { kind: 'weekly_all', percent: pct, resets_at: new Date(resetMs).toISOString(), scope: null }];
   return {
     kind: 'ok',
@@ -70,9 +70,9 @@ function weeklyAt(pct, resetMs) {
   };
 }
 
-async function reading(pct, resetMs) {
+async function reading(pct, resetMs, sessionPct = 10) {
   billing.usageCircuit.recordSuccess({});
-  billing.fetchUsage = async () => weeklyAt(pct, resetMs);
+  billing.fetchUsage = async () => weeklyAt(pct, resetMs, sessionPct);
   await scheduler.refreshNextReset();
 }
 
@@ -287,7 +287,7 @@ test('continuity: a resetsAt moved by 2 minutes writes ended then started', asyn
 });
 
 test('startObserved: a held first tick after boot writes startObserved false', async () => {
-  scheduler._resetSawUnheldTickForTests();
+  scheduler._resetPreviousTickUnheldForTests();
   await reading(96, minuteReset(7 * DAY + HOUR));
   queueOne();
   await scheduler.tickQueue();
@@ -297,7 +297,7 @@ test('startObserved: a held first tick after boot writes startObserved false', a
 });
 
 test('startObserved: an unheld tick then a held tick writes startObserved true', async () => {
-  scheduler._resetSawUnheldTickForTests();
+  scheduler._resetPreviousTickUnheldForTests();
   const reset = minuteReset(7 * DAY + HOUR);
   await reading(10, reset);
   await scheduler.tickQueue();
@@ -307,6 +307,25 @@ test('startObserved: an unheld tick then a held tick writes startObserved true',
   const ev = holdEvents();
   expect(ev).toHaveLength(1);
   expect(ev[0]).toMatchObject({ kind: 'auto_dispatch_hold_started', startObserved: true });
+});
+
+test('startObserved: a hold replaced by another reason while held writes startObserved false', async () => {
+  scheduler._resetPreviousTickUnheldForTests();
+  const reset = minuteReset(7 * DAY + HOUR);
+  await reading(10, reset);
+  await scheduler.tickQueue();
+  await reading(96, reset);
+  queueOne();
+  await scheduler.tickQueue();
+  await reading(10, reset, 99);
+  await scheduler.tickQueue();
+  const ev = holdEvents();
+  const started = ev.filter((e) => e.kind === 'auto_dispatch_hold_started');
+  expect(started).toHaveLength(2);
+  expect(started[0].startObserved).toBe(true);
+  expect(started[0].window).toBe('weekly_all');
+  expect(started[1].window).toBe('session');
+  expect(started[1].startObserved).toBe(false);
 });
 
 test('drift: resetsAt moving 40 s later on each of five held ticks writes one started event and no ended', async () => {

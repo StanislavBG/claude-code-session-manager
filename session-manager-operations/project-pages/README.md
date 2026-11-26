@@ -180,6 +180,13 @@ The macro editor locks `Show in every project` on for a Project Home tool and sh
 
 Per-file notes: [`code-map.md`](../architecture/code-map.md).
 
+## Git class: tracked
+
+`project-pages` is GIT_CLASS `tracked` (`src/main/lib/opsOwnership.cjs`). Project Home output
+(`knowledge/`, `videos/` including `_character/`, `matrix/`) is the project's own content,
+committed like docs. Session Manager never writes `project-pages/.gitignore`; a project that
+wants it out of git adds its own ignore rule, which Session Manager leaves alone.
+
 ## Library: Knowledge Pages + Videos
 
 **The split: HTML pages explain, videos show.** A Knowledge Page is a static, script-free
@@ -203,13 +210,6 @@ project-pages/
 `_character` can never match. `index.html` is written first, then `meta.json`, both
 atomically as writer `project-home`. Storage code: `src/main/lib/project-pages/pagesLibrary.cjs`
 (`listLibrary` is newest-first, capped at 500 entries).
-
-## Git class: tracked
-
-`project-pages` is GIT_CLASS `tracked` (`src/main/lib/opsOwnership.cjs`). Project Home output
-(`knowledge/`, `videos/` including `_character/`, `matrix/`) is the project's own content,
-committed like docs. Session Manager never writes `project-pages/.gitignore`; a project that
-wants it out of git adds its own ignore rule, which Session Manager leaves alone.
 
 ### meta.json schemas (`ipcSchemas.cjs`, both `.strict()`)
 

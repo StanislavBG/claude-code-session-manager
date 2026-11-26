@@ -435,3 +435,25 @@ test('listPersonas entries carry the loadout state', async () => {
   const by = Object.fromEntries(list.map((p) => [p.name, p.loadout]));
   expect(by).toMatchObject({ 'l-bare-empty': 'bare', 'l-undecided': 'undecided', 'l-bare': 'bare', 'l-equipped': 'equipped', 'l-unbound': 'unbound' });
 });
+
+test('listPersonas adds upgrade for an edited bundled-name persona behind the bundled file; dismissed and non-bundled are null', async () => {
+  const globalDir = await mkTmp('sm-agent-library-upg-global-');
+  const srcDir = await mkTmp('sm-agent-library-upg-src-');
+  await fsp.writeFile(path.join(srcDir, 'architect.md'), '---\nname: architect\nseedVersion: 5\n---\n\nNew bundled body.\n');
+  const old = '---\nname: architect\nseedVersion: 2\n---\n\nMy edited body.\n';
+  await fsp.writeFile(path.join(globalDir, 'architect.md'), old);
+  await fsp.writeFile(path.join(globalDir, 'validator.md'), old.replace(/architect/, 'validator'));
+  await fsp.writeFile(path.join(globalDir, 'custom-thing.md'), old.replace(/architect/, 'custom-thing'));
+  await fsp.writeFile(path.join(srcDir, 'validator.md'), '---\nname: validator\nseedVersion: 5\n---\n\nV.\n');
+  const run = (dismissals) => listPersonas({
+    globalDir,
+    loadSessions: async () => ({ tabs: [] }),
+    validatePath: identityValidatePath,
+    upgradeDeps: { shippedSeeds: {}, srcDir, dismissals },
+  });
+  const rows = await run({ validator: 5 });
+  const by = Object.fromEntries(rows.map((r) => [r.name, r]));
+  expect(by.architect.upgrade).toEqual({ installedVersion: 2, bundledVersion: 5, edited: true, bundledBody: 'New bundled body.' });
+  expect(by.validator.upgrade).toBeNull();
+  expect(by['custom-thing'].upgrade).toBeNull();
+});

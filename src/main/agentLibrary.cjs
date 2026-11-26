@@ -26,6 +26,7 @@ const { resolveMergedPersona, PERSONA_NAME_RE } = require('./lib/persona-macro/p
 const { isNonClaudeAgentCli, isAgentCliModel } = require('./lib/agent-cli/agentCliEvents.cjs');
 const { loadoutState, encodeLoadout } = require('./lib/persona-macro/personaLoadout.cjs');
 const { mcpServersFromTools } = require('./lib/claude/agentSnapshot.cjs');
+const { personaUpgradeFor, readDismissals } = require('./lib/persona-macro/personaUpgrade.cjs');
 const configMgr = require('./config.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 
@@ -467,6 +468,7 @@ async function listPersonas({
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
   loadSessions = sessionsStore.load,
   validatePath = configMgr.validatePath,
+  upgradeDeps,
 } = {}) {
   let files;
   try {
@@ -478,6 +480,7 @@ async function listPersonas({
 
   const projects = await openProjects({ loadSessions });
   const personas = [];
+  const dismissals = upgradeDeps?.dismissals ?? readDismissals();
 
   for (const file of files.sort()) {
     const fallbackName = file.replace(/\.md$/, '');
@@ -523,6 +526,12 @@ async function listPersonas({
 
     const trimmedCli = typeof fm.agentCli === 'string' ? fm.agentCli.trim() : '';
     const listedCli = isNonClaudeAgentCli(trimmedCli) ? trimmedCli : null;
+    let upgrade = null;
+    try {
+      upgrade = personaUpgradeFor(fallbackName, text, { ...upgradeDeps, dismissals }) ?? null;
+    } catch {
+      upgrade = null;
+    }
     personas.push({
       name: fm.name || fallbackName,
       description: fm.description || null,
@@ -547,6 +556,7 @@ async function listPersonas({
       body: body.trim(),
       overridingProjects,
       overrideDetails,
+      upgrade,
     });
   }
 

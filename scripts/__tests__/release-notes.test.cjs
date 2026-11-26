@@ -221,6 +221,97 @@ describe('release-notes.cjs upgrade-note rewriting', () => {
   })
 })
 
+describe('release-notes.cjs edge cases', () => {
+  let repo3
+  const g = (...args) =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', ...args], {
+      cwd: repo3, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  const run3 = (...args) => spawnSync(process.execPath, [SCRIPT, '--repo', repo3, ...args], { encoding: 'utf8' })
+  const NOTE = [
+    '# Title',
+    '',
+    '```',
+    '# not a heading',
+    '[x](rel.md)',
+    '```',
+    '~~~',
+    '## also not',
+    '~~~',
+    '',
+    'Titled [t](a/b.md "the title") link and [r][ref].',
+    '',
+    '[ref]: c.md',
+    '[ref2]: d.md "ref title"',
+    '[abs]: https://example.com/z',
+  ].join('\n')
+
+  beforeAll(() => {
+    repo3 = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-edge-'))
+    g('init', '-q', '-b', 'main')
+    g('commit', '-q', '--allow-empty', '-m', 'feat: first')
+    g('tag', 'v1.0.0')
+    fs.mkdirSync(path.join(repo3, 'release-notes'))
+    fs.writeFileSync(path.join(repo3, 'package.json'), JSON.stringify({ name: 'x', repository: 'https://github.com/acme/widget' }))
+    fs.writeFileSync(path.join(repo3, 'release-notes', 'after-v1.0.0.md'), NOTE + '\n')
+    g('add', '.')
+    g('commit', '-q', '-m', 'docs: note')
+    g('tag', 'v1.1.0')
+    const lines = Array.from({ length: 200 }, (_, i) => `line number ${i} of the long note`)
+    fs.writeFileSync(path.join(repo3, 'release-notes', 'after-v1.0.0.md'), lines.join('\n') + '\n')
+    g('add', '.')
+    g('commit', '-q', '-m', 'docs: long')
+    g('tag', 'v1.2.0')
+  })
+  afterAll(() => {
+    if (repo3) fs.rmSync(repo3, { recursive: true, force: true })
+  })
+
+  it('leaves fenced blocks unchanged', () => {
+    const out = run3('--tag', 'v1.1.0', '--prev', 'v1.0.0').stdout
+    expect(out).toContain('```\n# not a heading\n[x](rel.md)\n```')
+    expect(out).toContain('~~~\n## also not\n~~~')
+    expect(out).toContain('### Title')
+  })
+
+  it('rewrites reference definitions and titled inline links', () => {
+    const out = run3('--tag', 'v1.1.0', '--prev', 'v1.0.0').stdout
+    const base = 'https://github.com/acme/widget/blob/v1.1.0/release-notes/'
+    expect(out).toContain(`[ref]: ${base}c.md\n`)
+    expect(out).toContain(`[ref2]: ${base}d.md "ref title"`)
+    expect(out).toContain(`[t](${base}a/b.md "the title")`)
+    expect(out).toContain('[abs]: https://example.com/z')
+  })
+
+  it('truncates at a line boundary and keeps the marker within the cap', () => {
+    const max = 1000
+    const out = run3('--tag', 'v1.2.0', '--prev', 'v1.0.0', '--max-chars', String(max)).stdout
+    expect(out.length).toBeLessThanOrEqual(max)
+    const marker = '\n\n…(upgrade notes truncated)\n'
+    const idx = out.indexOf(marker)
+    expect(idx).toBeGreaterThan(0)
+    expect(out.slice(0, idx).split('\n').pop()).toMatch(/^line number \d+ of the long note$/)
+  })
+
+  it('the real 0.142.0 note: title becomes ###, link pinned to the tag', () => {
+    const real = fs.readFileSync(path.join(ROOT, 'release-notes', 'after-v0.142.0.md'), 'utf8')
+    expect(real.startsWith('# ')).toBe(true)
+    expect(real).not.toContain('github.com')
+    // HEAD's tree may predate the working-tree note, so run the script on a temp repo holding it.
+    const g4 = (...args) =>
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], {
+        cwd: repo3, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    fs.writeFileSync(path.join(repo3, 'release-notes', 'after-v1.0.0.md'), real)
+    g4('add', '.')
+    g4('commit', '-q', '-m', 'docs: real note')
+    const out = run3('--tag', 'HEAD', '--prev', 'v1.0.0').stdout
+    expect(out).toMatch(/^### Fine-grained/m)
+    expect(out).not.toMatch(/^#{4,} Fine-grained/m)
+    expect(out).toMatch(/\(https:\/\/github\.com\/[^/]+\/[^/]+\/blob\/HEAD\/session-manager-operations\/architecture\/external-contract\.md\)/)
+  })
+})
+
 describe('release.yml finalize-release', () => {
   const wf = yaml.load(fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'release.yml'), 'utf8'))
   const steps = wf.jobs['finalize-release'].steps

@@ -48,24 +48,58 @@ function repoSlug(repo, tag) {
   }
 }
 
-const LINK_RE = /\]\(([^)\s]+)\)/g
+const INLINE_RE = /\]\(([^)\s]+)(\s+"[^"]*")?\)/g
+const REF_RE = /^(\s*\[[^\]]+\]:\s*)(\S+)/
 const isRelative = (target) => !/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith('#')
 
+// Apply fn to every line outside ``` / ~~~ fenced blocks; fenced lines pass through unchanged.
+function mapOutsideFences(note, fn) {
+  let fence = null
+  return note
+    .split('\n')
+    .map((line) => {
+      const m = line.match(/^\s*(`{3,}|~{3,})/)
+      if (m) {
+        if (!fence) fence = m[1][0]
+        else if (m[1][0] === fence) fence = null
+        return line
+      }
+      return fence ? line : fn(line)
+    })
+    .join('\n')
+}
+
 // A release body has no base path, so relative targets (resolved from release-notes/) become blob URLs.
+function blobUrl(target, slug, tag) {
+  let p = target.startsWith('/') ? target.slice(1) : path.posix.join('release-notes', target)
+  p = path.posix.normalize(p)
+  while (p.startsWith('../')) p = p.slice(3)
+  return `https://github.com/${slug}/blob/${tag}/${p}`
+}
+
 function rewriteLinks(note, slug, tag) {
   if (!slug) return note
-  return note.replace(LINK_RE, (whole, target) => {
-    if (!isRelative(target)) return whole
-    let p = target.startsWith('/') ? target.slice(1) : path.posix.join('release-notes', target)
-    p = path.posix.normalize(p)
-    while (p.startsWith('../')) p = p.slice(3)
-    return `](https://github.com/${slug}/blob/${tag}/${p})`
+  return mapOutsideFences(note, (line) => {
+    line = line.replace(REF_RE, (whole, pre, target) => (isRelative(target) ? pre + blobUrl(target, slug, tag) : whole))
+    return line.replace(INLINE_RE, (whole, target, title) => (isRelative(target) ? `](${blobUrl(target, slug, tag)}${title || ''})` : whole))
   })
+}
+
+function hasRelativeLinks(note) {
+  let found = false
+  mapOutsideFences(note, (line) => {
+    const r = line.match(REF_RE)
+    if (r && isRelative(r[2])) found = true
+    for (const m of line.matchAll(INLINE_RE)) if (isRelative(m[1])) found = true
+    return line
+  })
+  return found
 }
 
 // Nest the note under '## Upgrade notes': # -> ###, ## -> ####, capped at ######.
 function demoteHeadings(note) {
-  return note.replace(/^(#{1,6})(\s)/gm, (_, hashes, sp) => '#'.repeat(Math.min(6, hashes.length + 2)) + sp)
+  return mapOutsideFences(note, (line) =>
+    line.replace(/^(#{1,6})(\s)/, (_, hashes, sp) => '#'.repeat(Math.min(6, hashes.length + 2)) + sp))
 }
 
 function buildNotes({ repo = process.cwd(), tag, prev, maxChars = MAX_CHARS } = {}) {
@@ -84,7 +118,7 @@ function buildNotes({ repo = process.cwd(), tag, prev, maxChars = MAX_CHARS } = 
   const hasNote = tryGit(repo, ['cat-file', '-e', `${tag}:${notePath}`]) !== null
   let upgrade = hasNote ? git(repo, ['show', `${tag}:${notePath}`]).trim() : ''
   if (upgrade) {
-    const needsSlug = [...upgrade.matchAll(LINK_RE)].some((m) => isRelative(m[1]))
+    const needsSlug = hasRelativeLinks(upgrade)
     if (needsSlug) {
       const slug = repoSlug(repo, tag)
       if (slug) upgrade = rewriteLinks(upgrade, slug, tag)
@@ -109,7 +143,11 @@ function buildNotes({ repo = process.cwd(), tag, prev, maxChars = MAX_CHARS } = 
   head += `## Changes since ${prev}\n\n`
   if (head.length > maxChars) {
     const marker = '\n\n…(upgrade notes truncated)\n'
-    head = head.slice(0, Math.max(0, maxChars - marker.length - 200)) + marker
+    let cut = head.slice(0, Math.max(0, maxChars - marker.length - 200))
+    const nl = cut.lastIndexOf('\n')
+    // Keep the raw slice when the note has no line break to cut back to (one very long line).
+    if (nl > '## Upgrade notes\n\n'.length) cut = cut.slice(0, nl)
+    head = cut + marker
   }
 
   let body = head

@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v34 -->
+<!-- PRD_AUTHORING.md v35 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -273,3 +273,4 @@ Before queueing a new PRD, verify each of these:
 - [ ] **Doc links gated:** a PRD that adds, moves or renames a markdown file runs the project's doc-link check in its gate when the project has one (in session-manager: `timeout 120 npm run lint:docs`). Why: PRD kit-cast-playbook added `src/main/lib/demo-video-kit/cast.md` with only the kit tests in its gate, so the orphan doc landed on 2026-11-23 and turned lint:docs red for the next PRD.
 - [ ] **Size budgets gated:** a PRD that edits a file the project caps by size runs that cap's check in its gate when the project has one (in session-manager: README.md gates `timeout 120 npm run lint:readme`). Why: PRD 4105-web-remote-label-leftovers edited README.md with only lint:docs and typecheck in its gate, so README.md reached 24,026 bytes on 2026-11-24, over its cap, and npm run lint turned red for every later PRD.
 - [ ] **Gate purity:** a gate command must not create or modify tracked files; outputs go to the per-gate TMPDIR or a gitignored path. Why: a dirtied tree fails the clean-tree check.
+- [ ] **Plan-review checklist** (the independent reviewer checks each queued PRD; check them yourself first): every criterion is provable from the tree or a read-only probe; a failure path is covered; one edge case is covered; no criterion is vacuous because a sibling PRD already satisfies it; every `dependsOn` is real (the PRD needs that PRD's output); the gate is green at base; a live-behavior change has an `http` criterion; a doc PRD depends on the code PRD it describes.

@@ -1,7 +1,7 @@
 /**
  * develop-skill-planning-rules.test.cjs — drift guard for five planning rules in the
  * /develop skill and PRD_AUTHORING.md (art tag, gate purity, test-file allowance,
- * completeness-pass timing, validate criteria by slug).
+ * plan-review wording, validate criteria by slug).
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/develop-skill-planning-rules.test.cjs
  */
@@ -48,12 +48,15 @@ test('step 7 exempts lockstep test files from the file limit', () => {
   );
 });
 
-test('step 4 starts the completeness pass in the background with the turn deadline', () => {
+test('step 4 holds plans for the independent plan review; rule 13 and Phase 2 name it', () => {
   const s = flat(skill());
-  expect(s).toMatch(/background sub-agent as soon as the draft list exists/);
-  expect(s).toMatch(/keep exploring while it runs/);
-  expect(s).toMatch(/hard-killed at 30 minutes with a warning at 24/);
-  expect(s).toMatch(/late gaps become sibling PRDs/);
+  expect(s).not.toMatch(/completeness pass/);
+  expect(s).toMatch(/held for|held: plan-review/);
+  expect(s).toMatch(/SM_PLAN_REVIEW=0/);
+  expect(s).toMatch(/SM_PLAN_REVIEW_HOLD_MINUTES/);
+  expect(s).toMatch(/plan reviewer reviews before dispatch and the validator after/);
+  expect(s).toMatch(/PLAN REVIEWED digest/);
+  expect(s).toMatch(/scheduler_release_plan/);
 });
 
 test('validate criterion 4 cites PRDs by slug, no NN in the path', () => {

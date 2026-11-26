@@ -110,11 +110,9 @@ three failure modes have different fixes:
    (empty, max, concurrent, malformed, permission, failure); interaction effects (what depends
    on your change); integration (reuse the existing schema, store, API, primitives);
    validation (for UI: which screenshot, light and dark, proves which criterion).
-4. **Run a completeness pass** if the ask exceeds one or two PRDs or spans subsystems: start it as a
-   background sub-agent as soon as the draft list exists (Explore or general-purpose; the ask
-   verbatim, your draft list, the lenses; ask what is missing) and keep exploring while it runs.
-   The planner turn is hard-killed at 30 minutes with a warning at 24; late gaps become sibling
-   PRDs. Fold in real gaps, drop vague ones. Repeat at most once. It reviews; you author.
+4. **Plans of 3+ PRDs, or any chain, are held for an independent plan review before dispatch**
+   (`held: plan-review`). `SM_PLAN_REVIEW=0` is off;
+   `SM_PLAN_REVIEW_HOLD_MINUTES` is the timeout.
 5. **Tests and security go inside the feature's own PRD** as criteria (security when it
    touches input, auth or data), never as follow-ups. Why: TDD needs the test with the code;
    security is decided while writing it. Also check quality (performance, error handling).
@@ -165,7 +163,7 @@ three failure modes have different fixes:
     change a PRD only to silence a warning. Then post one short message: each PRD's number and
     slug, the validate slug, and that no per-PRD check will come from this session. Name a
     warning only if you changed a PRD because of it.
-13. **Never stop for review after queueing.** Why: the validator is the review.
+13. **Never stop for review after queueing.** Why: the plan reviewer reviews before dispatch and the validator after.
 
 ### PRD fields
 
@@ -299,7 +297,10 @@ Rules:
       under Needs you (rule 6) with the validator's reason and what was tried. Why: a second miss on the same criterion means the plan is wrong, and another
       wave would repeat it. A Not validated list means validate exactly those PRDs here. All
       `VERIFIED` with nothing open means Done: write the final report.
-   3. **A `PRECONDITION HOLD` notice** is not a park and not a fix-wave trigger. Do nothing — no
+   3. **A PLAN REVIEWED digest.** Apply amendments via `scheduler_update_prd`, give a one-line
+      reason per rejected finding, then release with one `scheduler_release_plan` call
+      (`rereview` only after a block, once).
+   4. **A `PRECONDITION HOLD` notice** is not a park and not a fix-wave trigger. Do nothing — no
       reset, no edit, no fix PRD; the scheduler re-checks the preflight on its own. State the
       missing precondition in the report. Why: only a person can supply it.
 4. **Done** = the latest validator marked every PRD `VERIFIED`, including each PRD an earlier

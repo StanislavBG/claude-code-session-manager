@@ -7093,6 +7093,36 @@ function healTargetForFix(fixSlug, jobs) {
 }
 
 /**
+ * A fix plan succeeded for `orig`. An artifact-only parent (PRD declares
+ * deliverable: artifact) is re-queued to pending for a fresh run, because
+ * promoting it would mark it done without its record (4418: live probe never
+ * re-run, artifactEvidence stayed ok:false). Any other parent is promoted to
+ * completed as before. Returns 'requeued' | 'completed' | 'skipped'
+ * ('skipped' = already re-queued once for this fix plan; a repeat boot pass
+ * must not loop the parent back to pending after it failed again).
+ */
+function applyFixSuccessToOriginal(orig, fixSlug, { promoteReason, promoteSource, requeueSource }) {
+  if (orig.deliverable === 'artifact') {
+    if (orig.requeuedByFix === fixSlug) return 'skipped';
+    const ok = resetJobFields(orig, `requeued: fix plan ${fixSlug} succeeded`, { source: requeueSource });
+    if (ok) {
+      orig.error = null; // the reason lives on the transition, not as a row error
+      orig.requeuedByFix = fixSlug;
+      delete orig.completedBy;
+      delete orig.looksDone;
+      return 'requeued';
+    }
+    return 'skipped';
+  }
+  transitionJob(orig, 'completed', { reason: promoteReason, source: promoteSource });
+  orig.exitCode = 0;
+  orig.error = null;
+  orig.completedBy = fixSlug;
+  delete orig.looksDone;
+  return 'completed';
+}
+
+/**
  * Build the Opus investigation prompt. Pure/hermetic so its content can be
  * unit-tested (no spawn, no fs). Inputs are the already-resolved values that
  * spawnInvestigation computes.
@@ -9643,16 +9673,18 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
             const orig = healTargetForFix(job.slug, s.jobs);
             if (orig) {
               const priorStatus = orig.status;
-              console.log(`[scheduler] auto-promote: ${orig.slug} (${priorStatus}) → completed because ${job.slug} succeeded`);
-              transitionJob(orig, 'completed', { reason: `auto-promoted: fix plan ${job.slug} succeeded`, source: 'spawnJob:auto-promote' });
-              orig.exitCode = 0;
-              orig.error = null;
-              orig.completedBy = job.slug;
-              delete orig.looksDone;
-              if (priorStatus === 'needs_review') {
-                delete orig.verifierVerdict;
+              const outcome = applyFixSuccessToOriginal(orig, job.slug, {
+                promoteReason: `auto-promoted: fix plan ${job.slug} succeeded`,
+                promoteSource: 'spawnJob:auto-promote',
+                requeueSource: 'spawnJob:auto-promote',
+              });
+              console.log(`[scheduler] auto-promote: ${orig.slug} (${priorStatus}) → ${outcome} because ${job.slug} succeeded`);
+              if (outcome === 'completed') {
+                if (priorStatus === 'needs_review') {
+                  delete orig.verifierVerdict;
+                }
+                newlyCompletedPrds.push({ slug: orig.slug, cwd: orig.cwd });
               }
-              newlyCompletedPrds.push({ slug: orig.slug, cwd: orig.cwd });
             }
           }
         }
@@ -13013,14 +13045,17 @@ async function reverifyNeedsReview() {
       const orig = healTargetForFix(job.slug, s.jobs);
       if (!orig) continue;
       const priorStatus = orig.status;
-      transitionJob(orig, 'completed', { reason: `auto-promoted: fix plan ${job.slug} already completed`, source: 'reverifyNeedsReview:auto-promote' });
-      orig.exitCode = 0;
-      orig.error = null;
-      orig.completedBy = job.slug;
-      delete orig.looksDone;
-      if (priorStatus === 'needs_review') delete orig.verifierVerdict;
-      promoted.push(`${orig.slug} (was ${priorStatus}, via ${job.slug})`);
-      promotedPrds.push({ slug: orig.slug, cwd: orig.cwd });
+      const outcome = applyFixSuccessToOriginal(orig, job.slug, {
+        promoteReason: `auto-promoted: fix plan ${job.slug} already completed`,
+        promoteSource: 'reverifyNeedsReview:auto-promote',
+        requeueSource: 'reverifyNeedsReview:auto-promote',
+      });
+      if (outcome === 'skipped') continue;
+      if (outcome === 'completed') {
+        if (priorStatus === 'needs_review') delete orig.verifierVerdict;
+        promotedPrds.push({ slug: orig.slug, cwd: orig.cwd });
+      }
+      promoted.push(`${orig.slug} (was ${priorStatus}, ${outcome} via ${job.slug})`);
     }
   });
   for (const { slug, cwd } of promotedPrds) {
@@ -15274,6 +15309,7 @@ module.exports = {
   isPromotableOriginal,
   applyRcaClassification,
   healTargetForFix,
+  applyFixSuccessToOriginal,
   buildInvestigationPrompt,
   readRunOutcomeSidecars,
   isFixPlanSlug,

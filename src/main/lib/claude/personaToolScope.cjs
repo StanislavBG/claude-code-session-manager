@@ -164,12 +164,52 @@ function personaToolScopeEnv(scope) {
   return { [JOB_MCP_TOOLS_ENV]: JSON.stringify(mcp) };
 }
 
+/**
+ * The `--disallowedTools=Skill(<name>)` argv that refuses every installed
+ * skill a persona's equipped packs do not carry. Skills ride only inside packs.
+ * Verified on CLI 2.1.330: a denied Skill call fails with 'Skill execution
+ * blocked by permission rules'. Always the --flag=value form (only the first
+ * value after a variadic flag is literal). Pure: the caller passes the catalog.
+ *
+ * Unbound/undecided loadouts deny nothing; Bare ignores equipped packs. CLI-bundled
+ * skills follow the built-in tool decision and are never denied; `alwaysAllowed`
+ * (finish protocol: code-review, security-review) never are either.
+ *
+ * @param {{ installedSkills?: readonly string[], equippedPacks?: readonly string[],
+ *   packCatalog?: readonly { id: string, skills?: readonly string[] }[],
+ *   bundledSkills?: readonly string[], loadout?: string,
+ *   alwaysAllowed?: readonly string[] }} [opts]
+ * @returns {string[]}
+ */
+function skillDenyArgs({
+  installedSkills = [], equippedPacks = [], packCatalog = [], bundledSkills = [],
+  loadout, alwaysAllowed = ['code-review', 'security-review'],
+} = {}) {
+  if (loadout === 'unbound' || loadout === 'undecided') return [];
+  const allowed = new Set([...bundledSkills, ...alwaysAllowed].map(String));
+  if (loadout !== 'bare') {
+    const equipped = new Set(equippedPacks.map(String));
+    for (const pack of packCatalog) {
+      if (!pack || !equipped.has(String(pack.id))) continue;
+      for (const s of pack.skills || []) allowed.add(String(s));
+    }
+  }
+  const out = [];
+  for (const raw of installedSkills) {
+    const name = String(raw).trim();
+    if (!name || allowed.has(name) || out.includes(`--disallowedTools=Skill(${name})`)) continue;
+    out.push(`--disallowedTools=Skill(${name})`);
+  }
+  return out;
+}
+
 module.exports = {
   JOB_MCP_TOOLS_ENV,
   personaToolScopeEnv,
   HEADLESS_TOOL_FLOOR,
   HEADLESS_SCOPE_AGENT_NAME,
   buildPersonaToolScope,
+  skillDenyArgs,
   personaToolScopeArgs,
   resolvedMcpServerNames,
 };

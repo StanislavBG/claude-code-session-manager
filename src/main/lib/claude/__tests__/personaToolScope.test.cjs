@@ -9,6 +9,7 @@ const {
   buildPersonaToolScope,
   personaToolScopeArgs,
   personaToolScopeEnv,
+  skillDenyArgs,
   JOB_MCP_TOOLS_ENV,
 } = require('../personaToolScope.cjs');
 
@@ -160,5 +161,36 @@ describe('loadout states', () => {
 
   it('Unbound (tools: *) is unscoped', () => {
     assert.equal(buildPersonaToolScope(['*']), null);
+  });
+});
+
+describe('skillDenyArgs', () => {
+  const packCatalog = [{ id: 'dev', skills: ['session-manager-dev:develop'] }];
+  const base = {
+    installedSkills: ['session-manager-dev:develop', 'my-user-skill', 'simplify', 'code-review'],
+    packCatalog,
+    bundledSkills: ['simplify'],
+  };
+
+  it('allows a skill carried by an equipped pack, denies the unpacked one', () => {
+    assert.deepEqual(
+      skillDenyArgs({ ...base, equippedPacks: ['dev'], loadout: 'equipped' }),
+      ['--disallowedTools=Skill(my-user-skill)'],
+    );
+  });
+
+  it('denies a pack skill when its pack is not equipped; bundled + always-allowed pass', () => {
+    assert.deepEqual(
+      skillDenyArgs({ ...base, equippedPacks: [], loadout: 'equipped' }),
+      ['--disallowedTools=Skill(session-manager-dev:develop)', '--disallowedTools=Skill(my-user-skill)'],
+    );
+  });
+
+  it('unbound yields []; bare denies every non-bundled skill', () => {
+    assert.deepEqual(skillDenyArgs({ ...base, equippedPacks: ['dev'], loadout: 'unbound' }), []);
+    assert.deepEqual(
+      skillDenyArgs({ ...base, equippedPacks: ['dev'], loadout: 'bare' }),
+      ['--disallowedTools=Skill(session-manager-dev:develop)', '--disallowedTools=Skill(my-user-skill)'],
+    );
   });
 });

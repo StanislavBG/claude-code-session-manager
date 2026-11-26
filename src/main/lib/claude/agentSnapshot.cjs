@@ -5,7 +5,7 @@
  * agent), stored locally and content-addressed.
  *
  * A snapshot freezes exactly the agent definition a run used:
- *   { name, bodySha256, body, model, effort, tools, mcpServers, packs, seedVersion, environment }
+ *   { name, bodySha256, body, model, effort, tools, mcpServers, packs, seedVersion, environment, gearBindsChat, loadout }
  * Its id is the sha256 of its canonical JSON (keys sorted at every depth), so
  * equal definitions share one id and any edit (body, model, tools, ...) mints
  * a new one. A resume can therefore re-run precisely the definition it pinned.
@@ -36,6 +36,7 @@ const crypto = require('node:crypto');
 const fsp = require('node:fs/promises');
 const { opsPath, assertOpsWrite } = require('../opsOwnership.cjs');
 const atomicFs = require('../util/atomicFs.cjs');
+const { loadoutState } = require('../persona-macro/personaLoadout.cjs');
 
 const WRITER = 'agents';
 const ID_RE = /^[0-9a-f]{64}$/;
@@ -120,6 +121,9 @@ async function buildAgentSnapshot({ cwd, agentType, packs, deps = {} } = {}) {
     packs: Array.isArray(packs) ? packs.map(String) : [],
     seedVersion,
     environment: { id: env.id, hash: env.hash },
+    // Gear applies to chat turns only for snapshots stamped true; older snapshots lack the key (falsy).
+    gearBindsChat: true,
+    loadout: loadoutState(fm),
   };
   return { id: snapshotId(snapshot), snapshot, refusal: null };
 }

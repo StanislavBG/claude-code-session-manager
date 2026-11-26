@@ -46,7 +46,7 @@ test('builds the frozen definition from the persona resolvers', async () => {
   const { id, snapshot, refusal } = await snap.buildAgentSnapshot({ cwd, agentType: NAME, packs: ['p1'] });
   expect(refusal).toBeNull();
   expect(Object.keys(snapshot).sort()).toEqual(
-    ['body', 'bodySha256', 'effort', 'environment', 'mcpServers', 'model', 'name', 'packs', 'seedVersion', 'tools'],
+    ['body', 'bodySha256', 'effort', 'environment', 'gearBindsChat', 'loadout', 'mcpServers', 'model', 'name', 'packs', 'seedVersion', 'tools'],
   );
   expect(snapshot.name).toBe(NAME);
   expect(snapshot.body).toBe('You are the snapshot tester.');
@@ -122,4 +122,21 @@ test('refusal passthrough: a missing persona yields its refusal and no snapshot'
     deps: { resolvePrdPersonaForSpawn: async () => ({ model: null, systemPrompt: null, personaPath: null, tools: null, refusal: injected }) },
   });
   expect(viaDeps).toEqual({ id: null, snapshot: null, refusal: injected });
+});
+
+test('gearBindsChat: new snapshots are stamped; an old fixture without it reads as not binding', async () => {
+  const { snapshot } = await snap.buildAgentSnapshot({ cwd, agentType: NAME });
+  expect(snapshot.gearBindsChat).toBe(true);
+  expect(snapshot.loadout).toBe('equipped');
+
+  const { gearBindsChat, loadout, ...old } = snapshot;
+  const oldId = snap.snapshotId(old);
+  expect(oldId).not.toBe(snap.snapshotId(snapshot));
+  const file = opsPath(cwd, 'agents', 'snapshots', `${oldId}.json`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${snap.canonicalJson(old)}\n`);
+  const read = await snap.readAgentSnapshot(cwd, oldId);
+  expect(read).toEqual(old);
+  expect(read.gearBindsChat).toBeFalsy();
+  expect(snap.readAgentSnapshotSync(cwd, oldId).gearBindsChat).toBeFalsy();
 });

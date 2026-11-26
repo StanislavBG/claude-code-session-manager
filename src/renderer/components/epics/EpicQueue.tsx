@@ -25,7 +25,7 @@ import {
   type EpicDisplayStatus,
   type EpicSnapshots,
 } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag, EpicAgentCliChip, EpicInboundTag, EpicWorktreeChip, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, EpicAgentCliChip, EpicInboundTag, EpicStartedByTag, EpicWorktreeChip, epicStatusDotClass, epicStatusLabel } from './epic-primitives'
 import { inboundFeedbackOrigin } from '../../lib/epicOrigin'
 import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
@@ -429,6 +429,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
             {pinned && <span className="text-accent shrink-0" aria-hidden="true"><PinIcon filled /></span>}
             <span className={`min-w-0 truncate text-[12.5px] ${selected ? 'font-semibold text-fg' : 'text-fg-dim'}`}>{title}</span>
             <EpicInboundTag origin={inbound} small />
+            <EpicStartedByTag epic={epic} small />
           </span>
           <span className="font-mono text-[10px] text-fg-faint shrink-0">{age}</span>
         </button>
@@ -480,6 +481,7 @@ function QueueRow({ epic, snapshots, events, status, selected, compact, now, onS
           <EpicKindTag kind={epic.tag} small />
           <EpicAgentCliChip cli={epic.agentCli} small />
           <EpicInboundTag origin={inbound} small />
+          <EpicStartedByTag epic={epic} small />
           {status !== 'completed' && <EpicWorktreeChip worktree={epic.worktree} small />}
           <span className="ml-auto font-mono text-[10.5px] text-fg-faint pr-9">{age}</span>
         </span>

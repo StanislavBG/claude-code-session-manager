@@ -116,3 +116,34 @@ describe('EpicQueue — agent CLI chip (PRD 3017)', () => {
     expect(claudeRow.querySelector('[data-testid="epic-agent-cli-chip"]')).toBeNull()
   })
 })
+
+describe('EpicQueue — started-by-script tag', () => {
+  function epic(id: string, source?: unknown) {
+    return {
+      id,
+      goalText: `Epic ${id}`,
+      cwd: '/home/bilko/Projects/alpha',
+      claudeSessionId: `sess-${id}`,
+      status: 'active',
+      createdAt: '2026-11-13T00:00:00.000Z',
+      completedAt: null,
+      tag: 'feature',
+      source,
+    } as any
+  }
+  it('names the script, with and without a caller; nothing for a human Epic', async () => {
+    const withCaller = epic('a', { startedBy: { kind: 'script', route: 'macro_press', caller: { pipeline: 'blog_publish', runId: 'r1' }, fromEpicId: 'e9' } })
+    const noCaller = epic('b', { startedBy: { kind: 'script', route: 'macro_press' } })
+    const human = epic('c')
+    const el = mount(<EpicQueue {...baseProps()} epics={[withCaller, noCaller, human]} />)
+    await act(async () => {})
+    const tagOf = (id: string) =>
+      Array.from(el.querySelectorAll('[data-testid="epic-queue-row"]'))
+        .find((r) => r.getAttribute('data-epic-id') === id)!
+        .querySelector('[data-testid="epic-started-by"]')
+    expect(tagOf('a')?.textContent).toBe('Started by script: blog_publish')
+    expect(tagOf('a')?.getAttribute('title')).toContain('r1')
+    expect(tagOf('b')?.textContent).toBe('Started by script')
+    expect(tagOf('c')).toBeNull()
+  })
+})

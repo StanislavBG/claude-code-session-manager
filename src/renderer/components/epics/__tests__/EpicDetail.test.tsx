@@ -1443,6 +1443,29 @@ describe('EpicDetail (PRD 827)', () => {
     })
   })
 
+  describe('started-by-script tag', () => {
+    const withSource = async (source?: unknown) => {
+      installWindowApiMock()
+      const base = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Started title', 'discussion')
+      return { ...base, source } as typeof base
+    }
+    it('shows the pipeline, the bare label, and nothing for a human Epic', async () => {
+      const a = await withSource({ startedBy: { kind: 'script', route: 'macro_press', caller: { pipeline: 'blog_publish', runId: 'r1' } } })
+      let el = mount(createElement(EpicDetail, { promptSession: a }))
+      expect(el.querySelector('[data-testid="epic-started-by"]')?.textContent).toBe('Started by script: blog_publish')
+      act(() => root!.unmount())
+      el.remove()
+      const b = await withSource({ startedBy: { kind: 'script', route: 'macro_press' } })
+      el = mount(createElement(EpicDetail, { promptSession: b }))
+      expect(el.querySelector('[data-testid="epic-started-by"]')?.textContent).toBe('Started by script')
+      act(() => root!.unmount())
+      el.remove()
+      const c = await withSource(undefined)
+      el = mount(createElement(EpicDetail, { promptSession: c }))
+      expect(el.querySelector('[data-testid="epic-started-by"]')).toBeNull()
+    })
+  })
+
   describe('Detail dial + hidden-events divider (PRD 1468)', () => {
     it('CORE: the active verbosity segment is filled accent, inactive segments are dim text', async () => {
       installWindowApiMock()

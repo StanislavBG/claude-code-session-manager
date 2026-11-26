@@ -172,6 +172,34 @@ export function EpicInboundTag({ origin, small }: { origin: InboundFeedbackOrigi
   )
 }
 
+/** "Started by script" label + tooltip for an Epic a script pressed (source.startedBy); null for a human-pressed Epic. */
+export function scriptStartedByLabel(epic: PromptSession): { label: string; title: string } | null {
+  const sb = epic.source?.startedBy
+  if (!sb || sb.kind !== 'script') return null
+  const pipeline = sb.caller?.pipeline
+  const label = pipeline ? `Started by script: ${pipeline}` : 'Started by script'
+  const parts = [label, `route: ${sb.route}`]
+  if (sb.caller?.runId) parts.push(`runId: ${sb.caller.runId}`)
+  if (sb.fromEpicId) parts.push(`asking Epic: ${sb.fromEpicId}`)
+  return { label, title: parts.join('\n') }
+}
+
+export function EpicStartedByTag({ epic, small }: { epic: PromptSession; small?: boolean }) {
+  const info = scriptStartedByLabel(epic)
+  if (!info) return null
+  return (
+    <span
+      title={info.title}
+      data-testid="epic-started-by"
+      className={`inline-flex items-center gap-1 font-mono font-semibold tracking-wide rounded ring-1 ring-inset whitespace-nowrap max-w-[10rem] ${
+        small ? 'px-1.5 py-0.5 text-[9.5px]' : 'px-[7px] py-[3px] text-[10.5px]'
+      } text-amber-300 ring-amber-400/40`}
+    >
+      <span className="truncate">{info.label}</span>
+    </span>
+  )
+}
+
 // ─── InboundProposalCard ─────────────────────────────────────────────────────
 const PROPOSAL_HEADING = 'font-mono text-[10.5px] font-semibold uppercase tracking-wide text-fg-dim'
 const PROPOSAL_BODY = 'text-[12.5px] leading-relaxed text-fg-dim'

@@ -129,7 +129,7 @@ export async function countSettingsKeys(path: string): Promise<number> {
   return isRecord(r.data) ? Object.keys(r.data).length : 0
 }
 
-function chipClass(active: boolean, warn: boolean): string {
+export function chipClass(active: boolean, warn: boolean): string {
   if (warn) return active ? 'bg-accent/15 text-accent-dark' : 'bg-accent-muted/15 text-accent-muted'
   return active ? 'bg-fg text-bg-hi' : 'bg-bg/10 text-line'
 }

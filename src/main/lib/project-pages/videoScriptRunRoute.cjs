@@ -2,7 +2,8 @@
  * videoScriptRunRoute.cjs — a project's own script presses Demo Video.
  *
  *   POST /admin/project-home/videos/run  (body ≤ 64 KiB)
- *     { cwd, kind, target?, length?, style?, character?, voiceId?, focus?, reviewFirst?, externalRef? }
+ *     { cwd, kind, target?, length?, style?, character?, voiceId?, focus?, reviewFirst?, externalRef?,
+ *       caller?: { pipeline?, runId?, step?, attempt? } }
  *   curl -s -X POST "http://127.0.0.1:$(jq -r .port ~/.claude/session-manager/admin-api.json)/admin/project-home/videos/run" -H "Authorization: Bearer $(jq -r .token ~/.claude/session-manager/admin-api.json)" -H 'Content-Type: application/json' -d '{"cwd":"/abs/project","kind":"blog-post","target":"posts/hello.md","externalRef":"post:hello"}'
  *
  * Starts ONE builtin-demo-video job for the cwd through the same renderer
@@ -10,7 +11,10 @@
  * launchSession run 'job'), so persona, checks, review stage and the single
  * mint authority are the human press's own. Checks, in order, each refusal
  * launching nothing:
- *   1. 400 — body/cwd (resolveCwd from projectHomeAdminRoutes.cjs);
+ *   1. 400 — body/cwd (resolveCwd from projectHomeAdminRoutes.cjs), or a caller
+ *      failing CallerSchema (epic/scriptStartedBy.cjs). caller names the script;
+ *      every press sends startedBy (+ the resolved calling chat) so the minted
+ *      Epic's source says a script started it; ledger + audit record the caller;
  *   2. 403 scripts_not_allowed — the project's 'Scripts may run Demo Video'
  *      switch is off (videoScriptPress.isVideoScriptSwitchOn);
  *   3. 400 — the press choices (videoPressLines.parseScriptPress), a voiceId
@@ -43,6 +47,7 @@
 const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { normalizeExternalRef } = require('../epic/externalRef.cjs');
 const { parseScriptPress, pressLines } = require('./videoPressLines.cjs');
+const { CallerSchema } = require('../epic/scriptStartedBy.cjs');
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -53,7 +58,7 @@ const MAX_RUN_BODY_BYTES = 64 * 1024;
 const MACRO_ID = 'builtin-demo-video';
 const ACTIVE = new Set(['pending', 'held', 'running']);
 const PRESS_KEYS = ['kind', 'target', 'length', 'style', 'character', 'voiceId', 'focus', 'reviewFirst'];
-const ALLOWED_KEYS = new Set(['cwd', 'externalRef', ...PRESS_KEYS]);
+const ALLOWED_KEYS = new Set(['cwd', 'externalRef', 'caller', ...PRESS_KEYS]);
 const SWITCH_REASON = "the 'Scripts may run Demo Video' switch is off for this project; a human turns it on in Project Home > Video";
 
 /** cwd -> launch promise; one scripted launch per project at a time. */
@@ -76,7 +81,7 @@ function launchError(result) {
  *   listJobRows?: () => Promise<any[]>, resolveCwd?: (c: unknown) => any, videoScriptPress?: any,
  *   listVoices?: (cwd: string) => { voices: Array<{ id: string }> }, builtinMacros?: any[],
  *   appendAuditEvent?: Function, withExternalRefLock?: Function, now?: () => number,
- *   readHistoryTail?: (cwd: string) => Promise<string> }} [deps]
+ *   readHistoryTail?: (cwd: string) => Promise<string>, startedByFromRequest?: Function }} [deps]
  */
 function registerAdminRoute(adminHttp, deps = {}) {
   const resolveCwd = deps.resolveCwd
@@ -111,6 +116,13 @@ function registerAdminRoute(adminHttp, deps = {}) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return bad('body must be a JSON object');
     const unknown = Object.keys(body).find((k) => !ALLOWED_KEYS.has(k));
     if (unknown) return bad(`unknown field: ${unknown}`);
+
+    let caller;
+    if (body.caller !== undefined) {
+      const c = CallerSchema.safeParse(body.caller);
+      if (!c.success) return bad(`invalid caller: ${c.error.issues.map((i) => `${i.path.join('.') || 'caller'} ${i.message}`).join('; ')}`);
+      caller = c.data;
+    }
 
     const resolved = resolveCwd(body.cwd);
     if (!resolved || !resolved.ok) {
@@ -180,6 +192,9 @@ function registerAdminRoute(adminHttp, deps = {}) {
         return;
       }
 
+      const startedByFn = deps.startedByFromRequest
+        || ((/** @type {any} */ a, /** @type {any} */ d) => require('../epic/scriptStartedBy.cjs').startedByFromRequest(a, d));
+      const startedBy = await startedByFn({ route: ROUTE_PATH, caller, socket: req.socket }, deps);
       const payload = {
         cwd,
         agentName: macro.agentName,
@@ -188,6 +203,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
         prompt: `${macro.prompt}\n\nAdditional instructions: ${pressLines(cfg).join('\n')}`,
         macroId: MACRO_ID,
         via: 'script',
+        startedBy,
         ...(cfg.review ? { reviewStage: true } : {}),
         ...(externalRef !== undefined ? { externalRef } : {}),
       };
@@ -220,6 +236,8 @@ function registerAdminRoute(adminHttp, deps = {}) {
           kind: cfg.kind,
           at: new Date(now()).toISOString(),
           ...(externalRef !== undefined ? { externalRef } : {}),
+          ...(caller ? { caller } : {}),
+          ...(startedBy.fromEpicId ? { fromEpicId: startedBy.fromEpicId } : {}),
         });
       } catch (e) {
         recorded = false;
@@ -230,6 +248,8 @@ function registerAdminRoute(adminHttp, deps = {}) {
           route: ROUTE_PATH, cwd, macroId: MACRO_ID, kind: cfg.kind,
           entryId: result.entryId, epicId: result.epicId, slug, stage,
           ...(externalRef !== undefined ? { externalRef } : {}),
+          ...(caller ? { caller } : {}),
+          ...(startedBy.fromEpicId ? { fromEpicId: startedBy.fromEpicId } : {}),
         });
       } catch { /* audit is best-effort */ }
       sendJson(res, 200, {

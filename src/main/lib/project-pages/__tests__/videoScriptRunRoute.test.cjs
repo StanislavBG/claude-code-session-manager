@@ -186,6 +186,7 @@ describe(ROUTE, () => {
       prompt: `${DEMO.prompt}\n\nAdditional instructions: ${pressLines(cfg).join('\n')}`,
       macroId: 'builtin-demo-video',
       via: 'script',
+      startedBy: { kind: 'script', route: '/admin/project-home/videos/run' },
       reviewStage: true,
     }]);
     expect(launches[0].prompt).toContain('Video kind: Blog post');
@@ -195,6 +196,34 @@ describe(ROUTE, () => {
     expect(audit).toHaveLength(1);
     expect(audit[0][0]).toBe('admin_video_script_run');
     expect(audit[0][1]).toMatchObject({ cwd, entryId: 'vid-1', epicId: 'epic-1' });
+  });
+
+  test('startedBy carries the caller; recorded in audit', async () => {
+    switchOn();
+    const caller = { pipeline: 'blog', runId: 'r1', step: 'video', attempt: 2 };
+    const res = await call({ cwd, kind: 'Project demo', caller });
+    expect(res.status).toBe(200);
+    expect(launches[0].startedBy).toEqual({ kind: 'script', route: '/admin/project-home/videos/run', caller });
+    expect(audit[0][1]).toMatchObject({ caller });
+  });
+
+  test('resolved chat adds fromEpicId/fromCwd', async () => {
+    switchOn();
+    register({
+      startedByFromRequest: async ({ route, caller }) => ({ kind: 'script', route, caller, fromCwd: '/p', fromEpicId: 'ep-9' }),
+    });
+    const res = await call({ cwd, kind: 'Project demo', caller: { pipeline: 'x' } });
+    expect(res.status).toBe(200);
+    expect(launches[0].startedBy).toMatchObject({ fromCwd: '/p', fromEpicId: 'ep-9', caller: { pipeline: 'x' } });
+    expect(audit[0][1]).toMatchObject({ fromEpicId: 'ep-9', caller: { pipeline: 'x' } });
+  });
+
+  test.each([[{ bogus: 1 }], [{ attempt: -1 }], ['str']])('invalid caller %j: 400, nothing launched', async (caller) => {
+    switchOn();
+    const res = await call({ cwd, kind: 'Project demo', caller });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(launches).toEqual([]);
   });
 
   test('without reviewFirst the payload carries no reviewStage or externalRef', async () => {

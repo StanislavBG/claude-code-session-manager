@@ -6,6 +6,7 @@ const { registerAppAdminRoutes } = require('../adminRouteRegistry.cjs');
 const EXPECTED = [
   'GET /admin/scheduler/jobs',
   'GET /admin/scheduler/slots',
+  'POST /admin/scheduler/release-plan',
   'GET /admin/usage-hold',
   'POST /admin/scheduler/create-prd',
   'GET /admin/scheduler/prds',

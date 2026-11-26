@@ -695,6 +695,30 @@ const TOOLS = [
     },
   },
   {
+    name: 'scheduler_release_plan',
+    description: descriptionFor('scheduler_release_plan'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        epicId: { type: 'string', description: 'The Epic id the plan belongs to.' },
+        validateSlug: { type: 'string', description: "The plan's validate PRD slug." },
+        accepted: { type: 'number', description: 'How many review findings you accepted.' },
+        rejected: {
+          type: 'array',
+          description: 'Each rejected finding with a one-line reason (reason must be non-empty).',
+          items: {
+            type: 'object',
+            properties: { finding: { type: 'string' }, reason: { type: 'string' } },
+            required: ['finding', 'reason'],
+          },
+        },
+        rereview: { type: 'boolean', description: 'Instead of releasing, request the single re-review after a block (once per plan).' },
+        cwd: { type: 'string', description: 'Optional: project cwd; defaults to this process cwd.' },
+      },
+      required: ['epicId', 'validateSlug'],
+    },
+  },
+  {
     name: 'scheduler_list_prds',
     description: descriptionFor('scheduler_list_prds'),
     inputSchema: {
@@ -2092,6 +2116,21 @@ async function handleCallTool(request) {
         text += `\nWarnings:\n${warned.map((p) => p.warnings.map((w) => `- ${p.slug}: ${w}`).join('\n')).join('\n')}`;
       }
       return { content: [{ type: 'text', text }] };
+    }
+    if (name === 'scheduler_release_plan') {
+      const refusal = headlessQueueRefusal('scheduler_release_plan');
+      if (refusal) return refusal;
+      const body = {
+        cwd: typeof args?.cwd === 'string' && args.cwd ? args.cwd : process.cwd(),
+        epicId: args?.epicId,
+        validateSlug: args?.validateSlug,
+        rejected: Array.isArray(args?.rejected) ? args.rejected : [],
+        accepted: typeof args?.accepted === 'number' ? args.accepted : 0,
+        ...(args?.rereview === true ? { rereview: true } : {}),
+      };
+      const result = await adminRequest('POST', '/admin/scheduler/release-plan', body);
+      if (result?.ok === false) return errorResult(`scheduler_release_plan refused: ${result.reason ?? result.error ?? JSON.stringify(result)}`);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'feedback_list_projects') {
       const result = await adminRequest('GET', '/admin/feedback/targets');

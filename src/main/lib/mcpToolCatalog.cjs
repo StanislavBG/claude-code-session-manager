@@ -191,6 +191,24 @@ const MCP_TOOL_CATALOG = [
     notes: 'See /develop.',
   },
   {
+    name: 'scheduler_release_plan',
+    group: 'scheduler',
+    purpose: 'Release a plan held for independent review via the session-manager app admin API (POST /admin/scheduler/release-plan). '
+      + 'Records the accepted finding count and one non-empty reason per rejected finding, then lets the plan\'s PRDs dispatch. '
+      + 'A second call returns alreadyReleased. With rereview: true it instead asks for ONE more review after a block '
+      + '(allowed only when the latest review has a block decision and the plan is at round 1; at most once per plan).',
+    summary: 'Release a reviewed plan, or request its single re-review.',
+    whenToUse: 'Use after reading the plan review: call once with accepted (count) and rejected [{ finding, reason }], or with rereview: true after a block.',
+    whenNotToUse: 'Not callable from inside a headless scheduled job (same refusal as scheduler_create_prds). Do not use to edit PRDs or to request a second re-review.',
+    exampleArgs: {
+      epicId: 'abc123',
+      validateSlug: 'validate-my-plan',
+      accepted: 2,
+      rejected: [{ finding: 'prd-3: add a failure-path test', reason: 'covered by the gate in prd-2' }],
+    },
+    notes: null,
+  },
+  {
     name: 'scheduler_list_prds',
     group: 'scheduler',
     purpose: "THE ONLY SUPPORTED WAY to list scheduled PRDs (live + archived) via the session-manager app's admin API. "

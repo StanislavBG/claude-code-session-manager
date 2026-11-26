@@ -58,3 +58,26 @@ test('environmentLimitStamp', () => {
   expect(environmentLimitStamp(lim, 'completed').environmentLimit).toBeNull();
   expect(environmentLimitStamp(null, 'failed').environmentLimit).toBeNull();
 });
+
+test('stream: successful Bash cat of the sandbox section -> null; is_error + AF_UNIX -> unix-socket', () => {
+  const doc = nodefs.readFileSync(nodepath.join(__dirname, '../../../templates/PRD_AUTHORING.md'), 'utf8');
+  const section = doc.slice(doc.indexOf('Job sandbox limits'), doc.indexOf('Job sandbox limits') + 3000);
+  expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', section, false)].join('\n'))).toBeNull();
+  const absent = j({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'b1', content: section }] } });
+  expect(sandboxLimitFromStreamJson([bashUse('b1'), absent].join('\n'))).toBeNull();
+  const err = section.split('\n').find((l) => l.includes('AF_UNIX')) + '\nPermissionError: [Errno 1] Operation not permitted on socket(AF_UNIX)\n';
+  expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', err, true)].join('\n')).kind).toBe('unix-socket');
+});
+test('stream: structured_output FAIL failReason -> claude-dir-write', () => {
+  const so = { schedulerVerdict: 'FAIL', failReason: 'sandbox blocks writes under .claude/skills' };
+  for (const key of ['structured_output', 'structuredOutput']) {
+    const log = j({ type: 'result', result: '{}', [key]: so });
+    expect(sandboxLimitFromStreamJson(log).kind).toBe('claude-dir-write');
+  }
+});
+test('claude-dir-write raw refusal', () => {
+  const log = [bashUse('b1'), toolRes('b1', "mv: cannot move 'a' to '.claude/skills/b': Operation not permitted")].join('\n');
+  expect(sandboxLimitFromStreamJson(log).kind).toBe('claude-dir-write');
+  expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', 'Bash writes under .claude/ are refused')].join('\n'))).toBeNull();
+  expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', 'cat: x: Permission denied')].join('\n'))).toBeNull();
+});

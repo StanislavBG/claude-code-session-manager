@@ -341,8 +341,9 @@ function scanHaltLine(text) {
 }
 
 /**
- * One-line reason after `SCHEDULER_VERDICT: FAIL` (same two-source scan order
- * as scanSentinel). Trimmed, capped at 300 chars; '' when absent.
+ * One-line reason after `SCHEDULER_VERDICT: FAIL` or `NEEDS_HUMAN` (same
+ * two-source scan order as scanSentinel), so it also returns NEEDS_HUMAN
+ * reasons. Trimmed, capped at 300 chars; '' when absent.
  */
 function scanSentinelReason(resultEvent, events) {
   const RE = /^SCHEDULER_VERDICT:\s*(?:FAIL|NEEDS_HUMAN)\b[ \t]*([^\n]*)/m;

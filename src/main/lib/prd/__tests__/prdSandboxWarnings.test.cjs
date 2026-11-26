@@ -46,27 +46,27 @@ test('acceptance criteria text counts; no warning without .claude path or verb',
 test('createPrdBatch result carries the warning', async () => {
   const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-sandbox-warn-'));
   try {
-  const outDir = path.join(cwd, 'out');
-  await fsp.mkdir(outDir, { recursive: true });
-  config.addAllowedRoot(cwd);
-  let nn = 300;
-  const remote = {
-    async allocateParallelGroup() { return nn++; },
-    async readPrd() { return { ok: false }; },
-    async writePrd(slug, body) {
-      const p = path.join(outDir, `${slug}.md`);
-      await fsp.writeFile(p, body);
-      return { ok: true, path: p };
-    },
-    async listPrds() { return { prds: [], total: 0, limit: 0, offset: 0, hasMore: false }; },
-  };
-  const r = await createPrdBatch([
-    { title: 'T', slug: 'sbx', estimateMinutes: 10, goal: 'git rm the old skill', acceptanceCriteria: ['a'],
-      implementationNotes: 'n', files: ['.claude/skills/old.md'] },
-  ], remote, { cwd, sourcePromptId: 'epic-a' });
-  expect(r.ok).toBe(true);
-  expect(JSON.stringify(r)).toContain('refused by the job sandbox');
-  } finally {
-    await fsp.rm(cwd, { recursive: true, force: true });
+    const outDir = path.join(cwd, 'out');
+    await fsp.mkdir(outDir, { recursive: true });
+    config.addAllowedRoot(cwd);
+    let nn = 300;
+    const remote = {
+      async allocateParallelGroup() { return nn++; },
+      async readPrd() { return { ok: false }; },
+      async writePrd(slug, body) {
+        const p = path.join(outDir, `${slug}.md`);
+        await fsp.writeFile(p, body);
+        return { ok: true, path: p };
+      },
+      async listPrds() { return { prds: [], total: 0, limit: 0, offset: 0, hasMore: false }; },
+    };
+    const r = await createPrdBatch([
+      { title: 'T', slug: 'sbx', estimateMinutes: 10, goal: 'git rm the old skill', acceptanceCriteria: ['a'],
+        implementationNotes: 'n', files: ['.claude/skills/old.md'] },
+    ], remote, { cwd, sourcePromptId: 'epic-a' });
+    expect(r.ok).toBe(true);
+    expect(JSON.stringify(r)).toContain('refused by the job sandbox');
+    } finally {
+      await fsp.rm(cwd, { recursive: true, force: true });
   }
 });

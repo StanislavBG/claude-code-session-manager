@@ -10,7 +10,7 @@
  */
 
 const PATTERNS = [
-  ['claude-dir-write', /sandbox[^\n]{0,80}\.claude/i],
+  ['claude-dir-write', /sandbox[^\n]{0,80}\.claude|(?:Operation not permitted|Permission denied)[^\n]{0,160}\.claude\/|\.claude\/[^\n]{0,160}(?:Operation not permitted|Permission denied)/i],
   ['unix-socket', /(?:Operation not permitted)[^\n]{0,80}AF_UNIX|AF_UNIX[^\n]{0,80}Operation not permitted/i],
   ['readonly-tmp', /(?:Errno 30|Read-only file system)[^\n]{0,80}\/tmp|\/tmp[^\n]{0,80}(?:Errno 30|Read-only file system)/i],
 ];
@@ -51,13 +51,19 @@ function sandboxLimitFromStreamJson(text) {
   const bashIds = new Set();
   let hit = null;
   let resultText = null;
+  let structuredOutput;
   for (const raw of text.split('\n')) {
     const line = raw.trim();
     if (!line || line[0] !== '{') continue;
     let ev;
     try { ev = JSON.parse(line); } catch { continue; }
     if (!ev || typeof ev !== 'object') continue;
-    if (ev.type === 'result' && typeof ev.result === 'string') { resultText = ev.result; continue; }
+    if (ev.type === 'result' && typeof ev.result === 'string') {
+      resultText = ev.result;
+      const so = ev.structured_output ?? ev.structuredOutput;
+      if (so && typeof so === 'object' && !Array.isArray(so)) structuredOutput = so;
+      continue;
+    }
     const content = ev.message && Array.isArray(ev.message.content) ? ev.message.content : null;
     if (!content) continue;
     for (const item of content) {
@@ -65,7 +71,7 @@ function sandboxLimitFromStreamJson(text) {
       if (ev.type === 'assistant' && item.type === 'tool_use' && item.name === 'Bash' && item.id) {
         bashIds.add(item.id);
       } else if (ev.type === 'user' && item.type === 'tool_result' && bashIds.has(item.tool_use_id)) {
-        if (hit) continue;
+        if (hit || item.is_error !== true) continue;
         const body = typeof item.content === 'string'
           ? item.content
           : Array.isArray(item.content)
@@ -76,10 +82,10 @@ function sandboxLimitFromStreamJson(text) {
     }
   }
   if (hit) return hit;
-  if (resultText) {
+  if (resultText || structuredOutput) {
     // Lazy require: runVerify.cjs is large.
     const { scanSentinelReason } = require('../../runVerify.cjs');
-    return detectPerLine(scanSentinelReason({ resultText }, []));
+    return detectPerLine(scanSentinelReason({ resultText, ...(structuredOutput ? { structuredOutput } : {}) }, []));
   }
   return null;
 }

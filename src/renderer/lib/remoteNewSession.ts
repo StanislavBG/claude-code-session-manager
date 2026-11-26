@@ -19,7 +19,7 @@ function report(result: ChatExternalNewSessionResult): void {
 }
 
 export function registerRemoteNewSession(): () => void {
-  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId, externalRef, requestId, via, effort, reviewStage }) => {
+  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId, externalRef, requestId, via, startedBy, effort, reviewStage }) => {
     const isScript = via === 'script'
     try {
       let agentDescription: string | undefined
@@ -52,6 +52,7 @@ export function registerRemoteNewSession(): () => void {
         ...(isJob ? { run: 'job' as const } : {}),
         ...(extra ? { extraInstructions: extra } : {}),
         ...(typeof effort === 'string' && effort ? { effort } : {}),
+        ...(isScript && startedBy && typeof startedBy === 'object' ? { startedBy } : {}),
         ...(forwardReview ? { reviewStage: true } : {}),
       })
       if (requestId) {

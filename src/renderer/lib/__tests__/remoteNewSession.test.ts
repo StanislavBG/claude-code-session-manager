@@ -9,7 +9,7 @@ import { registerRemoteNewSession } from '../remoteNewSession'
 
 const payload: {
   cwd: string; agentName: string; tag: string; title: string; prompt: string; macroId?: string; externalRef?: string
-  requestId?: string; via?: 'script'; effort?: string; reviewStage?: boolean
+  requestId?: string; via?: 'script'; startedBy?: { kind: 'script'; route: string }; effort?: string; reviewStage?: boolean
 } = {
   cwd: '/p', agentName: 'dev-lead', tag: 'feature', title: 'T', prompt: 'do it',
 }
@@ -66,6 +66,16 @@ describe('registerRemoteNewSession', () => {
     expect(launchSession.mock.calls[1][0]).not.toHaveProperty('externalRef')
     await fire({ ...payload, via: 'script', externalRef: '' })
     expect(launchSession.mock.calls[2][0]).not.toHaveProperty('externalRef')
+  })
+
+  it('forwards startedBy only for a script press', async () => {
+    launchSession.mockResolvedValue({ epicId: 'e', claudeSessionId: 's' })
+    registerRemoteNewSession()
+    const startedBy = { kind: 'script' as const, route: '/r' }
+    await fire({ ...payload, via: 'script', startedBy })
+    expect(launchSession).toHaveBeenLastCalledWith(expect.objectContaining({ startedBy }))
+    await fire({ ...payload, startedBy })
+    expect(launchSession.mock.calls[1][0]).not.toHaveProperty('startedBy')
   })
 
   it('toasts and logs on failure without throwing', async () => {

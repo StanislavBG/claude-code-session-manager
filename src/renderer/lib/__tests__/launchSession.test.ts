@@ -87,6 +87,15 @@ describe('launchSession', () => {
     expect(createPromptSession.mock.calls[0]).toHaveLength(7)
   })
 
+  it('forwards startedBy in the runtime argument only when set', async () => {
+    const startedBy = { kind: 'script' as const, route: '/r' }
+    await launchSession({ ...input, startedBy })
+    expect(createPromptSession.mock.calls[0][7]).toEqual({ startedBy })
+    createPromptSession.mockClear()
+    await launchSession(input)
+    expect(createPromptSession.mock.calls[0]).toHaveLength(7)
+  })
+
   it('forwards a chosen effort in the runtime argument, alone or with macroId', async () => {
     await launchSession({ ...input, effort: 'medium' })
     expect(createPromptSession.mock.calls[0][7]).toEqual({ effort: 'medium' })

@@ -9,6 +9,7 @@ import { useChat } from '../state/chat'
 import { composeEpicIntake } from './epicIntake'
 import { defaultContextInjectionsForTag } from './contextInjections'
 import type { EpicTag } from './tagLibrary'
+import type { EpicSource } from '../state/promptSessions'
 
 export interface LaunchSessionInput {
   cwd: string
@@ -37,6 +38,8 @@ export interface LaunchSessionInput {
   approve?: boolean
   /** 'external' = a script-typed opening prompt: never recorded as a verified human quote. Absent = 'human'. */
   origin?: 'external'
+  /** Who started this Epic when a script did; absent = a person pressed it. */
+  startedBy?: EpicSource['startedBy']
 }
 
 /**
@@ -69,7 +72,7 @@ export interface LaunchSessionResult {
 }
 
 export async function launchSession(input: LaunchSessionInput): Promise<LaunchSessionResult> {
-  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, inputValues, reviewStage, voiceId, effort, approve = true, origin } = input
+  const { cwd, agentName, tag, title, goal, agentDescription, source, macroId, externalRef, run, extraInstructions, inputValues, reviewStage, voiceId, effort, approve = true, origin, startedBy } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
   if (!agentName) throw new Error('launchSession: agentName is required')
   if (!title) throw new Error('launchSession: title is required')
@@ -89,6 +92,7 @@ export async function launchSession(input: LaunchSessionInput): Promise<LaunchSe
     ...(macroId ? { macroId } : {}),
     ...(typeof externalRef === 'string' && externalRef ? { externalRef } : {}),
     ...(effort ? { effort } : {}),
+    ...(startedBy ? { startedBy } : {}),
   }
   const session = await usePromptSessions
     .getState()

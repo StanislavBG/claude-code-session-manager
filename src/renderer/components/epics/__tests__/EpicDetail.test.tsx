@@ -122,7 +122,9 @@ describe('EpicDetail (PRD 827)', () => {
     ;({ useScheduleState } = await import('../../../state/scheduleState'))
     ;({ EpicDetail } = await import('../EpicDetail'))
     ;({ useEpicUsage } = await import('../../../state/epicUsage'))
-  })
+    // The dynamic imports of large state modules can exceed vitest's 10 s
+    // default hook timeout under full-suite load.
+  }, 60000)
 
   beforeEach(() => {
     _resetForTests()

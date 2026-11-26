@@ -66,7 +66,16 @@ const FRAMES: Frame[] = [
     await page.getByTestId('agent-mcp-row').dispatchEvent('dragenter')
     await page.getByTestId('agent-release-hint').waitFor() } },
   // 1f: blender-artist's sheet with the blender server's Powers panel open.
-  { name: 'mcp-powers', testid: 'agent-roster', reference: '1f-mcp-powers.png', setUp: async (page) => { await openSheet('blender-artist')(page); await page.locator('[data-testid="agent-mcp-item"][data-server="blender"] [data-testid="agent-mcp-powers-open"]').click(); await page.getByTestId('agent-mcp-powers').waitFor() } },
+  { name: 'mcp-powers', testid: 'agent-roster', reference: '1f-mcp-powers.png', setUp: async (page) => { await openSheet('blender-artist')(page); await page.locator('[data-testid="agent-mcp-item"][data-server="blender"] [data-testid="agent-mcp-powers-open"]').click(); await page.getByTestId('agent-mcp-powers').waitFor()
+    // 1f layout: full server name (not clipped), short tool labels, header children do not overlap.
+    const name = page.getByTestId('agent-mcp-powers-name')
+    if ((await name.textContent())?.trim() !== 'blender') throw new Error('powers header must show the full server name')
+    if (await name.evaluate((el) => el.scrollWidth > el.clientWidth)) throw new Error('server name is clipped')
+    const first = await page.locator('[data-power]').first().textContent()
+    if (first?.includes('mcp__')) throw new Error('tool labels must be the short name, not the mcp__ id')
+    const count = (await page.getByTestId('agent-mcp-powers-count').boundingBox())!; const nb = (await name.boundingBox())!
+    if (nb.x + nb.width > count.x + 1) throw new Error('powers header text overlaps the count')
+  } },
   // 1g: an Undecided agent's sheet shows the first-run choice in the gear area.
   { name: 'undecided', testid: 'agent-roster', reference: '1g-undecided-first-run.png', setUp: async (page) => { await openSheet('page-history')(page); await page.getByTestId('agent-undecided-choice').waitFor() } },
   // 1h: builder's sheet in project mode — Global | In project ▾ picks Self, whose overlay overrides the model.

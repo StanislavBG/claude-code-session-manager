@@ -4,6 +4,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { GearPanel } from '../GearPanel'
+import { useLayout } from '../../../../state/layout'
 import { BLANK_DRAFT, type Draft } from '../AgentDetail'
 
 const item = (id: string, badges: Array<'risky' | 'banned' | 'floor'> = []) => ({ id, label: id, badges })
@@ -17,7 +18,7 @@ let container: HTMLDivElement
 let root: Root
 let latest: Draft
 async function mount(initial: Partial<Draft>) {
-  ;(window as unknown as { api: unknown }).api = { agents: { armory, onChanged: () => () => {} } }
+  ;(window as unknown as { api: unknown }).api = { agents: { armory, onChanged: () => () => {} }, toolRisk: { read: async () => ({ ok: true, marks: { mcp__blender__a: 'public', mcp__blender__c: 'read' } }) } }
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -37,7 +38,12 @@ describe('McpPowers', () => {
     armory.mockResolvedValue(mk('checked'))
     await mount({ tools: ['Edit', 'mcp__blender__a', 'mcp__blender__b'], mcpServers: ['blender'] })
     expect(q('[data-testid="agent-mcp-powers-count"]').textContent).toBe('2 of 3 powers')
-    expect(q('[data-power="mcp__blender__a"] [data-badge="risky"]')).toBeTruthy()
+    expect(q('[data-power="mcp__blender__a"] [data-badge="risky"]').textContent).toBe('public')
+    expect(q('[data-power="mcp__blender__b"] [data-badge="risky"]')).toBeNull()
+    expect(q('[data-power="mcp__blender__c"] [data-badge="risky"]')).toBeNull()
+    expect(q('[data-power="mcp__blender__a"] span[title]').textContent).toBe('a')
+    expect(q('[data-power="mcp__blender__a"] span[title]').getAttribute('title')).toBe('mcp__blender__a')
+    expect(q('[data-testid="agent-mcp-powers-name"]').textContent).toBe('blender')
     await act(async () => { (q('[data-power="mcp__blender__b"] input') as HTMLElement).click() })
     expect(latest.tools).toEqual(['Edit', 'mcp__blender__a'])
     expect(latest.mcpServers).toEqual(['blender'])
@@ -70,6 +76,10 @@ describe('McpPowers', () => {
     await mount({ tools: ['mcp__blender__a'], mcpServers: ['blender'] })
     expect(q('[data-testid="agent-mcp-powers-check"]').textContent).toBe('Check in MCP')
     expect(container.querySelectorAll('[data-power]').length).toBe(3)
+    const open = vi.spyOn(useLayout.getState(), 'openPanel').mockImplementation(() => {})
+    await act(async () => { q('[data-testid="agent-mcp-powers-check"]').click() })
+    expect(open).toHaveBeenCalledWith('claude-config', 'mcp')
+    expect(q('[data-testid="agent-mcp-powers-check"]').getAttribute('href')).toBeNull()
   })
   it('not-checked with no known tools still offers the link', async () => {
     armory.mockResolvedValue(mk('not-checked', []))

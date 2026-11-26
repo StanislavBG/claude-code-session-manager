@@ -905,7 +905,8 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       return;
     }
     // Long-lived Epic worktree: refresh its node_modules links from the project checkout
-    // (fire-and-forget, throttled) so packages added to main later are visible this turn.
+    // (fire-and-forget, throttled). The sync runs after the CLI is spawned, so it normally
+    // lands before the agent's first tool call but is not awaited; the next turn guarantees it.
     if (plan.execCwd && plan.execCwd !== cwd) {
       epicDepsSync.syncEpicWorktreeDeps({ projectCwd: cwd, worktreeCwd: plan.execCwd });
     }

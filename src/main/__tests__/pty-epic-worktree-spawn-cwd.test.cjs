@@ -17,7 +17,7 @@
 
 'use strict';
 
-import { test, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { test, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -284,8 +284,7 @@ test('planEpicSpawn with a REAL on-disk index: project-root caller resumes, vani
 test('spawn() refreshes the Epic worktree node_modules links with the project cwd and the worktree cwd', () => {
   const depsSync = require('../lib/epic/epicDepsSync.cjs');
   const calls = [];
-  const orig = depsSync.syncEpicWorktreeDeps;
-  depsSync.syncEpicWorktreeDeps = (opts) => { calls.push(opts); return true; };
+  const depsSpy = vi.spyOn(depsSync, 'syncEpicWorktreeDeps').mockImplementation((opts) => { calls.push(opts); return true; });
   const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-deps-main-'));
   const worktreeCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-pty-deps-wt-'));
   const sessionId = 'epic-session-deps';
@@ -301,7 +300,7 @@ test('spawn() refreshes the Epic worktree node_modules links with the project cw
     expect(calls).toHaveLength(1);
     manager.kill('plain-deps-tab');
   } finally {
-    depsSync.syncEpicWorktreeDeps = orig;
+    depsSpy.mockRestore();
     manager.kill(sessionId);
     fs.rmSync(worktreeCwd, { recursive: true, force: true });
   }

@@ -984,7 +984,7 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
       // since (and drop links main lost). Best-effort — never fails the reuse.
       try {
         const sync = await require('./worktreeDeps.cjs').syncNodeModulesLinks({ mainCwd: cwd, worktreeCwd: epicDir });
-        if (sync && (sync.added || sync.removed)) console.log(`[gitWorktree] synced dep links: +${sync.added} -${sync.removed} -> ${epicDir}`);
+        if (sync && (sync.added || sync.removed || sync.kept)) console.log(`[gitWorktree] synced dep links: +${sync.added} -${sync.removed} kept=${sync.kept} -> ${epicDir}`);
       } catch (err) {
         console.warn(`[gitWorktree] dep link sync failed for ${epicDir}: ${(err && err.message) || err}`);
       }

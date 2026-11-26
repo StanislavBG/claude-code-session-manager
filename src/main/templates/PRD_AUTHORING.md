@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v31 -->
+<!-- PRD_AUTHORING.md v32 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -154,6 +154,16 @@ Why: `npm --prefix web/feedback-widget ci` through the old whole-folder link emp
 Rule: a job's processes never outlive it — the group sweep at exit, the job scope stop (systemd) and the 5-minute leftover sweep (Linux) stop anything it started, so `nohup` or `&` does not daemonize. Anything that must keep running goes to a service manager (systemd unit, cron), never `nohup` or `&`.
 Why: finished jobs left dev servers running for days, holding memory and ports.
 
+### Job sandbox limits
+
+Rule: jobs run under the CLI OS sandbox, so a gate or step must not depend on any of these:
+- Bash writes under `.claude/` are refused (no `git mv`, `git rm` or `rm` there). Use the Write and Edit tools (Write the new file, Edit the old one into a shim), or leave a deletion to a human or non-sandboxed step.
+- AF_UNIX socket bind/connect is refused (`Operation not permitted`).
+- `/tmp` is read-only; only `$TMPDIR` (the job's private dir) is writable.
+
+Gates must not run tests that open Unix sockets or hardcode `/tmp` — run those outside the job, or mark them skipped in the gate.
+Why: the CLI sandbox protects `.claude/` config dirs even inside the worktree write root; Self PRDs 1326 and 1313 parked on exactly this.
+
 ---
 
 ## §8 Scope sizing — target ≤10 min, ceiling 15
@@ -248,6 +258,7 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§6 Gate and files:** `gate` follows every rule in §6 (or is `["none"]` alone); `files` is 1–50 repo-relative paths, no overlap with a concurrent PRD.
 - [ ] **§7 Self-contained:** no reference to "the conversation" or outside context; paths/identifiers inline; clean UTF-8, no NUL bytes (`grep -qP '\x00' file && echo BAD`).
 - [ ] **§7 Worktree reach:** no relative path to a gitignored file; live-run steps use absolute main-checkout paths in an artifact-only PRD. Why: the job worktree has no gitignored runtime state, so relative paths fail or bake a temporary path into host config (burrow 1516).
+- [ ] **§7 Job sandbox limits:** no gate or step uses Bash writes under `.claude/`, Unix sockets, or hardcoded `/tmp` (see [Job sandbox limits](#job-sandbox-limits)).
 - [ ] **§7 No installs:** no gate runs `npm ci` or `npm install`. Why: dependencies are linked; an install through a link emptied the main checkout's web/feedback-widget/node_modules (2026-11-24).
 - [ ] **No authed loopback probe:** no gate or criterion probes a bearer-authed loopback route (`/admin/*`); `http` criteria are GET-only with no credentials. Why: release checks 4539 and 4337 prescribed one and ended silent_no_op.
 - [ ] **§8 Scope:** targets ≤10 min, ceiling 15; e2e/publish sharded to one spec per PRD.

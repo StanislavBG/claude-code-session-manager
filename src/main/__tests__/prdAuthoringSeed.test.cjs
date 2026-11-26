@@ -37,3 +37,14 @@ describe('seedAuthoringGuide', () => {
     expect(fs.readFileSync(dest, 'utf8')).toContain('v3');
   });
 });
+
+describe('shipped PRD_AUTHORING.md', () => {
+  const body = fs.readFileSync(path.join(__dirname, '..', 'templates', 'PRD_AUTHORING.md'), 'utf8');
+  it('carries the v32 stamp', () => {
+    expect(body.split('\n')[0]).toBe('<!-- PRD_AUTHORING.md v32 -->');
+  });
+  it('has the Job sandbox limits section and a §14 pointer', () => {
+    expect(body).toContain('### Job sandbox limits');
+    expect(body).toContain('(#job-sandbox-limits)');
+  });
+});

@@ -803,3 +803,9 @@ describe('service_pair_local handler', () => {
     expect(called).toBe(false);
   });
 });
+
+test('no catalog entry claims only a human creates Epics; the script-press recipe documents caller', () => {
+  expect(JSON.stringify(MCP_TOOL_CATALOG)).not.toContain('only ever created by a human pressing New Epic');
+  const recipe = MCP_RECIPES.find((r) => r.id === 'script-press-demo-video');
+  expect(recipe.steps.join('\n')).toContain('caller');
+});

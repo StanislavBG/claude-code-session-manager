@@ -102,7 +102,7 @@ test('an open Epic record joins session, events, jobs, needs-input and busy', as
     refuted: [],
     unvalidated: [],
     externalRef: 'ref-1',
-    source: { producer: 'portfolio', fromCwd: '/elsewhere', fromEpicId: 'e-x', macroId: 'm-1' },
+    source: { producer: 'portfolio', fromCwd: '/elsewhere', fromEpicId: 'e-x', macroId: 'm-1', startedBy: null },
     createdAt: '2026-11-01T00:00:00.000Z',
     completedAt: null,
     verdicts: [],
@@ -134,7 +134,7 @@ test('a completed Epic is read from its archive file', async () => {
   expect(rec.refuted).toEqual([{ slug: 'x', reason: 'broke it' }]);
   expect(rec.completedAt).toBe('2026-11-05T00:00:00.000Z');
   expect(rec.externalRef).toBeNull();
-  expect(rec.source).toEqual({ producer: null, fromCwd: null, fromEpicId: null, macroId: null });
+  expect(rec.source).toEqual({ producer: null, fromCwd: null, fromEpicId: null, macroId: null, startedBy: null });
 });
 
 test('a sparse mirror file without archivedAt is ignored', async () => {
@@ -527,4 +527,19 @@ test('verdicts: a completed Epic from the archive reads them too', async () => {
   writeVerdictFile(cwd, 'e-done', 'v.verdicts.json', file('v', '2026-11-03T00:00:00.000Z', [entry('7-done', 'VERIFIED')]));
   const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-done' }));
   expect(rec.verdicts.map((v) => v.prd)).toEqual(['done']);
+});
+
+test('source.startedBy: valid is returned, absent and malformed read as null', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const good = { kind: 'script', route: '/admin/project-home/videos/run', caller: { pipeline: 'blog', attempt: 1 }, fromEpicId: 'e-x' };
+  setup(cwd, [
+    session('sb-1', cwd, { source: { producer: 'new-epic-ui', startedBy: good } }),
+    session('sb-2', cwd, { source: { producer: 'new-epic-ui' } }),
+    session('sb-3', cwd, { source: { producer: 'new-epic-ui', startedBy: { kind: 'script', route: '' , bogus: 1 } } }),
+  ]);
+  const listJobs = () => ({ jobs: [] });
+  const get = (id) => getEpicRecord(cwd, opts(cwd, { id, listJobs }));
+  expect((await get('sb-1')).source.startedBy).toEqual(good);
+  expect((await get('sb-2')).source.startedBy).toBeNull();
+  expect((await get('sb-3')).source.startedBy).toBeNull();
 });

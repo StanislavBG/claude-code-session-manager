@@ -918,12 +918,12 @@ const MCP_TOOL_CATALOG = [
     purpose: "Read-only list of one project's open Epics (sessions) via the session-manager app's admin API "
       + '(GET /admin/epics) — the same outside-facing records a script gets: each Epic\'s epicId, title, '
       + 'outside-facing state and PRD progress. Optionally filter by `state`. Results are paginated (default limit 50, '
-      + 'max 200) — check `hasMore`/`total` before assuming you received every Epic; page further with `offset`.',
+      + 'max 200) — check `hasMore`/`total` before assuming you received every Epic; page further with `offset`. '
+      + 'Each record\'s source.startedBy is absent/null when a person pressed New Epic; otherwise a script started it, with its caller and fromEpicId.',
     summary: 'List the open sessions of one project and what state each is in.',
     whenToUse: 'Use to survey which Epics a project has open and which need input, review or approval, before '
       + 'reading one in full with epic_get.',
-    whenNotToUse: 'Do not use this to create, approve or change an Epic — it is read-only, and an Epic is only '
-      + 'ever created by a human pressing New Epic. Do not use it for PRD status; use scheduler_list_prds.',
+    whenNotToUse: 'Do not use this to create, approve or change an Epic — it is read-only. Do not use it for PRD status; use scheduler_list_prds.',
     exampleArgs: { cwd: '/home/bilko/Projects/session-manager', state: 'needs_input' },
     notes: 'A partial page carries a `note` naming how many Epics were returned out of `total`.',
   },
@@ -932,7 +932,8 @@ const MCP_TOOL_CATALOG = [
     group: 'epics',
     purpose: "Read-only fetch of one Epic's outside-facing record via the session-manager app's admin API "
       + '(GET /admin/epic), looked up in project `cwd` by exactly one of `id` (the Epic id) or `externalRef` '
-      + '(the reference it was opened with). Returns `{ ok: true, epic }`, or `{ ok: false, error: "not found" }`.',
+      + '(the reference it was opened with). Returns `{ ok: true, epic }`, or `{ ok: false, error: "not found" }`. '
+      + 'epic.source.startedBy is absent/null when a person pressed New Epic; otherwise a script started it, with its caller and fromEpicId.',
     summary: 'Read one session by its id or by the outside reference it was opened with.',
     whenToUse: 'Use after epic_list, or when you already hold an Epic id or external reference, to read that '
       + "one Epic's state and progress.",
@@ -1208,7 +1209,7 @@ const MCP_RECIPES = [
         + 'curl -s -X POST "http://127.0.0.1:$(jq -r .port ~/.claude/session-manager/admin-api.json)/admin/project-home/videos/run" '
         + '-H "Authorization: Bearer $(jq -r .token ~/.claude/session-manager/admin-api.json)" -H \'Content-Type: application/json\' '
         + '-d \'{"cwd":"/abs/project","kind":"Blog post","target":"https://example.com/blog/hello","externalRef":"hello"}\'. '
-        + 'Optional keys: length, style, character, voiceId, focus, reviewFirst. Success is { ok, entryId, epicId, slug, stage }; the same externalRef again answers { ok, existing: true, entryId, epicId } instead of a second run.',
+        + 'Optional keys: length, style, character, voiceId, focus, reviewFirst, and caller { pipeline, runId, step, attempt } (recorded on the Epic as source.startedBy.caller), e.g. "caller":{"pipeline":"blog-videos","runId":"run-42","step":"render","attempt":1}; a press from an SM chat records that chat\'s Epic automatically (fromEpicId). Success is { ok, entryId, epicId, slug, stage }; the same externalRef again answers { ok, existing: true, entryId, epicId } instead of a second run.',
       'Read the outcome with GET /admin/project-home/videos/status?cwd=<encoded>&id=<entryId> (same bearer token): state is queued, running, awaiting_review, saved (files.index/meta/mp4/poster, absolute paths), season-complete or failed (reason).',
       '409 already_building means a Demo Video job for this project is already pending or running — retry later; never loop tightly.',
       'With Review first (reviewFirst: true) the run stops at awaiting_review: only the human approves or asks for changes in Project Home > Video, then the final video builds. A script just keeps reading the status.',

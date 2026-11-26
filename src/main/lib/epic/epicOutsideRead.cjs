@@ -25,6 +25,7 @@ const { readArchived, defaultProjectRoots, makeRegisteredRootsCache } = require(
 const { gatherEpicJobReceipt } = require('./epicJobReceipt.cjs');
 const { summarizeTranscriptFile } = require('./transcriptUsage.cjs');
 const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
+const { StartedBySchema } = require('./scriptStartedBy.cjs');
 const { isSafeEpicId } = require('../prd/prdLocations.cjs');
 const fs = require('node:fs');
 const { opsPath } = require('../opsOwnership.cjs');
@@ -207,6 +208,13 @@ function readVerdictFiles(cwd, epicId) {
   }
 }
 
+/** Re-sanitize a stored startedBy; anything invalid or absent reads as null (a person pressed it). */
+function startedByOf(raw) {
+  if (raw == null) return null;
+  const r = StartedBySchema.safeParse(raw);
+  return r.success ? r.data : null;
+}
+
 function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
   const computed = computeEpicOutsideState({ session: { ...session, id: epicId }, events, jobs, needsInput, chatBusy });
   const source = isObj(session.source) ? session.source : {};
@@ -232,6 +240,7 @@ function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
       fromCwd: str(source.fromCwd),
       fromEpicId: str(source.fromEpicId),
       macroId: str(source.macroId),
+      startedBy: startedByOf(source.startedBy),
     },
     createdAt: str(session.createdAt),
     completedAt: str(session.completedAt),

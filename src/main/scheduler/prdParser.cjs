@@ -160,6 +160,7 @@ async function parsePrdRaw(filePath) {
     // Optional precondition command (preflightCheck.cjs); reconcile copies it
     // onto the queue row so spawnJob can hold the job while it exits non-zero.
     preflight: typeof fm.preflight === 'string' ? parsePreflightValue(rawFrontmatterValue(text, 'preflight')) : null,
+    planReview: typeof fm.planReview === 'string' && fm.planReview.trim().toLowerCase() === 'required' ? 'required' : null,
     // Opt-in exclusive-lease flag (PRD 1107, quietMachineLease.cjs +
     // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —
     // matches prdFrontmatter.cjs's applyKey semantics for this field.

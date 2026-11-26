@@ -2323,6 +2323,7 @@ async function reconcilePass(state) {
       effort: p.effort ?? job.effort ?? null,
       voiceId: p.voiceId ?? job.voiceId ?? null,
       preflight: p.preflight ?? null,
+      planReview: p.planReview ?? null,
     };
     // Adopt path: a row parked 'quarantined' (no createdVia provenance when
     // discovered) whose PRD file now carries a stamp — written via the
@@ -2452,6 +2453,7 @@ async function reconcilePass(state) {
       effort: p.effort ?? inv.row?.effort ?? null,
       voiceId: p.voiceId ?? inv.row?.voiceId ?? null,
       preflight: p.preflight ?? null,
+      planReview: p.planReview ?? null,
     };
     const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;
     // A repair is not a lifecycle transition — the corrupted `status` was
@@ -2609,6 +2611,7 @@ async function reconcilePass(state) {
       effort: p.effort ?? null,
       voiceId: p.voiceId ?? null,
       preflight: p.preflight ?? null,
+      planReview: p.planReview ?? null,
       status: 'pending',
       // Enqueue time (PRD 1086/1087): the cross-project fairness tiebreak and
       // the starvation escalation both need a provable age for a pending row;

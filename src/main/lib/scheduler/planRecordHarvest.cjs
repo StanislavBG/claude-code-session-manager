@@ -250,7 +250,7 @@ function harvestPlanRecords({ worktreeDir, projectRoot, epicId, declaredPaths = 
       if (folderRefused) { seen.add(src); skipped.push(folderRefused); continue; }
       let folderStat = null;
       try { folderStat = fsImpl.lstatSync(folderDir); } catch { /* missing: copyOne reports */ }
-      if (folderStat && (folderStat.isSymbolicLink() || !folderStat.isDirectory())) {
+      if (folderStat && (!folderStat.isDirectory())) {
         seen.add(src);
         skipped.push({ path: src, reason: 'declared epic folder is not a directory' });
         continue;

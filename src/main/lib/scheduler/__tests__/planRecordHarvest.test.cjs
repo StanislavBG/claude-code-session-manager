@@ -184,6 +184,14 @@ describe('harvestPlanRecords declaredPaths', () => {
     assert.deepEqual(res.skipped, [{ path: srcDir(FOREIGN), reason: 'symlinked parent refused' }]);
     assert.equal(fs.existsSync(path.join(destDir(FOREIGN), 'leak.md')), false);
   });
+  it('(f2) skips a declared record whose epic folder path is a regular file', () => {
+    fs.mkdirSync(path.dirname(srcDir(FOREIGN)), { recursive: true });
+    fs.writeFileSync(srcDir(FOREIGN), 'not a dir');
+    const res = harvestPlanRecords({ worktreeDir, projectRoot, epicId: EPIC, declaredPaths: [rel(FOREIGN, 'x.md')] });
+    assert.deepEqual(res.copied, []);
+    assert.equal(res.skipped.length, 1);
+    assert.equal(res.skipped[0].reason, 'declared epic folder is not a directory');
+  });
 
   it('(g) an unsafe epicId still copies a valid declared record and reports the epicId skip', () => {
     writeSrc('validate.md', '# V\n', FOREIGN);

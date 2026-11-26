@@ -43,3 +43,30 @@ test('escape counting by plan and missKind', () => {
   assert.equal(out.reviewed.escapes, 2);
   assert.equal(out.unreviewed.escapes, 1);
 });
+
+test('unreviewed plans keyed by validator slug (bare), falling back to plan', () => {
+  const out = planReviewStats({
+    verdictFiles: [
+      { prd: 'a', verdict: 'VERIFIED', findings: [], validator: '12-validate-x' },
+      { prd: 'b', verdict: 'REFUTED', findings: [{}], validator: 'validate-x' },
+      { prd: 'c', verdict: 'VERIFIED', findings: [], plan: 'validate-y' },
+      { prd: 'd', verdict: 'VERIFIED', findings: [] },
+    ],
+  });
+  assert.equal(out.unreviewed.plans, 2);
+  assert.equal(out.unreviewed.refuted, 1);
+});
+
+test('a timeout release or a record with no review is not reviewed', () => {
+  const timeout = { ...reviewedRec, release: { by: 'timeout', accepted: 0, rejected: [] } };
+  const noReview = { ...reviewedRec, reviews: [] };
+  const out = planReviewStats({
+    planReviews: [timeout, noReview],
+    verdictFiles: [{ prd: 'alpha', verdict: 'REFUTED', findings: [{}], validator: 'v-a' }],
+    fixes: [{ prd: 'alpha', missKind: 'spec-gap' }],
+  });
+  assert.equal(out.reviewed.plans, 0);
+  assert.equal(out.unreviewed.plans, 1);
+  assert.equal(out.unreviewed.refuted, 1);
+  assert.equal(out.unreviewed.escapes, 1);
+});

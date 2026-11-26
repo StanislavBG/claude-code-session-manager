@@ -559,3 +559,19 @@ test('planReviews: populated from plan-records/<epic>/*.plan-review.json, [] whe
   expect(rec.planReviews).toEqual([rec0]);
   expect((await getEpicRecord(cwd, opts(cwd, { id: 'e-nopr' }))).planReviews).toEqual([]);
 });
+
+test('planReviewStats: unreviewed plans and escapes from verdict files + PRD fixes', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-st', cwd)]);
+  writeVerdictFile(cwd, 'e-st', 'validate-s.verdicts.json', file('validate-s', '2026-11-02T00:00:00.000Z', [
+    entry('1-alpha', 'REFUTED', 'no test'),
+  ]));
+  const prds = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'e-st', 'prds');
+  fs.mkdirSync(prds, { recursive: true });
+  const fixes = JSON.stringify([{ prd: '1-alpha', missKind: 'spec-gap', reason: 'gap' }]);
+  fs.writeFileSync(path.join(prds, '2-fix.md'), `---\nfixes: ${fixes}\n---\n\n# Goal\n`);
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-st' }));
+  expect(rec.planReviewStats.unreviewed.plans).toBe(1);
+  expect(rec.planReviewStats.unreviewed.escapes).toBe(1);
+  expect(rec.planReviewStats.unreviewed.refuted).toBe(1);
+});

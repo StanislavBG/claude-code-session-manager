@@ -8,8 +8,8 @@
  *
  * A plan is a validate slug. A PRD belongs to a reviewed plan when it appears
  * in that record's reviews[].review.prds[].prd (bare slug). Every other verdict
- * or fix is unreviewed; unreviewed `plans` counts the distinct `plan` keys a
- * verdict entry carries (entries with none add to the totals only).
+ * or fix is unreviewed; unreviewed `plans` counts the distinct `validator` slugs (else `plan`) a
+ * verdict entry carries; a record with no stored review or a timeout release is not reviewed (entries with none add to the totals only).
  */
 
 const ESCAPE_KINDS = new Set(['spec-gap', 'missing-test']);
@@ -26,6 +26,8 @@ function planReviewStats({ planReviews, verdictFiles, fixes } = {}) {
 
   for (const rec of Array.isArray(planReviews) ? planReviews : []) {
     if (!isObj(rec) || !isObj(rec.release)) continue;
+    if (!Array.isArray(rec.reviews) || rec.reviews.length === 0) continue;
+    if (rec.release.by === 'timeout') continue;
     reviewed.plans += 1;
     const acc = rec.release.accepted;
     if (Number.isFinite(acc)) reviewed.acceptedFindings += acc;
@@ -41,7 +43,8 @@ function planReviewStats({ planReviews, verdictFiles, fixes } = {}) {
     if (!isObj(v) || typeof v.prd !== 'string') continue;
     const target = member.has(bare(v.prd)) ? reviewed : unreviewed;
     if (target === unreviewed) {
-      const key = typeof v.plan === 'string' && v.plan ? v.plan : null;
+      const raw = typeof v.validator === 'string' && v.validator ? v.validator : v.plan;
+      const key = typeof raw === 'string' && raw ? bare(raw) : null;
       if (key) unreviewedPlanKeys.add(key);
     }
     target.validatorFindings += Array.isArray(v.findings) ? v.findings.length : 0;

@@ -33,6 +33,7 @@ const { readJsonOrSync } = require('../util/atomicFs.cjs');
 const { parseValidatorVerdict } = require('../scheduler/validatorVerdictSchema.cjs');
 const { bareSlug } = require('../prd/depSlugResolve.cjs');
 const { readPlanReviewFiles } = require('../scheduler/planReviewStore.cjs');
+const { splitFrontmatter, parseFixes } = require('../prd/prdFrontmatter.cjs');
 const { planReviewStats } = require('../scheduler/planReviewStats.cjs');
 
 const DEFAULT_LIMIT = 50;
@@ -217,6 +218,27 @@ function startedByOf(raw) {
   return r.success ? r.data : null;
 }
 
+/** fixes[] ({ prd, missKind }) from this Epic's PRD files (prds/ and prds-archived/); [] on any failure. */
+function readEpicFixes(cwd, epicId) {
+  const out = [];
+  try {
+    if (!isSafeEpicId(epicId)) return out;
+    const base = path.join(opsPath(cwd, 'scheduler', 'epics'), epicId);
+    for (const sub of ['prds', 'prds-archived']) {
+      let names;
+      try { names = fs.readdirSync(path.join(base, sub)); } catch { continue; }
+      for (const n of names.filter((x) => x.endsWith('.md')).sort()) {
+        try {
+          const { fm } = splitFrontmatter(fs.readFileSync(path.join(base, sub, n), 'utf8'));
+          const list = typeof fm.fixes === 'string' ? parseFixes(fm.fixes) : null;
+          for (const f of list || []) out.push({ prd: f.prd, missKind: f.missKind });
+        } catch { /* skip unreadable PRD */ }
+      }
+    }
+  } catch { /* none */ }
+  return out;
+}
+
 function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
   const computed = computeEpicOutsideState({ session: { ...session, id: epicId }, events, jobs, needsInput, chatBusy });
   const source = isObj(session.source) ? session.source : {};
@@ -250,7 +272,7 @@ function buildRecord(cwd, epicId, session, events, jobs, needsInput, chatBusy) {
     completedAt: str(session.completedAt),
     verdicts,
     planReviews,
-    planReviewStats: planReviewStats({ planReviews, verdictFiles: verdicts, fixes: [] }),
+    planReviewStats: planReviewStats({ planReviews, verdictFiles: verdicts, fixes: readEpicFixes(cwd, epicId) }),
   };
 }
 

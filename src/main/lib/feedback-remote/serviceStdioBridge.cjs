@@ -41,6 +41,7 @@ const USAGE = [
   'usage:',
   '  claude-code-session-manager service pair --code <code> --name <name> --state-dir <dir> [--device <prefix>] [--timeout <seconds>]',
   '  claude-code-session-manager service mcp --state-dir <dir>',
+  '  claude-code-session-manager service pair-local --state-dir <dir> --name <name> --home <cwd> --tools a,b,c [--project-root <dir>] [--timeout <seconds>]',
 ].join('\n');
 
 /** Parses `--key value` / `--key=value` pairs. Returns { flags } or { error }. */
@@ -130,6 +131,100 @@ async function runPair(args, { stdout, stderr, clientFactory }) {
     clearTimeout(timer);
     try { client.close(); } catch { /* best-effort */ }
   }
+}
+
+const NOT_RUNNING_MSG = 'session manager is not running (no admin-api.json)';
+
+function errText(err) { return err && err.message ? err.message : String(err); }
+
+/**
+ * Pairs a same-machine service through the loopback admin API, no window step.
+ * @param {{ stateDir: string, name: string, homeCwd: string, tools: string[], projectRoot?: string, timeoutS?: number, fetchImpl?: Function, clientFactory?: Function, adminApiPath?: string }} opts
+ * @returns {Promise<{ ok: true, service: any } | { ok: false, error: string }>}
+ */
+async function pairLocal(opts) {
+  const { stateDir, name, homeCwd, tools, projectRoot, timeoutS = DEFAULT_PAIR_TIMEOUT_S } = opts || {};
+  const fetchImpl = (opts && opts.fetchImpl) || globalThis.fetch;
+  const clientFactory = (opts && opts.clientFactory) || defaultClientFactory;
+  let admin;
+  try {
+    const adminApiPath = (opts && opts.adminApiPath) || require('../scheduler/schedulerPaths.cjs').adminTokenPath();
+    admin = JSON.parse(require('node:fs').readFileSync(adminApiPath, 'utf8'));
+  } catch { return { ok: false, error: NOT_RUNNING_MSG }; }
+  if (!admin || !admin.port || !admin.token) return { ok: false, error: NOT_RUNNING_MSG };
+  const base = `http://127.0.0.1:${admin.port}/admin/services/pair-local`;
+
+  const post = async (url, body) => {
+    let res;
+    try {
+      res = await fetchImpl(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${admin.token}` },
+        body: JSON.stringify(body),
+      });
+    } catch (err) { return { ok: false, error: `admin api unreachable: ${errText(err)}` }; }
+    let json = null;
+    try { json = await res.json(); } catch { /* non-JSON */ }
+    if (!res.ok || !json || json.ok === false) return { ok: false, error: (json && json.error) || `admin api HTTP ${res.status}` };
+    return json;
+  };
+
+  let client;
+  let timer = null;
+  try {
+    const startBody = { name, homeCwd, tools };
+    if (projectRoot) startBody.projectRoot = projectRoot;
+    const started = await post(base, startBody);
+    if (!started.ok) return { ok: false, error: started.error };
+
+    let rejectConfirm;
+    const confirmFailed = new Promise((_, rej) => { rejectConfirm = rej; });
+    confirmFailed.catch(() => {});
+    let confirmP = null;
+    const onSas = (sas) => {
+      if (confirmP || !sas) return;
+      confirmP = post(`${base}/confirm`, { pairingId: started.pairingId, sas: String(sas).replace(/\D/g, '') });
+      confirmP.then((r) => { if (!r.ok) rejectConfirm(new Error(r.error)); });
+    };
+    client = clientFactory({ stateDir, onSas });
+    await client.pair({ code: started.code, name });
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`timed out after ${timeoutS} s waiting for pairing to confirm`)), timeoutS * 1000);
+    });
+    const res = await Promise.race([client.connect(), confirmFailed, timeout]);
+    if (res && res.sas) onSas(res.sas);
+    const confirmed = confirmP ? await confirmP : { ok: false, error: 'no SAS was derived' };
+    if (!confirmed.ok) return { ok: false, error: confirmed.error };
+    return { ok: true, service: confirmed.service };
+  } catch (err) {
+    return { ok: false, error: errText(err) };
+  } finally {
+    clearTimeout(timer);
+    try { if (client) client.close(); } catch { /* best-effort */ }
+  }
+}
+
+async function runPairLocal(args, { stdout, stderr, clientFactory, fetchImpl, adminApiPath }) {
+  const parsed = parseFlags(args, ['state-dir', 'name', 'home', 'tools', 'project-root', 'timeout']);
+  if (parsed.error) { line(stderr, `${parsed.error}\n${USAGE}`); return EXIT_USAGE; }
+  const { flags } = parsed;
+  for (const k of ['state-dir', 'name', 'home', 'tools']) {
+    if (!flags[k]) { line(stderr, `missing --${k}\n${USAGE}`); return EXIT_USAGE; }
+  }
+  const tools = flags.tools.split(',').map((t) => t.trim()).filter(Boolean);
+  if (!tools.length) { line(stderr, `missing --tools\n${USAGE}`); return EXIT_USAGE; }
+  let timeoutS = DEFAULT_PAIR_TIMEOUT_S;
+  if (flags.timeout !== undefined) {
+    timeoutS = Number(flags.timeout);
+    if (!Number.isFinite(timeoutS) || timeoutS <= 0) { line(stderr, `--timeout must be a positive number of seconds\n${USAGE}`); return EXIT_USAGE; }
+  }
+  const r = await pairLocal({
+    stateDir: flags['state-dir'], name: flags.name, homeCwd: flags.home, tools,
+    projectRoot: flags['project-root'], timeoutS, clientFactory, fetchImpl, adminApiPath,
+  });
+  if (!r.ok) { line(stderr, `service pair-local: ${r.error}`); return EXIT_FAIL; }
+  line(stdout, `Paired locally: ${flags.name}`);
+  return EXIT_OK;
 }
 
 function runMcp(args, { stdin, stdout, stderr, clientFactory }) {
@@ -279,12 +374,15 @@ async function runServiceCli(argv, io = {}) {
     stdout: io.stdout || process.stdout,
     stderr: io.stderr || process.stderr,
     clientFactory: io.clientFactory || defaultClientFactory,
+    fetchImpl: io.fetchImpl,
+    adminApiPath: io.adminApiPath,
   };
   const [sub, ...rest] = Array.isArray(argv) ? argv : [];
   if (sub === 'pair') return runPair(rest, deps);
+  if (sub === 'pair-local') return runPairLocal(rest, deps);
   if (sub === 'mcp') return runMcp(rest, deps);
   line(deps.stderr, sub ? `unknown service subcommand: ${sub}\n${USAGE}` : USAGE);
   return EXIT_USAGE;
 }
 
-module.exports = { runServiceCli, USAGE, CONFIRM_HINT, REVOKED_MSG, EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_REVOKED };
+module.exports = { runServiceCli, pairLocal, USAGE, CONFIRM_HINT, REVOKED_MSG, EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_REVOKED };

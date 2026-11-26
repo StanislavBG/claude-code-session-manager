@@ -7,7 +7,7 @@ const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 import { describe, it, expect } from 'vitest';
 
-const { runServiceCli, CONFIRM_HINT, REVOKED_MSG } = require('../serviceStdioBridge.cjs');
+const { runServiceCli, pairLocal, CONFIRM_HINT, REVOKED_MSG } = require('../serviceStdioBridge.cjs');
 
 function sink() {
   const s = new PassThrough();
@@ -200,5 +200,80 @@ describe('service mcp', () => {
   it('missing --state-dir is a usage error', async () => {
     const { factory } = fakeClient();
     expect(await runServiceCli(['mcp'], { stdin: new PassThrough(), stdout: sink().stream, stderr: sink().stream, clientFactory: factory })).toBe(2);
+  });
+
+  describe('pair-local', () => {
+    function setup(routes) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-'));
+      const adminApiPath = path.join(dir, 'admin-api.json');
+      fs.writeFileSync(adminApiPath, JSON.stringify({ port: 4321, token: 'tok' }));
+      const reqs = [];
+      const fetchImpl = async (url, init) => {
+        reqs.push({ url, init, body: JSON.parse(init.body) });
+        const r = routes(url);
+        return { ok: r.status === 200, status: r.status, json: async () => r.body };
+      };
+      return { adminApiPath, fetchImpl, reqs };
+    }
+    const okRoutes = (confirm) => (url) => (url.endsWith('/confirm')
+      ? (confirm || { status: 200, body: { ok: true, service: { id: 's1', name: 'Kiln' } } })
+      : { status: 200, body: { ok: true, code: 'CODE', pairingId: 'p1' } });
+    const base = ['pair-local', '--state-dir', '/s', '--name', 'Kiln', '--home', '/h', '--tools', 'a,b'];
+    const run = (argv, io) => {
+      const out = sink(); const err = sink();
+      return runServiceCli(argv, { stdin: new PassThrough(), stdout: out.stream, stderr: err.stream, ...io }).then((code) => ({ code, out, err }));
+    };
+
+    it('success: posts start then confirm once, prints Paired locally', async () => {
+      const { adminApiPath, fetchImpl, reqs } = setup(okRoutes());
+      const { client, factory } = fakeClient({
+        connect: async (c) => { c.opts.onSas('123456'); c.opts.onSas('123456'); await new Promise((r) => setTimeout(r, 5)); return { sas: '123456' }; },
+      });
+      const r = await run(base, { fetchImpl, adminApiPath, clientFactory: factory });
+      expect(r.code).toBe(0);
+      expect(r.out.text).toContain('Paired locally: Kiln');
+      expect(reqs.length).toBe(2);
+      expect(reqs[0].body).toEqual({ name: 'Kiln', homeCwd: '/h', tools: ['a', 'b'] });
+      expect(reqs[0].init.headers.authorization).toBe('Bearer tok');
+      expect(reqs[1].body).toEqual({ pairingId: 'p1', sas: '123456' });
+      expect(client.calls[0]).toEqual(['pair', { code: 'CODE', name: 'Kiln' }]);
+      expect(client.calls.some((c) => c[0] === 'close')).toBe(true);
+      expect(r.err.text).not.toContain('tok');
+    });
+
+    it('web_remote_off refusal exits 1 naming the error', async () => {
+      const { adminApiPath, fetchImpl } = setup(() => ({ status: 409, body: { ok: false, error: 'web_remote_off' } }));
+      const { factory } = fakeClient();
+      const r = await run(base, { fetchImpl, adminApiPath, clientFactory: factory });
+      expect(r.code).toBe(1);
+      expect(r.err.text).toContain('web_remote_off');
+    });
+
+    it('sas_mismatch on confirm fails even while connect hangs', async () => {
+      const { adminApiPath, fetchImpl } = setup(okRoutes({ status: 403, body: { ok: false, error: 'sas_mismatch' } }));
+      const { factory } = fakeClient({ connect: async (c) => { c.opts.onSas('111111'); return new Promise(() => {}); } });
+      const r = await pairLocalWith(fetchImpl, adminApiPath, factory);
+      expect(r).toEqual({ ok: false, error: 'sas_mismatch' });
+    });
+
+    it('missing admin-api.json', async () => {
+      const r = await pairLocal({ stateDir: '/s', name: 'K', homeCwd: '/h', tools: ['a'], adminApiPath: '/nonexistent/admin-api.json' });
+      expect(r).toEqual({ ok: false, error: 'session manager is not running (no admin-api.json)' });
+      const c = await run(base, { adminApiPath: '/nonexistent/admin-api.json' });
+      expect(c.code).toBe(1);
+    });
+
+    it('usage errors exit 2', async () => {
+      for (const drop of ['--state-dir', '--name', '--home', '--tools']) {
+        const argv = [...base];
+        const i = argv.indexOf(drop);
+        argv.splice(i, 2);
+        expect((await run(argv, {})).code).toBe(2);
+      }
+    });
+
+    function pairLocalWith(fetchImpl, adminApiPath, clientFactory) {
+      return pairLocal({ stateDir: '/s', name: 'K', homeCwd: '/h', tools: ['a'], fetchImpl, adminApiPath, clientFactory });
+    }
   });
 });

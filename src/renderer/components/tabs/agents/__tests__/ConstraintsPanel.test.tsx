@@ -7,7 +7,8 @@ import { ConstraintsPanel } from '../ConstraintsPanel'
 import { BLANK_DRAFT, type Draft } from '../AgentDetail'
 
 const item = (id: string, badges: Array<'risky' | 'banned' | 'floor'> = []) => ({ id, label: id, badges })
-const ARMORY = { builtins: [item('Task', ['banned']), item('Bash', ['risky'])], bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], errors: [] }
+const ARMORY = { builtins: [item('Task', ['banned']), item('Bash', ['risky'])], bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], errors: [],
+  environments: [{ name: 'headless-default', summary: 'OS sandbox' }, { name: 'open-web', summary: 'Open network' }] }
 
 let container: HTMLDivElement
 let root: Root
@@ -34,6 +35,16 @@ const q = (sel: string) => container.querySelector(sel) as HTMLElement
 afterEach(() => { act(() => root.unmount()); container.remove() })
 
 describe('ConstraintsPanel', () => {
+  it('renders environments from the armory with radio dots and the 1b header', async () => {
+    await mount()
+    expect(container.querySelectorAll('[data-environment]').length).toBe(2)
+    expect(q('[data-environment="open-web"]').textContent).toContain('Open network')
+    expect(q('[data-environment="headless-default"] [data-radio-dot]').getAttribute('data-radio-dot')).toBe('on')
+    expect(q('[data-environment="open-web"] [data-radio-dot]').getAttribute('data-radio-dot')).toBe('off')
+    expect(container.textContent).toContain('rules of the realm')
+    expect(container.textContent).toContain('Rules on the gear — not inventory.')
+  })
+
   it('selecting an environment card updates the draft', async () => {
     await mount()
     expect(q('[data-environment="headless-default"]').getAttribute('aria-checked')).toBe('true')

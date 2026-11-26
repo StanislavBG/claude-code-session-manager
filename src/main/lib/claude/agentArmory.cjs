@@ -13,6 +13,7 @@
  *  - listMcpServers({ cwd }) -> [{ name, scope }]  (same config reader as mcpToolsProbe)
  *  - getMcpProbe({ name, scope, cwd }) -> { ok, tools: (string|{name})[] } | null  (last result only)
  *  - loadMarks({ cwd }) -> { system, project } risk-mark layers
+ *  - listEnvironments() -> { name, summary }[]  (default: built-in profiles of environmentProfiles.cjs)
  *  - bannedTools: string[]  (the scheduler's HEADLESS_DISALLOWED_TOOLS, passed by the caller)
  */
 
@@ -35,6 +36,11 @@ async function defaultListMcpServers({ cwd }) {
   return out;
 }
 
+function defaultListEnvironments() {
+  const { BUILTIN_ENVIRONMENTS } = require('./environmentProfiles.cjs');
+  return Object.entries(BUILTIN_ENVIRONMENTS).map(([name, p]) => ({ name, summary: p.description }));
+}
+
 function defaultLoadMarks({ cwd }) {
   const m = require('./toolRiskMarks.cjs');
   return {
@@ -49,7 +55,7 @@ function defaultLoadMarks({ cwd }) {
 async function buildArmory({ cwd, deps } = {}) {
   const d = deps || {};
   /** @type {string[]} */ const errors = [];
-  const out = { builtins: [], bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], errors };
+  const out = { builtins: [], bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], environments: [], errors };
 
   /** Run one source; on failure record and return the fallback. */
   const guard = async (label, fn, fallback) => {
@@ -107,6 +113,8 @@ async function buildArmory({ cwd, deps } = {}) {
     } catch (e) { errors.push(`mcpProbe ${s.name}: ${msg(e)}`); }
     out.mcpServers.push({ id: s.name, label: s.name, badges: [], tools, status, scope: s.scope });
   }
+
+  out.environments = await guard('environments', async () => (d.listEnvironments || defaultListEnvironments)(), []);
   return out;
 }
 

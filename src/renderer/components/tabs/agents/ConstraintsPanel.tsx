@@ -8,17 +8,10 @@ import type { Draft } from './AgentDetail'
  * and the settings.json summary are READ-ONLY views — Settings is substrate, edited only in
  * Claude config ▸ Settings (the Settings law), reached by "Open Settings ›".
  *
- * There is no renderer IPC listing environment profiles, so the three built-ins of
- * lib/claude/environmentProfiles.cjs are mirrored here (user/project profile files are not listed).
+ * Environment cards render from `armory.environments` (served by agentArmory.cjs).
  */
 
 export const DEFAULT_ENVIRONMENT = 'headless-default'
-
-export const ENVIRONMENT_CARDS: ReadonlyArray<{ id: string; title: string; sub: string }> = [
-  { id: 'headless-default', title: 'Headless default', sub: 'OS sandbox · network allow-list' },
-  { id: 'validator-readonly', title: 'Validator read-only', sub: 'OS sandbox · no network' },
-  { id: 'open-web', title: 'Open web', sub: 'Open network · WebFetch / WebSearch' },
-]
 
 const RISK_LABEL: Record<ToolRiskMark, string> = {
   read: 'READ', write: 'WRITE', confirm: 'CONFIRM', irreversible: 'IRREVERSIBLE', money: 'MONEY', public: 'PUBLIC',
@@ -64,24 +57,36 @@ export function ConstraintsPanel({ obj, set }: { obj: Draft; set: (patch: Partia
 
   return (
     <section data-testid="agent-constraints-slot" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line flex flex-col gap-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Constraints</div>
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">
+          Constraints <span className="font-serif italic normal-case tracking-normal">rules of the realm</span>
+        </div>
+        <div className="text-[12px] text-fg-faint italic">Rules on the gear — not inventory.</div>
+      </div>
 
       <Section testid="constraints-environment" title="Sandbox environment">
         <div role="radiogroup" aria-label="Sandbox environment" className="flex flex-col gap-1.5">
-          {ENVIRONMENT_CARDS.map((c) => {
-            const on = c.id === current
+          {(armory?.environments ?? []).map((c) => {
+            const on = c.name === current
             return (
               <button
-                key={c.id}
+                key={c.name}
                 type="button"
                 role="radio"
                 aria-checked={on}
-                data-environment={c.id}
-                onClick={() => set({ environment: c.id })}
-                className={`text-left px-3 py-2 rounded-[10px] border ${on ? 'border-accent bg-accent/10' : 'border-line bg-bg hover:border-rule'}`}
+                data-environment={c.name}
+                onClick={() => set({ environment: c.name })}
+                className={`text-left px-3 py-2 rounded-[10px] border flex items-start gap-2 ${on ? 'border-accent bg-accent/10' : 'border-line bg-bg hover:border-rule'}`}
               >
-                <div className="text-[13px] font-semibold text-fg font-mono">{c.id}</div>
-                <div className="text-[11.5px] text-fg-faint">{c.sub}</div>
+                <span
+                  aria-hidden="true"
+                  data-radio-dot={on ? 'on' : 'off'}
+                  className={`mt-1 w-2.5 h-2.5 shrink-0 rounded-full border ${on ? 'border-accent bg-accent' : 'border-rule'}`}
+                />
+                <span className="min-w-0">
+                  <div className="text-[13px] font-semibold text-fg font-mono">{c.name}</div>
+                  <div className="text-[11.5px] text-fg-faint">{c.summary}</div>
+                </span>
               </button>
             )
           })}

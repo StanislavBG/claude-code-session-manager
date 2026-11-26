@@ -590,6 +590,8 @@ export interface Armory {
   mcpServers: ArmoryMcpItem[];
   packs: ArmoryPackItem[];
   unpackedSkills: string[];
+  /** Sandbox environment profiles (`environmentProfiles.cjs`). */
+  environments: { name: string; summary: string }[];
   errors: string[];
 }
 

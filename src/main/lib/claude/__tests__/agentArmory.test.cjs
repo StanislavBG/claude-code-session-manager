@@ -38,6 +38,15 @@ describe('buildArmory', () => {
     expect(r.builtins).toHaveLength(3);
   });
 
+  it('serves environment profiles; a failure adds to errors', async () => {
+    const ok = await buildArmory({ cwd: '/x', deps: baseDeps() });
+    expect(ok.environments.map((e) => e.name)).toEqual(expect.arrayContaining(['headless-default', 'validator-readonly', 'open-web']));
+    expect(typeof ok.environments[0].summary).toBe('string');
+    const bad = await buildArmory({ cwd: '/x', deps: baseDeps({ listEnvironments: () => { throw new Error('envboom'); } }) });
+    expect(bad.environments).toEqual([]);
+    expect(bad.errors).toEqual([expect.stringContaining('environments: envboom')]);
+  });
+
   it('never throws when every source fails', async () => {
     const bad = () => { throw new Error('x'); };
     const r = await buildArmory({ cwd: '/x', deps: { getBuiltinTools: bad, listPacks: bad, listUnpackedSkills: bad, listMcpServers: bad, loadMarks: bad } });

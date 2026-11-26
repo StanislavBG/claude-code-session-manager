@@ -315,12 +315,7 @@ function sliceFromByte(text, after) {
   return buf.subarray(start).toString('utf8');
 }
 
-const callerSchema = z.object({
-  pipeline: z.string().max(200).optional(),
-  runId: z.string().max(200).optional(),
-  step: z.string().max(200).optional(),
-  attempt: z.number().int().min(0).optional(),
-}).strict();
+const { CallerSchema: callerSchema } = require('../epic/scriptStartedBy.cjs');
 
 const usageNumber = z.number().int().min(0).optional();
 const importRecordSchema = z.object({

@@ -53,6 +53,14 @@ export interface EpicSource {
     | { requestedBy: 'macro'; macroId: string; macroLabel: string; verifiedAt: string; fromClaudeSessionId: string }
   /** 'cross-project-feedback' only — the asking Epic a feedback_reply lands in; absent when the sender was unresolved. */
   replyTo?: { cwd: string; epicId: string; claudeSessionId: string }
+  /** Who started this Epic when a script did (main's epic/scriptStartedBy.cjs); absent = a person pressed it. */
+  startedBy?: {
+    kind: 'script'
+    route: string
+    caller?: { pipeline?: string; runId?: string; step?: string; attempt?: number }
+    fromCwd?: string
+    fromEpicId?: string
+  }
   /** The Epic (in another project) that this one's reply answers. */
   replyOf?: { cwd: string; epicId: string }
 }

@@ -180,6 +180,6 @@ test('the seeded dev-lead puts follow-ups in a Follow-up commit trailer', () => 
   const { fm, body } = splitFrontmatter(raw);
 
   expect(raw.length).toBeLessThanOrEqual(6000);
-  expect(fm.seedVersion).toBe('8');
+  expect(fm.seedVersion).toBe('9');
   expect(body).toContain('A follow-up goes in a `Follow-up: <one line>` commit trailer, never only in this report.');
 });

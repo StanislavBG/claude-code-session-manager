@@ -525,7 +525,7 @@ test('project-home-builder: bundled seedVersion 8 carries both save tools and th
   const tools = fm.tools.split(',').map((t) => t.trim());
   expect(tools).toContain('mcp__session-manager-scheduler__project_page_write');
   expect(tools).toContain('mcp__session-manager-scheduler__project_home_write');
-  expect(fm.seedVersion).toBe('9');
+  expect(fm.seedVersion).toBe('8');
   expect(fm.mcpServers).toBe('session-manager-scheduler');
   expect(fm.description).toContain('Knowledge Page');
   const body = phbBundled();

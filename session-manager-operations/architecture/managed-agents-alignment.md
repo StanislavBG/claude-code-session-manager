@@ -32,9 +32,19 @@ an unknown declared capability parks the job (`capability_unknown`) instead of s
   scheduler's dispatch check, `src/main/lib/tasks/` Task spawn.
 - Why: inherited user-scope MCP servers made every job's tool surface (and memory cost) depend on the
   machine, not on the persona. Declared = reviewable; undeclared = absent.
-- Scope (decided 2026-11-23): Epic chat turns are out of scope and keep the user's own MCP config. A human
-  supervises every chat turn, and a persona-declared set would strip the ad-hoc servers the user relies on
-  for interactive work; strict loading guards only the unattended runs (scheduler jobs and Tasks).
+- Scope (decided 2026-11-26, reversing 2026-11-23): gear binds Epic chat turns too, for Epics minted after the
+  release (their pinned snapshot is stamped `gearBindsChat: true`; older snapshots keep the user's own MCP
+  config). Why: the owner wants Q&A and troubleshooting with the same character the Epic's jobs run as, not a
+  different, ungeared one. Code: `gearChatArgs` in `src/main/chatRunner.cjs` (tools, strict MCP, packs; an
+  unknown server/pack is dropped with a `capability_unknown` warning, never a failed turn;
+  `HEADLESS_DISALLOWED_TOOLS` is not applied to chat); stamp in `src/main/lib/claude/agentSnapshot.cjs`.
+- Skills: carried only inside packs. `skillDenyArgs` / `resolveSkillDeny` in `personaToolScope.cjs` add
+  `--disallowedTools=Skill(<name>)` for every installed skill not in an equipped pack, at job, Task and chat
+  spawns. CLI-bundled skills and `code-review` / `security-review` are never denied.
+- Loadout states (`src/main/lib/persona-macro/personaLoadout.cjs`, from the `tools:` key): `undecided` (key
+  absent: runs unscoped, reported Undecided), `bare` (`tools: []`: floor only, no pack skills), `equipped`
+  (`tools: A, B`: exactly those), `unbound` (`tools: *`: everything, an explicit decision). Unbound and
+  undecided deny no skills. Every persona has one; `npm run report:loadouts` lists them.
 
 ## Environments
 

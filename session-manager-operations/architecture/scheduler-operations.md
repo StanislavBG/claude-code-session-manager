@@ -632,7 +632,7 @@ line (`WebFetch`/`WebSearch` = web; a release persona = npm registry; else none)
 | `competitive-analyst` | `tool-rules` | web |
 | `competitive-researcher` | `tool-rules` | web |
 | `demo-video-builder` | `tool-rules` | none |
-| `dev-lead` | `os-sandbox` when available | npm registry + api.github.com (already live) |
+| `dev-lead` | `os-sandbox` when available | npm registry; api.github.com is allowed from the first release after 0.143.0 (commit e4a4bef7) |
 | `project-home-builder` | `tool-rules` | none |
 | `validator` | `os-sandbox` when available | none (already live) |
 

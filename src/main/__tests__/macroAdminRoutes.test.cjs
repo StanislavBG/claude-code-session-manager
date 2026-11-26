@@ -748,6 +748,7 @@ test('run: starts with defaults + overrides, exact payload, one audit event', as
     prompt: 'Digest rust for 1 days',
     macroId: s.macro.id,
     via: 'script',
+    startedBy: { kind: 'script', route: '/admin/macros/run' },
     effort: 'high',
   }]);
   const ev = runEvents(s.macro.id);
@@ -1332,4 +1333,60 @@ test('run: usageHold () => null leaves the success path unchanged', async () => 
   expect(r.status).toBe(200);
   expect(r.body.ok).toBe(true);
   expect(s.launches).toHaveLength(1);
+});
+
+// --- startedBy + caller on script launches ----------------------------------
+
+test('run: payload startedBy carries the caller; audit event includes caller', async () => {
+  const s = await setupRun();
+  const caller = { pipeline: 'demo-video', runId: 'r1', attempt: 2 };
+  const r = await s.run({ caller });
+  expect(r.status).toBe(200);
+  expect(s.launches[0].startedBy).toEqual({ kind: 'script', route: '/admin/macros/run', caller });
+  expect(runEvents(s.macro.id)[0].scriptCaller).toEqual(caller);
+});
+
+test('run: payload startedBy without caller has no caller key', async () => {
+  const s = await setupRun();
+  const r = await s.run({});
+  expect(r.status).toBe(200);
+  expect(s.launches[0].startedBy).toEqual({ kind: 'script', route: '/admin/macros/run' });
+  expect(runEvents(s.macro.id)[0].scriptCaller).toBeUndefined();
+});
+
+test('run: deps.startedByFromRequest is used', async () => {
+  const s = await setupRun();
+  const adminHttp = makeFakeAdminHttp();
+  const { launches, deps } = makeRunDeps();
+  const seen = [];
+  registerAdminRoute(adminHttp, {
+    ...deps,
+    startedByFromRequest: async (a) => { seen.push(a); return { kind: 'script', route: 'x', fromEpicId: 'e9' }; },
+  }, { filePath: s.filePath });
+  const r = await adminHttp.call('POST', '/admin/macros/run', { body: { cwd: s.cwd, id: s.macro.id, caller: { step: 'a' } } });
+  expect(r.status).toBe(200);
+  expect(seen[0]).toMatchObject({ route: '/admin/macros/run', caller: { step: 'a' } });
+  expect(launches[0].startedBy).toEqual({ kind: 'script', route: 'x', fromEpicId: 'e9' });
+});
+
+test('run+externalRef: startedBy rides in the payload, producer stays new-epic-ui', async () => {
+  const s = await setupRun();
+  const caller = { pipeline: 'p' };
+  const r = await s.run({ externalRef: 'sb-1', caller });
+  expect(r.status).toBe(200);
+  expect(s.launches[0].startedBy).toMatchObject({ kind: 'script', caller });
+  expect(await lookupExternalRef({ cwd: s.realCwd, externalRef: 'sb-1' })).toMatchObject({ epicId: r.body.epicId, producer: 'new-epic-ui' });
+  expect(runEvents(s.macro.id)[0].scriptCaller).toEqual(caller);
+});
+
+test('run: invalid caller is a 400 with no launch', async () => {
+  const s = await setupRun();
+  for (const caller of [{ bogus: 1 }, 'str', { attempt: -1 }, { pipeline: 5 }]) {
+    const r = await s.run({ caller });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/^caller/);
+  }
+  const r2 = await s.run({ caller: { bogus: 1 }, externalRef: 'sb-2' });
+  expect(r2.status).toBe(400);
+  expect(s.launches).toHaveLength(0);
 });

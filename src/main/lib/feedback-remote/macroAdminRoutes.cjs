@@ -44,7 +44,7 @@
  * `onChanged()` exactly once so the Sessions HOT KEYS strip updates live,
  * matching the IPC handlers in index.cjs.
  *
- * POST /admin/macros/run {cwd, id, inputs?, effort?, externalRef?}
+ * POST /admin/macros/run {cwd, id, inputs?, effort?, externalRef?, caller?}
  *                                -> { ok, epicId, alreadyRunning, externalRef? }
  * Starts a saved macro from a script (e.g. a systemd timer) through the
  * renderer's press path (deps.startExternalNewSession: same persona, tag, AIM
@@ -58,6 +58,10 @@
  * macro at most once per ref: it rides in the payload, is recorded in
  * externalRefIndex and audited; a repeat with the same cwd + ref answers
  * { existing: true } with that Epic (409 if another producer/macro owns the ref).
+ * caller ({pipeline?, runId?, step?, attempt?}, CallerSchema in
+ * epic/scriptStartedBy.cjs; invalid = 400, no launch) rides in the audit event as scriptCaller (the audit log stamps its own `caller`);
+ * every launch payload carries startedBy (deps.startedByFromRequest) so the Epic
+ * records it was script-started. The mint producer stays 'new-epic-ui'.
  *   curl -s -X POST "http://127.0.0.1:$(jq -r .port ~/.claude/session-manager/admin-api.json)/admin/macros/run" -H "Authorization: Bearer $(jq -r .token ~/.claude/session-manager/admin-api.json)" -H 'Content-Type: application/json' -d '{"cwd":"/abs/project","id":"<macro-id>"}'
  */
 'use strict';
@@ -70,6 +74,7 @@ const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { findHumanPromptContaining } = require('./humanPromptLedger.cjs');
 const { readActiveIndex } = require('../epic/epicMint.cjs');
 const { PRD_EFFORT_LEVELS } = require('../prd/prdFrontmatter.cjs');
+const { CallerSchema, startedByFromRequest: defaultStartedByFromRequest } = require('../epic/scriptStartedBy.cjs');
 const { normalizeExternalRef } = require('../epic/externalRef.cjs');
 const { findEpicByExternalRef, recordExternalRef, withExternalRefLock } = require('../epic/externalRefIndex.cjs');
 
@@ -379,6 +384,14 @@ function runHandler(deps, libOpts) {
     if (effort !== undefined && !PRD_EFFORT_LEVELS.includes(effort)) {
       return bad(`effort must be one of: ${PRD_EFFORT_LEVELS.join(', ')}`);
     }
+    let caller;
+    if (body.caller !== undefined) {
+      const parsedCaller = CallerSchema.safeParse(body.caller);
+      if (!parsedCaller.success) {
+        return bad(`caller: ${parsedCaller.error.issues?.[0]?.message ?? 'invalid'}`);
+      }
+      caller = parsedCaller.data;
+    }
     const ref = normalizeExternalRef(body.externalRef);
     if (!ref.ok) return bad(ref.error);
     const rendered = macroLibrary.renderMacroPrompt(macro.prompt, macro.inputs, {
@@ -388,7 +401,7 @@ function runHandler(deps, libOpts) {
     if (!rendered.ok) return bad(rendered.error);
 
     if (ref.value !== undefined) {
-      await runWithExternalRef({ deps, res, cwd, macro, prompt: rendered.prompt, effort, externalRef: ref.value });
+      await runWithExternalRef({ deps, req, res, caller, cwd, macro, prompt: rendered.prompt, effort, externalRef: ref.value });
       return;
     }
 
@@ -411,6 +424,8 @@ function runHandler(deps, libOpts) {
 
     if (refusedByUsageHold(deps, res)) return;
 
+    const startedBy = await (deps.startedByFromRequest || defaultStartedByFromRequest)(
+      { route: '/admin/macros/run', caller, socket: req.socket }, deps);
     const payload = {
       cwd,
       agentName: macro.agentName,
@@ -419,6 +434,7 @@ function runHandler(deps, libOpts) {
       prompt: rendered.prompt,
       macroId: macro.id,
       via: 'script',
+      startedBy,
       ...(effort !== undefined ? { effort } : {}),
     };
     const launch = (async () => {
@@ -449,6 +465,7 @@ function runHandler(deps, libOpts) {
       macroId: macro.id,
       epicId: result.epicId,
       alreadyRunning: false,
+      ...(caller ? { scriptCaller: caller } : {}),
     });
     sendJson(res, 200, { ok: true, epicId: result.epicId, alreadyRunning: false });
   };
@@ -491,7 +508,7 @@ function launchFailureError(result) {
  * (cwd, externalRef) share one launch. The macro-wide findRunningEpic shortcut
  * is skipped: a new ref is a new run even while another run is busy.
  */
-async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, externalRef }) {
+async function runWithExternalRef({ deps, req, res, caller, cwd, macro, prompt, effort, externalRef }) {
   const isTabBusy = deps.isTabBusy || (() => false);
   const existingAnswer = (epicId) => sendJson(res, 200, {
     ok: true, epicId, existing: true, alreadyRunning: !!isTabBusy(epicId), externalRef,
@@ -529,6 +546,8 @@ async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, exter
 
     if (refusedByUsageHold(deps, res)) return;
 
+    const startedBy = await (deps.startedByFromRequest || defaultStartedByFromRequest)(
+      { route: '/admin/macros/run', caller, socket: req.socket }, deps);
     const payload = {
       cwd,
       agentName: macro.agentName,
@@ -537,6 +556,7 @@ async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, exter
       prompt,
       macroId: macro.id,
       via: 'script',
+      startedBy,
       externalRef,
       ...(effort !== undefined ? { effort } : {}),
     };
@@ -577,6 +597,7 @@ async function runWithExternalRef({ deps, res, cwd, macro, prompt, effort, exter
       epicId: result.epicId,
       alreadyRunning: false,
       externalRef,
+      ...(caller ? { scriptCaller: caller } : {}),
     });
     sendJson(res, 200, {
       ok: true, epicId: result.epicId, alreadyRunning: false, externalRef,

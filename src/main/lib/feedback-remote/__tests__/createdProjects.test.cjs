@@ -128,6 +128,51 @@ test('missing and corrupt files load as empty', async () => {
   expect(createCreatedProjects({ filePath: file }).list().map((e) => e.cwd)).toEqual(['/p/ok']);
 });
 
+test('a failed write rejects, leaves the cache unchanged, and a later write persists', async () => {
+  const blocker = path.join(tmp, 'blocker');
+  fs.writeFileSync(blocker, 'x');
+  const bad = path.join(blocker, 'created-projects.json');
+  const s = createCreatedProjects({ filePath: bad });
+  await expect(s.record({ cwd: '/p/a', fromCwd: FROM, externalRef: 'r' })).rejects.toThrow();
+  expect(s.list()).toEqual([]);
+  expect(s.findByCwd('/p/a')).toBeNull();
+  expect(s.findByRef(FROM, 'r')).toBeNull();
+  await expect(s.record({ cwd: '/p/a', fromCwd: FROM, externalRef: 'r' })).rejects.toThrow();
+  fs.rmSync(blocker);
+  const rec = await s.record({ cwd: '/p/a', fromCwd: FROM, externalRef: 'r' });
+  expect(s.list()).toEqual([rec]);
+  expect(createCreatedProjects({ filePath: bad }).list()).toEqual([rec]);
+});
+
+test('a failed setRepo write does not leave the repo in memory', async () => {
+  const s = createCreatedProjects({ filePath: file });
+  await s.record({ cwd: '/p/a', fromCwd: FROM, externalRef: 'r' });
+  fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  fs.writeFileSync(path.dirname(file), 'x');
+  await expect(s.setRepo('/p/a', 'me/a')).rejects.toThrow();
+  expect(s.findByCwd('/p/a').repo).toBeNull();
+});
+
+test('loaded entries with an invalid repo get repo null; valid repos are kept', () => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const e = (cwd, repo) => ({ cwd, fromCwd: FROM, externalRef: cwd, repo, createdAt: 1 });
+  fs.writeFileSync(file, JSON.stringify({ version: 1, projects: [
+    e('/p/nl', 'me/a\nb'),
+    e('/p/long', 'x'.repeat(201)),
+    e('/p/empty', ''),
+    e('/p/nul', 'a\0b'),
+    e('/p/ok', 'me/ok'),
+    e('/p/max', 'y'.repeat(200)),
+  ] }));
+  const s = createCreatedProjects({ filePath: file });
+  expect(s.findByCwd('/p/nl').repo).toBeNull();
+  expect(s.findByCwd('/p/long').repo).toBeNull();
+  expect(s.findByCwd('/p/empty').repo).toBeNull();
+  expect(s.findByCwd('/p/nul').repo).toBeNull();
+  expect(s.findByCwd('/p/ok').repo).toBe('me/ok');
+  expect(s.findByCwd('/p/max').repo).toBe('y'.repeat(200));
+});
+
 test('file is written with mode 0600', async () => {
   const s = createCreatedProjects({ filePath: file });
   await s.record({ cwd: '/p/a', fromCwd: FROM, externalRef: 'r' });

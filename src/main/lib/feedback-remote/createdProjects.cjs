@@ -113,6 +113,20 @@ function isEntry(e) {
 }
 
 /**
+ * A repo read from disk: kept only when it passes validateRepo, else null.
+ * @param {unknown} repo
+ * @returns {string | null}
+ */
+function loadedRepo(repo) {
+  if (typeof repo !== 'string') return null;
+  try {
+    return validateRepo(repo, false);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {unknown} raw
  * @returns {StoreState}
  */
@@ -126,7 +140,7 @@ function normalizeLoaded(raw) {
     cwd: path.resolve(e.cwd),
     fromCwd: path.resolve(e.fromCwd),
     externalRef: e.externalRef,
-    repo: typeof e.repo === 'string' ? e.repo : null,
+    repo: loadedRepo(e.repo),
     createdAt: e.createdAt,
   }));
   return { version: STORE_VERSION, projects: projects.slice(-MAX_PROJECTS) };
@@ -158,9 +172,11 @@ function createCreatedProjects({ filePath, now } = {}) {
    */
   function mutate(fn) {
     const run = queue.then(async () => {
-      const s = load();
-      const result = fn(s);
-      await writeTextAtomic(file, `${JSON.stringify(s, null, 2)}\n`, { mode: 0o600 });
+      /** @type {StoreState} */
+      const next = JSON.parse(JSON.stringify(load()));
+      const result = fn(next);
+      await writeTextAtomic(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+      state = next;
       return result;
     });
     queue = run.catch(() => {});

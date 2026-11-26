@@ -878,6 +878,32 @@ A pending pairing lives 10 minutes on the desktop; the relay code itself lasts 5
 `~/.claude/session-manager/remote-services.json` ([`servicePairings.cjs`](../../src/main/lib/feedback-remote/servicePairings.cjs)) —
 that file is not part of the contract.
 
+### Pairing a service on this machine
+
+A service that runs on the same machine can be paired by an agent with no window step. It uses two
+token-guarded loopback admin routes ([`servicePairLocalRoutes.cjs`](../../src/main/lib/feedback-remote/servicePairLocalRoutes.cjs)); the admin
+token is required (401 without it) and Web remote must be on.
+
+- `POST /admin/services/pair-local` — body `{ name, homeCwd, tools, projectRoot? }` (strict; `name` 1-80 chars,
+  `homeCwd` an absolute path, `tools` a non-empty list of service tool names, `projectRoot` as in `project_create`).
+  Answers `200 { ok: true, code, pairingId, codeExpiresAt, deviceId }`.
+- `POST /admin/services/pair-local/confirm` — body `{ pairingId, sas }` (strict; `sas` is exactly 6 digits).
+  Answers `200 { ok: true, service }` — the paired service, never its public key.
+
+Refusals, both routes, body `{ ok: false, error }`: `400` for invalid JSON, a body that fails the schema
+(the error names the field) or any other failure; `409` for `web_remote_off` or `no_paired_device`; `404` for
+`no_pending_service` (unknown `pairingId`) or `not_local_pairing` (the pending pairing was started from the
+window, not here); `403` for `sas_mismatch`.
+
+Callers: the CLI line `claude-code-session-manager service pair-local --state-dir <dir> --name <name> --home <cwd> --tools a,b,c [--project-root <dir>] [--timeout <seconds>]`
+([`serviceStdioBridge.cjs`](../../src/main/lib/feedback-remote/serviceStdioBridge.cjs)) starts, redeems, and confirms in one run; the
+`service_pair_local` MCP tool (arguments `stateDir`, `name`, `homeCwd`, `tools`) does the same for an agent in a
+Session Manager chat or terminal session (refused inside a scheduled job). The pairing is identical to the window one:
+the same scope, `homeCwd`, `projectRoot`, revoke and kill-switch rules apply, and the audit log marks it `paired-locally`.
+
+The SAS is still compared. The local client derives it from the relay handshake and posts it over loopback, and the
+desktop checks it against its own; a relay man-in-the-middle derives a different one, so it still fails with `sas_mismatch`.
+
 ### Scope and its limits
 
 Enforced on the desktop by [`serviceMcpSession.cjs`](../../src/main/lib/feedback-remote/serviceMcpSession.cjs), on every call:

@@ -8,6 +8,9 @@
  *
  * Read-only, same-uid processes only. Never logs or returns the environment —
  * only the two variables. Never throws or rejects; null on any miss.
+ * SECURITY: the resolved chat/Epic is self-asserted by any same-uid process
+ * (it can set these variables to anything). It is provenance only and must
+ * never be used to authorize anything.
  * Linux: /proc. darwin: lsof + ps (execFile, no shell). Others: null.
  */
 
@@ -117,8 +120,9 @@ async function darwinResolve(socket, deps, deadline, now) {
       const cmd = await run(execFile, 'ps', ['-E', '-ww', '-o', 'command=', '-p', String(pid)], left());
       if (cmd) {
         const env = {};
-        const id = / SM_CHAT_SESSION_ID=(\S+)/.exec(cmd);
-        const root = / SM_PROJECT_ROOT=(\S+)/.exec(cmd);
+        // ps -E prints argv then the environment: the LAST match is the env's.
+        const id = [...cmd.matchAll(/ SM_CHAT_SESSION_ID=(\S+)/g)].pop();
+        const root = [...cmd.matchAll(/ SM_PROJECT_ROOT=(\S+)/g)].pop();
         if (id) env.SM_CHAT_SESSION_ID = id[1];
         if (root) env.SM_PROJECT_ROOT = root[1];
         const found = pickVars(env);

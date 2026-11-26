@@ -62,6 +62,17 @@ describe('injected deps', () => {
     expect(await resolvePeerChatSession(sock, { platform: 'darwin', execFile }))
       .toEqual({ chatSessionId: 'chat-abcdef12', projectRoot: '/p' });
   });
+  it('darwin takes the last match (env is appended after argv)', async () => {
+    const execFile = (file, args, opts, cb) => {
+      if (file === 'lsof') return cb(null, `p${process.pid}\np777\n`);
+      if (args.includes('command=')) {
+        return cb(null, 'node x SM_CHAT_SESSION_ID=fake-argv-0001 SM_PROJECT_ROOT=/fake PATH=/bin SM_CHAT_SESSION_ID=chat-abcdef12 SM_PROJECT_ROOT=/p');
+      }
+      return cb(new Error('no'));
+    };
+    expect(await resolvePeerChatSession(sock, { platform: 'darwin', execFile }))
+      .toEqual({ chatSessionId: 'chat-abcdef12', projectRoot: '/p' });
+  });
 });
 
 describe('real socket', () => {

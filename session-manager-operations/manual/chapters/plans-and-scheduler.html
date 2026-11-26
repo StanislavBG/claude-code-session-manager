@@ -104,6 +104,51 @@ work starts by itself. A reset of that work order checks again right away.</p>
 stuck, so no alarms fire. And if a run fails because the step is missing again, the work order
 goes back on hold instead of into Needs review.</aside>
 
+<h2>A second opinion before a big plan runs</h2>
+
+<p>A plan written by one agent can carry that agent's blind spots. So a bigger plan gets an
+independent review before any of its work orders start. A plan is held for review when it has
+three or more work orders, or when any one of them depends on another in the same plan. A
+single work order, or two with no link between them, skips the review and runs as usual.</p>
+
+<p>While the plan is held, its waiting work orders stay Pending with the note <code>held:
+plan-review</code>. No agent works on them yet.</p>
+
+<h3>Who reviews</h3>
+
+<p>The reviewer is a different persona, <strong>plan-reviewer</strong>, and it never runs on the same
+model family as the agent that wrote the plan. It is read-only: it edits no work order and no code,
+and it queues nothing. It reads every work order in the plan, checks each against a fixed
+checklist, and marks each one <code>ok</code>, <code>amend</code>, or <code>block</code>. Each
+finding comes with a concrete suggested edit.</p>
+
+<h3>What the planner does with findings</h3>
+
+<p>When the review lands, the planner's Session gets one message that starts with <code>PLAN
+REVIEWED:</code>. It lists each work order's decision, its findings, and the edits the reviewer
+suggests. The planner then applies the edits it agrees with. For any finding it rejects, it gives a
+one-line reason, and a rejection with no reason is refused.</p>
+
+<h3>Release</h3>
+
+<ol class="manual-steps">
+  <li><strong>One call releases the plan.</strong> The planner makes a single release call that
+  records what it accepted and what it rejected, with reasons. Calling it a second time changes
+  nothing.</li>
+  <li><strong>All ok releases itself.</strong> If every work order is <code>ok</code> and there are
+  no plan-level findings, the plan is released automatically and the message says so. If the review
+  itself fails, the plan is released too, marked as unreviewed, so a broken reviewer never
+  strands your work.</li>
+  <li><strong>A block can be re-checked once.</strong> After a <code>block</code>, the planner may
+  ask for one more review of the revised plan, and no more than one.</li>
+  <li><strong>A timeout releases it.</strong> A hold never lasts forever. If nobody releases the
+  plan within 4 hours, the Scheduler releases it. Set <code>SM_PLAN_REVIEW_HOLD_MINUTES</code> to
+  change the length.</li>
+</ol>
+
+<aside class="manual-note"><strong>Good to know:</strong> to turn plan review off entirely, start
+the app with <code>SM_PLAN_REVIEW=0</code>. Plans then dispatch with no hold.</aside>
+
 <h2>Taking the wheel: pace, pause, and cancel</h2>
 
 <p>Every Claude Code job on your machine — Scheduler work and Chat alike — draws from one shared

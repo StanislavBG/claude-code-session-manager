@@ -430,7 +430,6 @@ test('listPersonas entries carry the loadout state', async () => {
   }
   // Bare via `tools: []` (savePersona has no loadout field) and via an empty `tools:` line (native loader: zero tools).
   await fsp.writeFile(path.join(globalDir, 'l-bare.md'), '---\nname: l-bare\ndescription: d\ntools: []\nmodel: opus\n---\nB.\n');
-  // (native loader: zero tools).
   await fsp.writeFile(path.join(globalDir, 'l-bare-empty.md'), '---\nname: l-bare-empty\ndescription: d\ntools:\nmodel: opus\n---\nB.\n');
   const list = await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: identityValidatePath });
   const by = Object.fromEntries(list.map((p) => [p.name, p.loadout]));

@@ -598,6 +598,14 @@ export interface AgentPersona {
   name: string;
   description: string | null;
   tools: string[];
+  /** The `tools:` decision: undecided (no line) / bare (`[]`) / equipped / unbound (`*`). */
+  loadout?: 'undecided' | 'bare' | 'equipped' | 'unbound';
+  /** Declared MCP servers (`mcpServers:`); [] = none. */
+  mcpServers?: string[];
+  /** Declared context packs (`packs:`); [] = none. */
+  packs?: string[];
+  /** Declared environment profile (`environment:`); null = headless-default. */
+  environment?: string | null;
   model: string | null;
   /** Per-Epic reasoning effort (`effort:` frontmatter; a `models.catalog` effort level). Null = inherit. Passed to the claude spawn as `--effort` (never `auto`). */
   effort: string | null;
@@ -641,6 +649,14 @@ export interface AgentPersonaSaveInput {
   originalName?: string;
   description: string;
   tools: string[];
+  /** Global save only: the loadout decision encoding `tools:` (omit = derive from `tools`). */
+  loadout?: 'bare' | 'unbound' | 'equipped';
+  /** Global save: declared MCP servers; omit = keep the file's value, `[]` = none. */
+  mcpServers?: string[];
+  /** Global save: declared context packs; omit = keep the file's value, `[]` = none. */
+  packs?: string[];
+  /** Global save: declared environment profile; omit = keep the file's value. */
+  environment?: string;
   model: string;
   /** Effort level, or `'inherit'`/omitted to write no `effort:` line. */
   effort?: string;
@@ -1142,7 +1158,7 @@ export interface ScheduleJob {
   /** PRD frontmatter library voice (in-process only); handed to the job as SM_VOICE_ID. */
   voiceId?: string | null;
   /** PRD frontmatter persona (queue rows carry it; absent = dev-lead). */
-  agentType?: string;
+  agentType?: string | null;
   slug: string;
   title: string;
   cwd: string | null;

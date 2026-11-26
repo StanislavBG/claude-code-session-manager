@@ -12,7 +12,9 @@
  *   - Frontmatter: overlay keys override the global's; a key absent from the
  *     overlay (or present with an empty value) falls back to the global.
  *   - Gear keys (`tools`, `mcpServers`, `packs`, `environment`) REPLACE the
- *     global value wholesale — never a union (a Bare `tools: []` overlay wins
+ *     global value wholesale — never a union (a Bare `tools: []` overlay wins;
+ *     likewise `mcpServers: []` / `packs: []` = replace with none, a non-empty
+ *     value that survives the empty-value skip below;
  *     over the global's tools); absent keys inherit. `loadout` on the result is
  *     computed from the MERGED `tools`.
  *   - Body: an overlay with a non-empty body replaces the global body wholesale

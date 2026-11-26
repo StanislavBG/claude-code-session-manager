@@ -856,9 +856,18 @@ const agentsSavePersona = z.record(z.string(), z.unknown()).transform((raw, ctx)
   for (const k of GEAR_KEYS) {
     if (k in rest) { gear[k] = rest[k]; delete rest[k]; }
   }
-  if (!hasCwd && Object.keys(gear).length) {
-    ctx.addIssue({ code: 'custom', message: `${Object.keys(gear).join(', ')} are accepted only on a project override (projectCwd set)` });
+  // Global saves take the gear keys via AgentPersonaSaveSchema; 'undecided' is overlay-only.
+  if (!hasCwd && gear.loadout === 'undecided') {
+    ctx.addIssue({ code: 'custom', path: ['loadout'], message: "loadout 'undecided' is accepted only on a project override (projectCwd set)" });
     return z.NEVER;
+  }
+  if (!hasCwd) {
+    const base = AgentPersonaSaveSchema.safeParse({ ...rest, ...gear });
+    if (!base.success) {
+      for (const i of base.error.issues) ctx.addIssue({ code: 'custom', path: i.path, message: i.message });
+      return z.NEVER;
+    }
+    return base.data;
   }
   const base = AgentPersonaSaveSchema.safeParse(rest);
   const g = AgentOverlayGearSchema.safeParse(gear);

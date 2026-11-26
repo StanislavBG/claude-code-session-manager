@@ -4,7 +4,7 @@ import { test, expect, afterEach } from 'vitest';
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { savePersona } = require('../agentLibrary.cjs');
+const { savePersona, listPersonas } = require('../agentLibrary.cjs');
 
 const idPath = (p) => p;
 const writes = [];
@@ -90,4 +90,32 @@ test('no mcp__ tools leaves the caller mcpServers untouched', async () => {
   const globalDir = await mkTmp();
   await savePersona({ ...base, name: 'gear-b', model: 'sonnet', globalDir, mcpServers: ['only'] });
   expect(await fsp.readFile(path.join(globalDir, 'gear-b.md'), 'utf8')).toMatch(/^mcpServers: only$/m);
+});
+
+test('a global save writes mcpServers, packs, environment and the loadout encoding', async () => {
+  const globalDir = await mkTmp();
+  await savePersona({ ...base, name: 'g', model: 'opus', globalDir, tools: [], loadout: 'bare', mcpServers: ['alpha'], packs: ['pk'], environment: 'sandboxed' });
+  const text = await fsp.readFile(path.join(globalDir, 'g.md'), 'utf8');
+  expect(text).toContain('tools: []');
+  expect(text).toContain('mcpServers: alpha');
+  expect(text).toContain('packs: pk');
+  expect(text).toContain('environment: sandboxed');
+  await savePersona({ ...base, name: 'g', model: 'opus', globalDir, loadout: 'unbound' });
+  expect(await fsp.readFile(path.join(globalDir, 'g.md'), 'utf8')).toContain('tools: *');
+  const list = await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: idPath });
+  expect(list[0]).toMatchObject({ loadout: 'unbound', mcpServers: ['alpha'], packs: ['pk'], environment: 'sandboxed' });
+});
+
+test('a global save with explicit empty mcpServers/packs writes `[]`, which lists as none', async () => {
+  const globalDir = await mkTmp();
+  await savePersona({ ...base, name: 'e', model: 'opus', globalDir, mcpServers: ['alpha'], packs: ['pk'] });
+  await savePersona({ ...base, name: 'e', model: 'opus', globalDir, mcpServers: [], packs: [] });
+  const text = await fsp.readFile(path.join(globalDir, 'e.md'), 'utf8');
+  expect(text).toContain('mcpServers: []');
+  expect(text).toContain('packs: []');
+  const list = await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: idPath });
+  expect(list[0]).toMatchObject({ mcpServers: [], packs: [], environment: null });
+  // Omitted on the next save: the explicit empty is carried over, not dropped.
+  await savePersona({ ...base, name: 'e', model: 'opus', globalDir });
+  expect(await fsp.readFile(path.join(globalDir, 'e.md'), 'utf8')).toContain('mcpServers: []');
 });

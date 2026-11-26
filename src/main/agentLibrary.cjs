@@ -35,6 +35,9 @@ function parseTools(raw) {
   return raw.split(',').map((t) => t.trim()).filter((t) => t && t !== '[]');
 }
 
+/** Explicit-empty marker for a gear list: `mcpServers: []` / `packs: []` = replace with none. */
+const EMPTY_LIST_ENCODING = '[]';
+
 /**
  * A declared-capability frontmatter value (`mcpServers:` / `packs:`) as a
  * list: a comma string ("a, b") or a string list (structured callers).
@@ -48,7 +51,7 @@ function parseCapabilityList(raw) {
   for (const it of items) {
     if (typeof it !== 'string') continue;
     const v = it.trim();
-    if (v && !out.includes(v)) out.push(v);
+    if (v && v !== EMPTY_LIST_ENCODING && !out.includes(v)) out.push(v);
   }
   return out;
 }
@@ -148,8 +151,8 @@ function serializePersona({ name, description, tools, loadout, model, effort, co
   if (title) lines.push(`title: ${title}`);
   if (typeof seedVersion === 'number' && Number.isFinite(seedVersion)) lines.push(`seedVersion: ${seedVersion}`);
   if (executorOnly === true) lines.push('executorOnly: true');
-  if (Array.isArray(mcpServers) && mcpServers.length) lines.push(`mcpServers: ${mcpServers.join(', ')}`);
-  if (Array.isArray(packs) && packs.length) lines.push(`packs: ${packs.join(', ')}`);
+  if (Array.isArray(mcpServers)) lines.push(`mcpServers: ${mcpServers.length ? mcpServers.join(', ') : EMPTY_LIST_ENCODING}`);
+  if (Array.isArray(packs)) lines.push(`packs: ${packs.length ? packs.join(', ') : EMPTY_LIST_ENCODING}`);
   if (typeof environment === 'string' && environment.trim()) lines.push(`environment: ${environment.trim()}`);
   if (Array.isArray(preservedLines) && preservedLines.length) lines.push(...preservedLines);
   lines.push('---', '');
@@ -238,8 +241,9 @@ async function saveOverlay({ name, projectCwd, model, effort, tools, loadout, mc
   // `tools: []` alone is the override call's dummy value, so Bare/Unbound need an explicit `loadout`.
   const toolsValue = loadout ? encodeLoadout(loadout, tools) : (Array.isArray(tools) && tools.length ? encodeLoadout('equipped', tools) : null);
   if (toolsValue) managedLines.push(`tools: ${toolsValue}`);
-  if (Array.isArray(mcpServers) && mcpServers.length) managedLines.push(`mcpServers: ${mcpServers.join(', ')}`);
-  if (Array.isArray(packs) && packs.length) managedLines.push(`packs: ${packs.join(', ')}`);
+  // An explicit [] is written as `[]` = replace the global value with none (personaMerge); undefined = inherit.
+  if (Array.isArray(mcpServers)) managedLines.push(`mcpServers: ${mcpServers.length ? mcpServers.join(', ') : EMPTY_LIST_ENCODING}`);
+  if (Array.isArray(packs)) managedLines.push(`packs: ${packs.length ? packs.join(', ') : EMPTY_LIST_ENCODING}`);
   if (typeof environment === 'string' && environment.trim()) managedLines.push(`environment: ${environment.trim()}`);
   if (managedLines.length) assertValidOverlayKeys(name, managedLines);
   if (managedLines.length === 0 && preserved.length === 0) {
@@ -372,7 +376,7 @@ async function savePersona({
   if (derivedServers.length) {
     resolvedMcpServers = [...new Set([...(Array.isArray(resolvedMcpServers) ? resolvedMcpServers : []), ...derivedServers])];
   }
-  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, mcpServers: resolvedMcpServers, packs: resolvedPacks, environment: resolvedEnvironment, body, preservedLines });
+  const text = serializePersona({ name, description, tools, loadout, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, mcpServers: resolvedMcpServers, packs: resolvedPacks, environment: resolvedEnvironment, body, preservedLines });
   assertValidPersonaText(name, text, preservedLines);
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
@@ -524,6 +528,9 @@ async function listPersonas({
       description: fm.description || null,
       tools: parseTools(fm.tools),
       loadout: loadoutState(fm),
+      mcpServers: parseCapabilityList(fm.mcpServers),
+      packs: parseCapabilityList(fm.packs),
+      environment: typeof fm.environment === 'string' && fm.environment.trim() ? fm.environment.trim() : null,
       model: fm.model || null,
       effort: fm.effort || null,
       color: fm.color || null,

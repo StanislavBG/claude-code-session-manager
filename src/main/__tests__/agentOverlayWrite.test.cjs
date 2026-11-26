@@ -216,3 +216,20 @@ test('a gear overlay merges over the global (replace) and an invalid gear value 
   fs.writeFileSync(overlayFile, '---\ntools: Read\n---\nBody.\n');
   await expect(save({ tools: ['Grep'] })).rejects.toThrow(/full-body/);
 });
+
+test('an explicitly empty mcpServers/packs is written as `[]` and merges as replace-with-none; undefined inherits', async () => {
+  const { overlayFile, globalFile, deps, save, cwd } = setup();
+  fs.writeFileSync(globalFile, '---\nname: dev-lead\ndescription: d\nmodel: sonnet\nmcpServers: alpha, beta\npacks: pk\n---\nGlobal body.\n');
+  await save({ mcpServers: [], packs: [] });
+  expect(fs.readFileSync(overlayFile, 'utf8')).toBe('---\nmcpServers: []\npacks: []\n---\n');
+  const { resolveMergedPersona } = require('../lib/persona-macro/personaMerge.cjs');
+  const { parseCapabilityList } = require('../agentLibrary.cjs');
+  const merged = resolveMergedPersona(cwd, 'dev-lead', { validatePath: (p) => p, globalDir: deps.globalDir });
+  expect(merged.provenance.mcpServers).toBe('overlay');
+  expect(parseCapabilityList(merged.fm.mcpServers)).toEqual([]);
+  expect(parseCapabilityList(merged.fm.packs)).toEqual([]);
+  // undefined = no line = inherit the global value.
+  await save({ mcpServers: undefined, packs: undefined, model: 'opus' });
+  const inherited = resolveMergedPersona(cwd, 'dev-lead', { validatePath: (p) => p, globalDir: deps.globalDir });
+  expect(parseCapabilityList(inherited.fm.mcpServers)).toEqual(['alpha', 'beta']);
+});

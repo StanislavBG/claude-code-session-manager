@@ -74,11 +74,22 @@ test('agentsIpc agents:armory calls buildArmory with the cwd and the scheduler b
   expect(Array.isArray(spy.mock.calls[0][0].deps.bannedTools)).toBe(true);
 });
 
-test('agentsSavePersona admits gear keys only on a project override and validates them', () => {
+test('agentsSavePersona admits gear keys on global and override saves and validates them', () => {
   const s = schemas.agentsSavePersona;
   const base = { name: 'dev-lead', description: '', tools: [], model: 'opus', color: '', tags: [], body: '' };
   expect(parses(s, { ...base, projectCwd: '/work/alpha', mcpServers: ['a'], packs: ['p'], environment: 'sandboxed', loadout: 'bare' })).toBe(true);
-  expect(parses(s, { ...base, mcpServers: ['a'] })).toBe(false);
+  // Global save (no projectCwd): every gear field is accepted and kept.
+  const g = s.safeParse({ ...base, mcpServers: ['a'], packs: [], environment: 'sandboxed', loadout: 'unbound' });
+  expect(g.success).toBe(true);
+  expect(g.data).toMatchObject({ mcpServers: ['a'], packs: [], environment: 'sandboxed', loadout: 'unbound' });
+  expect(parses(s, { ...base, mcpServers: [] })).toBe(true);
+  expect(parses(s, { ...base, packs: ['p'] })).toBe(true);
+  expect(parses(s, { ...base, loadout: 'bare' })).toBe(true);
+  expect(parses(s, { ...base, loadout: 'equipped' })).toBe(true);
+  expect(parses(s, { ...base, loadout: 'undecided' })).toBe(false);
+  expect(parses(s, { ...base, loadout: 'nope' })).toBe(false);
+  expect(parses(s, { ...base, environment: 'Bad Env' })).toBe(false);
+  expect(parses(s, { ...base, mcpServers: [''] })).toBe(false);
   expect(parses(s, { ...base, projectCwd: '/work/alpha', environment: 'Bad Env' })).toBe(false);
   expect(parses(s, { ...base, projectCwd: '/work/alpha', bogus: 1 })).toBe(false);
 });

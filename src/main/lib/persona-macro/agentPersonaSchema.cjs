@@ -97,6 +97,12 @@ const AgentPersonaSaveSchema = z.object({
   agentCli: z.enum(/** @type {[string, ...string[]]} */ ([...AGENT_CLI_IDS])).optional(),
   // Model handed to that CLI; same rule as epicMint.
   agentCliModel: z.string().regex(AGENT_CLI_MODEL_RE).optional(),
+  // Gear (global save): declared MCP servers / context packs / environment profile, and the
+  // loadout decision that encodes `tools:`. An explicit [] means "none" (written as `[]`).
+  mcpServers: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
+  packs: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
+  environment: z.string().trim().regex(/^[a-z0-9][a-z0-9-]*$/, 'environment must be a lowercase, hyphenated profile name').optional(),
+  loadout: z.enum(['bare', 'unbound', 'equipped']).optional(),
   // Unbounded — a persona's body is arbitrary system-prompt prose.
   body: z.string(),
 }).strict().superRefine((p, ctx) => {

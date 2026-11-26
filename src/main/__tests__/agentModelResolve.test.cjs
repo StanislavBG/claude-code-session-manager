@@ -195,7 +195,7 @@ test("resolvePrdPersonaForSpawn resolves an absent agentType as 'dev-lead' (no s
   const getPersonaBody = async ({ name }) => { names.push(name); return { path: '/x/dev-lead.md', text: '---\nmodel: opus\n---\nLead.' }; };
   const result = await resolvePrdPersonaForSpawn({ cwd: '/irrelevant', agentType: null, deps: { getPersonaBody } });
   expect(names).toEqual(['dev-lead']);
-  expect(result).toEqual({ model: 'opus', systemPrompt: 'Lead.', personaPath: '/x/dev-lead.md', tools: null, refusal: null });
+  expect(result).toEqual({ model: 'opus', systemPrompt: 'Lead.', personaPath: '/x/dev-lead.md', tools: null, loadout: 'undecided', refusal: null });
 });
 
 test('resolvePrdPersonaForSpawn returns the persona tools frontmatter as a parsed list, MCP names unchanged', async () => {

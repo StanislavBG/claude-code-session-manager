@@ -222,6 +222,13 @@ function writeGatedClaudeStub() {
       process.stdout.write('1.0.0 (stub)\\n');
       process.exit(0);
     }
+    // builtinTools.cjs probes the CLI's tool/skill catalog (resolveSkillDeny)
+    // with a minimal '-p hi' run and waits for the stream-json init event;
+    // answer it at once, or the probe's 20s timeout stalls dispatch before spawn.
+    if (process.argv[process.argv.indexOf('-p') + 1] === 'hi') {
+      process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', tools: ['Read', 'Bash'], skills: [] }) + '\\n');
+      process.exit(0);
+    }
     const goFile = path.join(process.cwd(), 'go.marker');
     const deadline = Date.now() + 10_000;
     while (!fs.existsSync(goFile) && Date.now() < deadline) {

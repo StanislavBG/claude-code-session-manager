@@ -14,6 +14,15 @@ import { useMcpChecks } from '../../../state/mcpChecks'
 import { HOME, PROJECT_CWD, PROJECT_TAB } from './_navfaceHarness'
 
 vi.mock('../../VoiceButton', () => ({ VoiceButton: () => null }))
+vi.mock('../Library', async (orig) => ({
+  ...(await orig<typeof import('../Library')>()),
+  McpLibrary: (p: { scope?: string; cwd?: string | null }) =>
+    createElement('div', { 'data-testid': 'mcp-library', 'data-scope': p.scope, 'data-cwd': p.cwd ?? '' }),
+}))
+vi.mock('../home/HomeSessionDrawer', () => ({
+  HomeSessionDrawer: (p: { open: boolean; title: string; children?: unknown }) =>
+    p.open ? createElement('div', { 'data-testid': 'drawer', 'data-title': p.title }, p.children as never) : null,
+}))
 // Monaco-backed editors don't render in jsdom.
 vi.mock('../../ui/MarkdownEditor', () => ({ MarkdownEditor: () => createElement('div') }))
 vi.mock('../../ui/JsonEditor', () => ({ JsonEditor: () => createElement('div') }))
@@ -107,8 +116,8 @@ const chips = () => Array.from(container.querySelectorAll('[data-testid="source-
 const tabLabel = (b: Element) => b.querySelector('span.font-semibold')?.textContent?.trim()
 /** Clicks a rail tab. */
 async function pick(label: string) {
-  const band = Array.from(q('config-rail')?.querySelectorAll('[role="tab"]') ?? []) as HTMLElement[]
-  const b = band.find((x) => tabLabel(x) === label)
+  const railTabs = Array.from(q('config-rail')?.querySelectorAll('[role="tab"]') ?? []) as HTMLElement[]
+  const b = railTabs.find((x) => tabLabel(x) === label)
   if (!b) throw new Error(`no rail tab "${label}"`)
   await act(async () => { b.click() })
   await flush()
@@ -169,7 +178,7 @@ describe('ProjectClaudeConfig', () => {
     expect(q('config-rail')?.textContent).toContain('Claude config')
   })
 
-  it('renders ConfigBand over the project path with exactly Memory, CLAUDE.md, Settings, MCP, Skills and live counts', async () => {
+  it('renders the rail over the project path with exactly Memory, CLAUDE.md, Settings, MCP, Skills and live counts', async () => {
     api.memory.list.mockResolvedValue({
       entries: [{ name: 'a' }, { name: 'b' }, { name: 'c' }], workspace: 'ws', dir: MEM_DIR, autoMemoryEnabled: true, error: null,
     })
@@ -185,11 +194,11 @@ describe('ProjectClaudeConfig', () => {
       entries: p.endsWith('/.claude/commands') ? [{ name: 'go.md', isDir: false }, { name: 'x.txt', isDir: false }] : [],
     }))
     await mount()
-    const band = q('config-rail')!
-    expect(band.textContent).toContain('CLAUDE CODE · PROJECT')
-    expect(band.textContent).toContain('Claude config')
-    expect(band.textContent).toContain(SHORT)
-    const tabs = Array.from(band.querySelectorAll('[role="tab"]'))
+    const rail = q('config-rail')!
+    expect(rail.textContent).toContain('CLAUDE CODE · PROJECT')
+    expect(rail.textContent).toContain('Claude config')
+    expect(rail.textContent).toContain(SHORT)
+    const tabs = Array.from(rail.querySelectorAll('[role="tab"]'))
     expect(tabs.map(tabLabel)).toEqual(['Memory', 'CLAUDE.md', 'Settings', 'MCP', 'Skills'])
     // Plugins and Agents are machine-wide: Home only.
     expect(q('config-rail-tab-plugins')).toBeNull()
@@ -202,9 +211,31 @@ describe('ProjectClaudeConfig', () => {
     expect(countOf('settings')).toBe('2')
     expect(countOf('mcp')).toBe('2')
     expect(countOf('skills')).toBe('1')
-    // The old ViewTabs/SourceChip header row and the source strip under the band are gone.
+    // The old ViewTabs/SourceChip header row and the source strip under the rail are gone.
     expect(q('project-claude-config-toolbar')).toBeNull()
     expect(q('project-claude-config-source')).toBeNull()
+  })
+
+  it('LEARN toggles the learn panel open and closed', async () => {
+    await mount()
+    const press = () => clickText('LEARN')
+    expect(q('project-claude-config-learn')).toBeNull()
+    await press()
+    expect(q('project-claude-config-learn')).not.toBeNull()
+    await press()
+    expect(q('project-claude-config-learn')).toBeNull()
+  })
+
+  it('MCP Add opens the drawer titled Add MCP server with the McpLibrary at project scope for the cwd', async () => {
+    await mount()
+    await pick('MCP')
+    expect(q('drawer')).toBeNull()
+    await act(async () => { q('mcp-add-server')!.click() })
+    await act(async () => { q('mcp-browse-catalog')!.click() })
+    await flush()
+    expect(q('drawer')?.getAttribute('data-title')).toBe('Add MCP server')
+    expect(q('mcp-library')?.getAttribute('data-scope')).toBe('project')
+    expect(q('mcp-library')?.getAttribute('data-cwd')).toBe(PROJECT_CWD)
   })
 
   const countOf = (key: string) => q(`config-rail-tab-${key}`)?.querySelector('[data-testid="config-rail-count"]')?.textContent
@@ -288,7 +319,7 @@ describe('ProjectClaudeConfig', () => {
     expect(q('config-rail-tab-claude-md')?.querySelector('[data-testid="config-rail-count"]')?.textContent).toBe('missing')
   })
 
-  it('mounts all five tabs with no source strip under the band; radio rows own the Project / Local choice', async () => {
+  it('mounts all five tabs with no source strip under the rail; radio rows own the Project / Local choice', async () => {
     await mount()
     const panel = (key: string) => q(`project-claude-config-panel-${key}`)
     const checked = () =>

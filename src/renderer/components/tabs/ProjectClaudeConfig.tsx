@@ -56,7 +56,7 @@ import type { AlmanacIconName } from '../layout/AlmanacIcon'
 type ConfigTab = 'memory' | 'claude-md' | 'settings' | 'mcp' | 'skills'
 type ProjectScope = 'project' | 'local'
 
-/** The five project tabs, in band order. Plugins and Agents are machine-wide: Home only. */
+/** The five project tabs, in rail order. Plugins and Agents are machine-wide: Home only. */
 const PROJECT_CLAUDE_CONFIG_TABS: ReadonlyArray<{ key: ConfigTab; label: string; icon: AlmanacIconName }> = [
   { key: 'memory', label: 'Memory', icon: 'memory' },
   { key: 'claude-md', label: 'CLAUDE.md', icon: 'system-prompt' },
@@ -148,7 +148,7 @@ async function readProjectCounts(cwd: string): Promise<ProjectCounts> {
 }
 
 /**
- * Live counts for the band's five tabs, read through the same window.api readers the tab
+ * Live counts for the rail's five tabs, read through the same window.api readers the tab
  * bodies use. Every source path is watched; a change re-reads all counts (they are cheap).
  * Keyed by cwd so a project switch never shows the previous project's numbers.
  */
@@ -270,7 +270,7 @@ function ProjectClaudeConfigComponent() {
   )
   const search = useConfigSearch({ load: loadSearchItems, loadKey: cwd ?? '', onChoose: chooseResult })
 
-  const bandTabs = useMemo<ConfigTabSpec<ConfigTab>[]>(() => {
+  const railTabs = useMemo<ConfigTabSpec<ConfigTab>[]>(() => {
     const countOf: Record<ConfigTab, Partial<ConfigTabSpec<ConfigTab>>> = {
       memory: { count: asCount(counts.memory), attention: counts.memoryAttention },
       'claude-md': claudeMdChip(counts.claudeMd),
@@ -299,7 +299,7 @@ function ProjectClaudeConfigComponent() {
       eyebrow="CLAUDE CODE · PROJECT"
       title="Claude config"
       scopePath={shortenHome(cwd, home)}
-      tabs={bandTabs}
+      tabs={railTabs}
       activeKey={tab}
       onSelect={selectTab}
       search={search}

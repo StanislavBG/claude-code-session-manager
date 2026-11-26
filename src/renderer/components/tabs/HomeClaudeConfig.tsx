@@ -1,6 +1,7 @@
 /**
- * HomeClaudeConfig — Home's one "Claude config" page over `~/.claude`: the ClaudeConfigShell rail plus six tabs, each mounting the existing page for that area at
- * user scope (design-mocks/claude-config/DESIGN_SPEC.md §1.2, §2). The four
+ * HomeClaudeConfig — Home's one "Claude config" page over `~/.claude`: the ClaudeConfigShell rail
+ * plus six tabs, each mounting the existing page for that area at user scope
+ * (design-mocks/claude-config/DESIGN_SPEC.md §1.2, §2). The four
  * retired Home rows (system-prompt / settings / extensions / agent-library)
  * route here through lib/navGroups.ts's NAV_KEY_ALIASES.
  *
@@ -119,7 +120,7 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
   }, [selectTab])
   const search = useConfigSearch({ load: loadHomeSearchItems, loadKey: 'home', onChoose: chooseResult })
 
-  const bandTabs = useMemo<ConfigTabSpec<HomeConfigTab>[]>(() => {
+  const railTabs = useMemo<ConfigTabSpec<HomeConfigTab>[]>(() => {
     const extra: Record<HomeConfigTab, Partial<ConfigTabSpec<HomeConfigTab>>> = {
       'claude-md': claudeMdChip(files.claudeMd),
       settings: { count: asCount(files.settings) },
@@ -140,7 +141,7 @@ function HomeClaudeConfigComponent({ initialTab = 'claude-md' }: { initialTab?: 
       eyebrow="CLAUDE CODE · GLOBAL"
       title="Claude config"
       scopePath="~/.claude"
-      tabs={bandTabs}
+      tabs={railTabs}
       activeKey={tab}
       onSelect={selectTab}
       search={search}

@@ -11,12 +11,26 @@ const { stub } = vi.hoisted(() => ({
 }))
 vi.mock('../SystemPrompt', () => ({ SystemPrompt: stub('SystemPrompt') }))
 vi.mock('../Settings', () => ({ Settings: stub('Settings') }))
-vi.mock('../McpServers', () => ({ McpServers: stub('McpServers') }))
+vi.mock('../McpServers', () => ({
+  McpServers: (p: { scope?: string; onAdd?: (c: { scope: string; cwd: string | null }) => void }) =>
+    createElement('button', {
+      'data-testid': 'page-McpServers', 'data-scope': p.scope, type: 'button',
+      onClick: () => p.onAdd?.({ scope: p.scope ?? 'user', cwd: null }),
+    }),
+}))
 vi.mock('../Skills', () => ({ Skills: stub('Skills') }))
 vi.mock('../Plugins', () => ({ Plugins: stub('Plugins') }))
 vi.mock('../AgentLibrary', () => ({ AgentLibrary: stub('AgentLibrary') }))
-vi.mock('../Library', () => ({ SkillsLibrary: () => null, McpLibrary: () => null, PluginsLibrary: () => null }))
-vi.mock('../home/HomeSessionDrawer', () => ({ HomeSessionDrawer: () => null }))
+vi.mock('../Library', () => ({
+  SkillsLibrary: () => null,
+  McpLibrary: (p: { scope?: string; cwd?: string | null }) =>
+    createElement('div', { 'data-testid': 'mcp-library', 'data-scope': p.scope, 'data-cwd': p.cwd ?? '' }),
+  PluginsLibrary: () => null,
+}))
+vi.mock('../home/HomeSessionDrawer', () => ({
+  HomeSessionDrawer: (p: { open: boolean; title: string; children?: unknown }) =>
+    p.open ? createElement('div', { 'data-testid': 'drawer', 'data-title': p.title }, p.children as never) : null,
+}))
 vi.mock('../../../lib/useExtensionCounts', () => ({ useExtensionCounts: () => ({ skills: 7, mcp: 3, plugins: 2 }) }))
 vi.mock('../../../lib/useAgentPersonas', () => ({ useAgentPersonasState: () => ({ personas: [{}, {}, {}, {}], refresh: vi.fn() }) }))
 
@@ -92,12 +106,32 @@ afterEach(() => {
 const q = (id: string) => host.querySelector(`[data-testid="${id}"]`)
 
 describe('HomeClaudeConfig', () => {
-  it('renders the band with the global eyebrow, title and ~/.claude path', () => {
+  it('renders the rail with the global eyebrow, title and ~/.claude path', () => {
     act(() => root.render(createElement(HomeClaudeConfig)))
-    const band = q('config-rail')!
-    expect(band.textContent).toContain('CLAUDE CODE · GLOBAL')
-    expect(band.textContent).toContain('Claude config')
-    expect(band.textContent).toContain('~/.claude')
+    const rail = q('config-rail')!
+    expect(rail.textContent).toContain('CLAUDE CODE · GLOBAL')
+    expect(rail.textContent).toContain('Claude config')
+    expect(rail.textContent).toContain('~/.claude')
+  })
+
+  const pressLearn = () =>
+    act(() => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'LEARN') as HTMLButtonElement).click())
+
+  it('LEARN toggles the learn panel open and closed', () => {
+    act(() => root.render(createElement(HomeClaudeConfig)))
+    expect(q('home-claude-config-learn')).toBeNull()
+    pressLearn()
+    expect(q('home-claude-config-learn')).not.toBeNull()
+    pressLearn()
+    expect(q('home-claude-config-learn')).toBeNull()
+  })
+
+  it('MCP Add opens the drawer titled Add MCP server with the McpLibrary at user scope', () => {
+    act(() => root.render(createElement(HomeClaudeConfig, { initialTab: 'mcp' })))
+    expect(q('drawer')).toBeNull()
+    act(() => (q('page-McpServers') as HTMLButtonElement).click())
+    expect(q('drawer')?.getAttribute('data-title')).toBe('Add MCP server')
+    expect(q('mcp-library')?.getAttribute('data-scope')).toBe('user')
   })
 
   it.each([

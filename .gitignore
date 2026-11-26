@@ -22,6 +22,10 @@ playwright-report
 # run against this repo, not just this machine's local config — see
 # scripts/hooks/guard-prd-writes.cjs's header for the install/uninstall note.
 !.claude/settings.json
+# Project environment override (jobs may GET bilko.run for live release checks).
+!.claude/environments/
+.claude/environments/*
+!.claude/environments/headless-default.json
 .research/
 
 # Generated scheduler skill-discovery output (not source)

@@ -221,6 +221,7 @@ describe('sandboxChildEnv', () => {
       TMPDIR: '/tmp/smj-abc123',
       TMP: '/tmp/smj-abc123',
       TEMP: '/tmp/smj-abc123',
+      NODE_USE_ENV_PROXY: '1',
     });
   });
 

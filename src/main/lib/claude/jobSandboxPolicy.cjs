@@ -383,7 +383,8 @@ function wouldBlockRecord({ slug, persona, environment, what, detail, mode }) {
 /**
  * Env vars a job's child process needs for its sandbox level. An os-sandbox
  * job gets TMPDIR/TMP/TEMP pointed at its private temp dir (the only tmp
- * write root its settings declare); tool-rules jobs get no env change.
+ * write root its settings declare) and, with an allowlist network,
+ * NODE_USE_ENV_PROXY=1; tool-rules jobs get no env change.
  *
  * @param {{ level?: string }|null|undefined} policy
  * @param {string} tmpDir
@@ -391,7 +392,12 @@ function wouldBlockRecord({ slug, persona, environment, what, detail, mode }) {
  */
 function sandboxChildEnv(policy, tmpDir) {
   if (!policy || policy.level !== 'os-sandbox') return {};
-  return { TMPDIR: tmpDir, TMP: tmpDir, TEMP: tmpDir };
+  const env = { TMPDIR: tmpDir, TMP: tmpDir, TEMP: tmpDir };
+  // Node's https ignores HTTPS_PROXY unless asked; inside the sandbox the proxy
+  // is the only route to an allow-listed host.
+  const hosts = policy.summary && policy.summary.network;
+  if (Array.isArray(hosts) && hosts.length > 0) env.NODE_USE_ENV_PROXY = '1';
+  return env;
 }
 
 module.exports = {

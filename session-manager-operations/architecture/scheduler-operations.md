@@ -617,6 +617,12 @@ Both `os-sandbox` profiles share the same write roots (`sandbox.filesystem.allow
 live checks can read public GitHub releases; jobs hold no credentials, so this is unauthenticated
 read-only access, like the `registry.npmjs.org` entry that serves `npm view`.
 
+session-manager's own jobs also allow `bilko.run`, through the tracked project override
+`.claude/environments/headless-default.json` (a whole-file copy of the builtin plus that host), so
+live release checks can read the published phone bundle (PRD 4418). Sandboxed jobs with an
+allowlist network also get `NODE_USE_ENV_PROXY=1`: Node's `https` ignores `HTTPS_PROXY` otherwise,
+and the proxy is the only route out.
+
 A `tool-rules` job has no write or network restriction beyond the secret deny rules.
 
 ### Personas today and next stage

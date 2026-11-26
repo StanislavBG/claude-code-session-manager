@@ -223,3 +223,16 @@ describe('report-mode would-block records', () => {
     });
   });
 });
+
+describe('sandboxChildEnv NODE_USE_ENV_PROXY', () => {
+  it('sets NODE_USE_ENV_PROXY=1 for an os-sandbox job with an allowlist network', () => {
+    const env = policy.sandboxChildEnv({ level: 'os-sandbox', summary: { network: ['bilko.run'] } }, '/tmp/x');
+    expect(env.NODE_USE_ENV_PROXY).toBe('1');
+    expect(env.TMPDIR).toBe('/tmp/x');
+  });
+  it('omits it when there is no allowlist or the level is not os-sandbox', () => {
+    expect(policy.sandboxChildEnv({ level: 'os-sandbox', summary: { network: [] } }, '/t').NODE_USE_ENV_PROXY).toBeUndefined();
+    expect(policy.sandboxChildEnv({ level: 'os-sandbox', summary: { network: null } }, '/t').NODE_USE_ENV_PROXY).toBeUndefined();
+    expect(policy.sandboxChildEnv({ level: 'tool-rules' }, '/t')).toEqual({});
+  });
+});

@@ -1,0 +1,38 @@
+{
+  "description": "OS sandbox + network allow-list (dev-lead today).",
+  "osSandboxRequired": true,
+  "permissionMode": "acceptEdits",
+  "writeRoots": [
+    "{worktree}",
+    "{projectRoot}/.git",
+    "{tmp}",
+    "{home}/.npm",
+    "{home}/.cache",
+    "{projectRoot}/node_modules/.vite",
+    "{projectRoot}/node_modules/.vitest"
+  ],
+  "network": {
+    "mode": "allowlist",
+    "hosts": [
+      "registry.npmjs.org",
+      "api.github.com",
+      "bilko.run"
+    ]
+  },
+  "secretDenyPaths": [
+    ".npmrc",
+    ".netrc",
+    ".ssh",
+    ".gnupg",
+    ".claude/.credentials.json",
+    ".config/gh",
+    ".google_workspace_mcp",
+    ".config/google-workspace-mcp",
+    ".aws",
+    ".docker/config.json",
+    "Self/secrets",
+    ".config/session-manager/vault"
+  ],
+  "webFetch": false,
+  "webSearch": false
+}

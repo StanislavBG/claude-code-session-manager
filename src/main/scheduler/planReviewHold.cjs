@@ -116,6 +116,25 @@ function computePlanReviewHolds(rows, reviewsByValidateSlug, opts = {}) {
   return { held, needsReview, expired };
 }
 
+const MODEL_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable'];
+function familyOf(model) {
+  const m = String(model ?? '').toLowerCase();
+  return MODEL_FAMILIES.find((f) => m.includes(f)) || null;
+}
+
+/**
+ * The reviewer must not share the planner's model family: personaModel is kept
+ * unless it matches plannerModel's family, then 'opus' (persona sonnet) else 'sonnet'.
+ */
+function reviewerModelFor(personaModel, plannerModel) {
+  const persona = String(personaModel ?? '').trim();
+  const pf = familyOf(persona);
+  const lf = familyOf(plannerModel);
+  if (persona && !(pf && lf && pf === lf)) return persona;
+  return pf === 'sonnet' ? 'opus' : 'sonnet';
+}
+
 module.exports = {
+  reviewerModelFor,
   planMembers, qualifiesForReview, computePlanReviewHolds, holdMsFromEnv, planReviewEnabled,
 };

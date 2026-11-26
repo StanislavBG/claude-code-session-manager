@@ -186,6 +186,9 @@ const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const agentSnapshot = require('./lib/claude/agentSnapshot.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv, resolvedMcpServerNames, resolveSkillDeny } = require('./lib/claude/personaToolScope.cjs');
+const { PLAN_REVIEW_SCHEMA } = require('./lib/scheduler/planReviewSchema.cjs');
+const { reviewerModelFor } = require('./scheduler/planReviewHold.cjs');
+const { readSettingsModel } = require('./lib/claude/modelCatalog.cjs');
 const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured, expectedFromCriteria, formatCriteriaChecksSection } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, emitJobEvent, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
@@ -551,7 +554,12 @@ async function harvestJobArtifacts(job, worktreeDir, projectRoot, { runId = job 
 const FINISH_VALIDATOR_VERDICT_LINE = `
    - Your structured output's schedulerVerdict (and failReason) is what the scheduler reads as this verdict.`;
 
-function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPlan = false, isArtifactOnly = false, isValidator = false }) {
+// Plan-reviewer jobs (`--json-schema` PLAN_REVIEW_SCHEMA): the structured
+// object is the whole deliverable; there is nothing to commit.
+const FINISH_PLAN_REVIEWER_LINE = `
+   - PLAN REVIEWER: your deliverable is the structured output object (PLAN_REVIEW_SCHEMA) ONLY. Do not commit, do not edit files; the scheduler reads the object, not this verdict line.`;
+
+function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum, isFixPlan = false, isArtifactOnly = false, isValidator = false, isPlanReviewer = false }) {
   return `${verifyStepNum}. VERIFY — run every command in the PRD's \`# Gate\` section, in order, in the
    foreground. Each must exit 0. If the PRD has no \`# Gate\` section, run the
    project's own typecheck, lint and test commands instead. The project's
@@ -583,7 +591,7 @@ ${verdictStepNum}. VERDICT LINE — end your final report with exactly one of th
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
      SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
-   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.${isFixPlan ? FINISH_FIX_PLAN_VERDICT_LINE : ''}${isArtifactOnly ? FINISH_ARTIFACT_ONLY_VERDICT_LINE : ''}${isValidator ? FINISH_VALIDATOR_VERDICT_LINE : ''}
+   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.${isFixPlan ? FINISH_FIX_PLAN_VERDICT_LINE : ''}${isArtifactOnly ? FINISH_ARTIFACT_ONLY_VERDICT_LINE : ''}${isValidator ? FINISH_VALIDATOR_VERDICT_LINE : ''}${isPlanReviewer ? FINISH_PLAN_REVIEWER_LINE : ''}
    - Print FAIL when the gate is red or the commit could not land. Also print
      FAIL when a step needs something this run cannot reach (live runtime
      state, credentials, an account or dashboard action, a host install): do
@@ -633,13 +641,13 @@ in your final report.`;
  * tree, never FAIL for the missing commit. Self job 826 printed exactly that
  * false FAIL. Omitted/false leaves the text unchanged.
  */
-function buildFinishProtocol({ reviewInRun = true, isFixPlan = false, isArtifactOnly = false, isValidator = false } = {}) {
+function buildFinishProtocol({ reviewInRun = true, isFixPlan = false, isArtifactOnly = false, isValidator = false, isPlanReviewer = false } = {}) {
   if (reviewInRun) {
     return buildFinishHead(3) + FINISH_REVIEW_STEPS_IN_RUN
-      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5, isFixPlan, isArtifactOnly, isValidator });
+      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5, isFixPlan, isArtifactOnly, isValidator, isPlanReviewer });
   }
   return buildFinishHead(2) + FINISH_REVIEW_STEP_DEFERRED
-    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4, isFixPlan, isArtifactOnly, isValidator });
+    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4, isFixPlan, isArtifactOnly, isValidator, isPlanReviewer });
 }
 
 const FINISH_PROTOCOL = buildFinishProtocol({ reviewInRun: true });
@@ -6399,7 +6407,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     job.validatorCriteriaExpected = expected;
     if (section) prompt = `${prompt}\n\n${section}`;
   }
-  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly, isValidator: job.agentType === 'validator' }) });
+  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly: isArtifactOnly || job.agentType === 'plan-reviewer', isValidator: job.agentType === 'validator', isPlanReviewer: job.agentType === 'plan-reviewer' }) });
 
   // Foreign-WIP manifest (starry-night-ships PRD 148 postmortem): the
   // scheduler already knows, at spawn time, which dirty paths this job did
@@ -6474,7 +6482,17 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // Validator jobs (fresh and resume) return a schema-checked verdict:
   // --json-schema + StructuredOutput in scope (PRD 3613).
   const isValidator = job.agentType === 'validator';
-  const personaToolScope = buildPersonaToolScope(personaResolution.tools, { loadout: personaResolution.loadout, disallowed: HEADLESS_DISALLOWED_TOOLS, structuredOutput: isValidator });
+  // Plan-reviewer jobs return a schema-checked review (PLAN_REVIEW_SCHEMA) on a
+  // model that differs from the planner Epic's.
+  const isPlanReviewer = job.agentType === 'plan-reviewer';
+  let spawnModel = personaResolution.model;
+  if (isPlanReviewer) {
+    const plannerModel = (packEpic && typeof packEpic.model === 'string' && packEpic.model.trim())
+      || readSettingsModel(cwd) || 'opus';
+    spawnModel = reviewerModelFor(personaResolution.model, plannerModel);
+    job.model = spawnModel;
+  }
+  const personaToolScope = buildPersonaToolScope(personaResolution.tools, { loadout: personaResolution.loadout, disallowed: HEADLESS_DISALLOWED_TOOLS, structuredOutput: isValidator || isPlanReviewer });
   // Epic context packs (PRD 3154): the job's Epic's selected packs load as
   // --plugin-dir per pack, and their laws are appended AFTER the (already
   // capped) persona body — the persona cap never applies to laws. Fresh and
@@ -6827,7 +6845,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       `tmp=${sandboxTmpDir ?? 'none'}\n`);
     const jobArgs = buildClaudeSpawnArgs({
       sandboxArgs: sandboxPolicy.argv,
-      model: personaResolution.model,
+      model: spawnModel,
       effort: personaEffort,
       sessionId,
       resume: !!resumeTarget,
@@ -6835,7 +6853,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       toolScope: personaToolScope,
       mcpServerNames: personaResolution.mcpServers || [],
       pluginDirArgs: packArgs.pluginDirArgs,
-      jsonSchema: isValidator ? VALIDATOR_VERDICT_SCHEMA : null,
+      jsonSchema: isValidator ? VALIDATOR_VERDICT_SCHEMA : (isPlanReviewer ? PLAN_REVIEW_SCHEMA : null),
       riskGuardSettingsPath,
       skillDeny: skillDeny.args,
     });
@@ -7005,6 +7023,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           ...SCHEDULER_META_IDENTITY, ...setupMeta,
           originSessionId, contextDigestApplied,
           agentSnapshotId: personaResolution.agentSnapshotId || null,
+          ...(isPlanReviewer ? { agentType: 'plan-reviewer', model: spawnModel } : {}),
         });
         removeSandboxTmp();
         // Only the OS-sandboxed run can hit a sandbox refusal; stamped at finalize if the row ends failed/needs_review.

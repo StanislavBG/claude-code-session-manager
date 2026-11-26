@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
 /**
- * Dashboard refresh wiring: Home adopts useDashboardRefresh, and its Hero
+ * Dashboard refresh wiring: Home adopts useDashboardRefresh, and its bar
  * renders a Refresh button plus an 'Updated <ago>' / 'Refresh failed' stamp.
  */
 
@@ -28,7 +28,7 @@ vi.mock('../../../lib/useKnownProjects', async (orig) => {
   return { ...actual, useKnownProjects: () => ({ projects: [], recentSessions: [], loading: false }) }
 })
 
-import { Home, HomeHero } from '../Home'
+import { Home, GuildHallBar } from '../Home'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -59,8 +59,8 @@ async function render(el: ReturnType<typeof createElement>) {
 }
 
 function header(props: Partial<{ onRefresh: () => void; refreshing: boolean; lastRefreshedAt: number | null; failedSources: string[] }>) {
-  return createElement(HomeHero, {
-    greeting: 'Good morning', projectCount: 1, needsCount: 0, ...props,
+  return createElement(GuildHallBar, {
+    inUse: 0, total: 5, questCount: 0, questOpen: false, onToggleQuest: () => {}, ...props,
   })
 }
 
@@ -105,19 +105,5 @@ describe('Home refresh', () => {
     await render(header({ lastRefreshedAt: Date.now() }))
     expect(q('home-refresh')).toBeNull()
     expect(q('home-updated-at')).toBeNull()
-  })
-
-  it('greeting follows the clock across a lastRefreshedAt change', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date(2026, 10, 22, 9, 0, 0))
-    refreshState.value = { ...refreshState.value, lastRefreshedAt: Date.now() }
-    await render(createElement(Home, {}))
-    expect(container!.querySelector('h1')!.textContent).toContain('Good morning')
-
-    vi.setSystemTime(new Date(2026, 10, 22, 20, 0, 0))
-    refreshState.value = { ...refreshState.value, lastRefreshedAt: Date.now() }
-    // Home is memoized; a new props object forces the re-render a store change would.
-    await render(createElement(Home, { onNavigate: () => {} }))
-    expect(container!.querySelector('h1')!.textContent).toContain('Good evening')
   })
 })

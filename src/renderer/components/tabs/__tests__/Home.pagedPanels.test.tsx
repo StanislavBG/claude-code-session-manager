@@ -17,7 +17,7 @@ vi.mock('../../../lib/useKnownProjects', async (orig) => {
   return { ...actual, useKnownProjects: () => ({ projects: [], recentSessions: recent, loading: false }) }
 })
 
-import { NeedsYouSection, ActiveSessionsCard, RecentSessionsCard } from '../Home'
+import { NeedsYouSection } from '../Home'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -71,19 +71,5 @@ describe('Home paged panels', () => {
     expect(range(el, 'home-needs-pager')).toBe('5–6 of 6')
     expect(el.textContent).toContain('Row 5')
     expect(el.textContent).not.toContain('meta-0')
-  })
-
-  it('ActiveSessionsCard shows 5 rows per page', async () => {
-    const el = await mount(createElement(ActiveSessionsCard, {}))
-    expect(el.textContent).toContain('chat:epic-4')
-    expect(el.textContent).not.toContain('chat:epic-5')
-    expect(range(el, 'home-active-pager')).toBe('1–5 of 7')
-  })
-
-  it('RecentSessionsCard pages all recent sessions 5 per page', async () => {
-    const el = await mount(createElement(RecentSessionsCard, {}))
-    expect(el.textContent).toContain('sess0004')
-    expect(el.textContent).not.toContain('sess0005')
-    expect(range(el, 'home-recent-pager')).toBe('1–5 of 12')
   })
 })

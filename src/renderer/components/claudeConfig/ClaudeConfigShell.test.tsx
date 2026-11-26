@@ -114,6 +114,19 @@ describe('ClaudeConfigShell', () => {
     expect(document.activeElement).not.toBe(input)
   })
 
+  it('rail does not scroll; the search panel sits outside the tab scroller', () => {
+    render(vi.fn(), 'settings', 'abc')
+    const rail = container.querySelector<HTMLElement>('[data-testid="config-rail"]')!
+    expect(rail.className).not.toMatch(/overflow-(y-)?auto/)
+    const input = container.querySelector<HTMLInputElement>('input[type="search"]')!
+    act(() => { input.focus() })
+    const panel = container.querySelector('[data-testid="config-search-panel"]')
+    expect(panel).not.toBeNull()
+    const scroller = container.querySelector('[role="tablist"]')!.parentElement!
+    expect(scroller.className).toMatch(/overflow-y-auto/)
+    expect(scroller.contains(panel)).toBe(false)
+  })
+
   it('LEARN toggles the learn panel', () => {
     render()
     expect(container.querySelector('[data-testid="shell-learn"]')).toBeNull()

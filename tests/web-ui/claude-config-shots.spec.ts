@@ -57,8 +57,9 @@ async function settingsRows(panel: Locator, stages: string[]) {
   expect(await ladder.locator('[data-stage]').evaluateAll((els) => els.map((e) => e.getAttribute('data-stage')))).toEqual(stages)
 }
 
-const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string, string>; tabs: TabSpec[] }> = {
+const TABS: Record<Face, { search: string; eyebrow: string; scope: string; counts: Record<string, string>; tabs: TabSpec[] }> = {
   home: {
+    search: 'pdf',
     eyebrow: 'CLAUDE CODE · GLOBAL',
     scope: '~/.claude',
     // CLAUDE.md chip = the file + its two imports; Settings = top-level keys set in settings.json (finding 1).
@@ -152,6 +153,7 @@ const TABS: Record<Face, { eyebrow: string; scope: string; counts: Record<string
     ],
   },
   project: {
+    search: 'burrow',
     eyebrow: 'CLAUDE CODE · PROJECT',
     scope: '~/Projects/Self',
     counts: { memory: '9', 'claude-md': 'missing', settings: '3', mcp: '5', skills: '13' },
@@ -279,7 +281,7 @@ async function shortViewportTabs(page: Page) {
   await expect(last).toHaveAttribute('aria-selected', 'true')
   await expect(last).toBeFocused()
   await last.scrollIntoViewIfNeeded()
-  const box = await rail.evaluate((el) => {
+  const box = await rail.getByTestId('config-rail-scroll').evaluate((el) => {
     const r = el.getBoundingClientRect()
     return { top: r.top + el.clientTop, bottom: r.top + el.clientTop + el.clientHeight }
   })
@@ -313,6 +315,33 @@ async function homeImportShot(page: Page, written: string[]) {
   written.push(file)
   await page.getByTestId('config-rail-tab-agents').click()
   await expect(page.getByTestId('home-claude-config-panel-agents')).toBeVisible()
+}
+
+/** Search panel opens beside the rail, unclipped, over the content; rail has no horizontal range; no tab label truncates. */
+async function searchPanelShot(page: Page, face: Face, query: string, written: string[]) {
+  const rail = page.getByTestId('config-rail')
+  const input = page.getByLabel('Search all config')
+  await input.click()
+  await input.fill(query)
+  const panel = page.getByTestId('config-search-panel')
+  await expect(panel).toBeVisible()
+  const [rb, pb] = [(await rail.boundingBox())!, (await panel.boundingBox())!]
+  expect(pb.x).toBeGreaterThanOrEqual(rb.x + rb.width - 1)
+  expect(await panel.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return !!hit && el.contains(hit)
+  })).toBe(true)
+  expect(await rail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  const labels = await rail.getByTestId('config-rail-tab-label').evaluateAll((els) => els.map((e) => [e.textContent, e.scrollWidth, e.clientWidth]))
+  for (const [text, sw, cw] of labels) expect(sw as number, `label ${text}`).toBeLessThanOrEqual(cw as number)
+  await page.waitForTimeout(200)
+  const file = path.join(OUT, `${face}-search-open.png`)
+  await page.screenshot({ path: file })
+  written.push(file)
+  await input.fill('')
+  await input.press('Escape')
+  await expect(panel).toHaveCount(0)
 }
 
 test('Claude config screenshots: every Home and Project tab at 1592x1040', async () => {
@@ -369,6 +398,8 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
         prev = tb
       }
 
+      await searchPanelShot(page, face, spec.search, written)
+
       for (const t of spec.tabs) {
         await page.getByTestId(`config-rail-tab-${t.tab}`).click()
         if (t.select) {
@@ -415,8 +446,8 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
   expect(pageErrors).toEqual([])
   expect(unmodelled).toEqual([])
   expect(written.map((f) => path.basename(f, '.png')).sort()).toEqual([
-    'home-agents', 'home-claude-md', 'home-claude-md-import', 'home-mcp', 'home-plugins', 'home-settings', 'home-skills',
-    'project-claude-md', 'project-mcp', 'project-memory', 'project-settings', 'project-skills',
+    'home-agents', 'home-claude-md', 'home-claude-md-import', 'home-mcp', 'home-plugins', 'home-search-open', 'home-settings', 'home-skills',
+    'project-claude-md', 'project-mcp', 'project-memory', 'project-search-open', 'project-settings', 'project-skills',
   ])
   for (const f of written) {
     expect(fs.statSync(f).size).toBeGreaterThan(10_000)

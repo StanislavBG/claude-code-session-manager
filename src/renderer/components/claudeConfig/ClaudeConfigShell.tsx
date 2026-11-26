@@ -17,8 +17,8 @@ import {
   type ConfigTabSpec,
 } from './configShared'
 
-/** Rail width in px — the `w-[248px]` class below (Tailwind needs the literal; keep in step). */
-export const RAIL_W_PX = 248
+/** Rail width in px — the `w-[264px]` class below (Tailwind needs the literal; keep in step). */
+export const RAIL_W_PX = 264
 /** Rail horizontal padding per side in px — the `px-5` class below. */
 export const RAIL_PAD_X_PX = 20
 /** Scope-path limit: the rail's inner width over the 12px mono advance (0.6em = 7.2px). */
@@ -96,11 +96,12 @@ export function ClaudeConfigShell<K extends string>({
 
   return (
     <div data-testid={testId} className="h-full w-full flex bg-bg text-fg">
+      <div className="relative shrink-0 h-full">
       <nav
         data-testid="config-rail"
-        className="w-[248px] shrink-0 h-full overflow-y-auto bg-fg text-bg-hi px-5 py-6 flex flex-col gap-4"
+        className="w-[264px] shrink-0 h-full bg-fg text-bg-hi flex flex-col"
       >
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1 px-5 pt-6 pb-4">
           <span className="text-[10.5px] font-semibold tracking-[0.1em] text-bg-hi/60">{eyebrow}</span>
           <span className="font-serif text-[22px] font-medium leading-[1.15] text-bg-hi">{title}</span>
           <span
@@ -112,7 +113,7 @@ export function ClaudeConfigShell<K extends string>({
           </span>
         </div>
 
-        <div className="relative">
+        <div className="relative px-5 pb-4">
           <label className="flex items-center gap-2.5 w-full h-10 px-3 rounded-[10px] bg-bg/[0.08] border border-bg/[0.14] text-[13px] text-bg-hi/60 focus-within:border-bg/30">
             <AlmanacIcon name="search" size={15} className="shrink-0" />
             <input
@@ -129,18 +130,9 @@ export function ClaudeConfigShell<K extends string>({
             />
             <kbd className="font-mono text-[11px] px-1.5 py-px rounded border border-bg/20">/</kbd>
           </label>
-          {showPanel && (
-            <div
-              data-testid="config-search-panel"
-              // Keep focus in the field while a row is pressed, so the click still lands.
-              onMouseDown={(e) => e.preventDefault()}
-              className={`absolute left-full top-0 ml-2 w-[380px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-bg-hi text-fg shadow-lg whitespace-normal ${Z.dialog}`}
-            >
-              <ConfigSearchResults {...search.panelProps} tabs={tabs} />
-            </div>
-          )}
         </div>
 
+        <div data-testid="config-rail-scroll" className="flex-1 min-h-0 overflow-y-auto px-5 py-1">
         <div role="tablist" aria-orientation="vertical" aria-label={title} className="flex flex-col gap-1">
           {tabs.map((tab, i) => {
             const active = tab.key === activeKey
@@ -160,11 +152,11 @@ export function ClaudeConfigShell<K extends string>({
                 }`}
               >
                 <AlmanacIcon name={tab.icon} size={18} stroke={1.7} className={active ? 'text-fg' : 'text-rhythm'} />
-                <span className="flex-1 truncate text-left text-[14px] font-semibold">{tab.label}</span>
+                <span data-testid="config-rail-tab-label" className="flex-1 min-w-0 truncate text-left text-[14px] font-semibold">{tab.label}</span>
                 {tab.count !== undefined && (
                   <span
                     data-testid="config-rail-count"
-                    className={`font-mono text-xs px-[7px] py-0.5 rounded-md ${chipClass(active, !!tab.warn)}`}
+                    className={`shrink-0 whitespace-nowrap font-mono text-xs px-[7px] py-0.5 rounded-md ${chipClass(active, !!tab.warn)}`}
                   >
                     {tab.count}
                   </span>
@@ -180,8 +172,9 @@ export function ClaudeConfigShell<K extends string>({
             )
           })}
         </div>
+        </div>
 
-        <div className="mt-auto pt-2">
+        <div className="shrink-0 px-5 pt-2 pb-6">
           <button
             type="button"
             onClick={() => setLearnOpen((v) => !v)}
@@ -191,6 +184,17 @@ export function ClaudeConfigShell<K extends string>({
           </button>
         </div>
       </nav>
+          {showPanel && (
+            <div
+              data-testid="config-search-panel"
+              // Keep focus in the field while a row is pressed, so the click still lands.
+              onMouseDown={(e) => e.preventDefault()}
+              className={`absolute left-full top-4 ml-2 w-[380px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-bg-hi text-fg shadow-lg whitespace-normal ${Z.dialog}`}
+            >
+              <ConfigSearchResults {...search.panelProps} tabs={tabs} />
+            </div>
+          )}
+      </div>
 
       <div className="flex-1 min-w-0 h-full flex flex-col">
         {learnOpen && learn && (

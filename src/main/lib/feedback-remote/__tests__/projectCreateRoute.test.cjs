@@ -15,14 +15,18 @@ const fs = require('node:fs');
 const os = require('node:os');
 const http = require('node:http');
 const path = require('node:path');
-const { createAdminHttp, TOKEN_PATH } = require('../localAdminHttp.cjs');
+const { createAdminHttp } = require('../localAdminHttp.cjs');
 const { registerAdminRoute } = require('../projectCreate.cjs');
 const { createCreatedProjects } = require('../createdProjects.cjs');
 
 // Never let start() touch the production admin-api.json.
-const TEST_TOKEN_PATH = path.join(path.dirname(TOKEN_PATH), `admin-api.project-create-test-${process.pid}.json`);
+// The token file lives in its own mkdtemp dir (a registered root's .claude/ is the one writable spot), never under ~/.claude/session-manager/.
+const TOKEN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'project-create-token-'));
+const TEST_TOKEN_PATH = path.join(TOKEN_DIR, '.claude', 'admin-api.json');
 process.env.SM_ADMIN_TOKEN_PATH = TEST_TOKEN_PATH;
-afterAll(() => { fs.rmSync(TEST_TOKEN_PATH, { force: true }); });
+fs.mkdirSync(path.join(TOKEN_DIR, '.claude'));
+require('../../../config.cjs').addAllowedRoot(TOKEN_DIR);
+afterAll(() => { fs.rmSync(TOKEN_DIR, { recursive: true, force: true }); });
 
 const GIT_ENV_KEYS = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'];
 

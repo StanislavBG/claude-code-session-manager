@@ -210,6 +210,16 @@ test('pendingReplies keeps exactly the commits replyClaims.isCommitHash accepts'
   const expected = [...new Set(candidates.filter(isCommitHash).map((c) => String(c).toLowerCase()))];
   expect(expected.length).toBeGreaterThan(1);
   expect(expected.length).toBeLessThan(candidates.length);
-  const e = ledger.addPendingReply(entry({ commits: candidates }));
-  expect(e.commits).toEqual(expected);
+  const kept = [];
+  for (const c of candidates) {
+    const e = ledger.addPendingReply(entry({ commits: [c] }));
+    if (isCommitHash(c)) {
+      expect(e.commits).toEqual([String(c).toLowerCase()]);
+      kept.push(...e.commits);
+    } else {
+      // rejected-only entry stores no commits at all
+      expect('commits' in e).toBe(false);
+    }
+  }
+  expect([...new Set(kept)]).toEqual(expected);
 });

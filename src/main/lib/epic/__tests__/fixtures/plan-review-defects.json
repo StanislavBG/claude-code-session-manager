@@ -1,0 +1,48 @@
+{
+  "epicId": "epic-fixture",
+  "epicGoal": "Add a launcher that starts the demo service and document it.",
+  "validateSlug": "01-validate-launcher",
+  "baseSha": "abc1234",
+  "members": [
+    {
+      "slug": "01-limits-json",
+      "title": "Limits data file",
+      "goal": "build the limits JSON file",
+      "acceptanceCriteria": ["JSON equals the constants in src/limits.cjs"],
+      "files": ["src/data/limits.json"],
+      "gate": ["npx vitest run src/__tests__/limits.test.cjs"],
+      "dependsOn": [],
+      "prdPath": "scheduler/epics/epic-fixture/prds/01-limits-json.md"
+    },
+    {
+      "slug": "02-limits-constants",
+      "title": "Derive constants from JSON",
+      "goal": "build constants module deriving values from the limits JSON",
+      "acceptanceCriteria": ["src/limits.cjs exports constants computed by reading src/data/limits.json"],
+      "files": ["src/limits.cjs"],
+      "gate": ["npx vitest run src/__tests__/limits.test.cjs"],
+      "dependsOn": ["01-limits-json"],
+      "prdPath": "scheduler/epics/epic-fixture/prds/02-limits-constants.md"
+    },
+    {
+      "slug": "03-launch-demo",
+      "title": "Launch demo service",
+      "goal": "build a launcher that calls Session Manager to start the demo",
+      "acceptanceCriteria": ["launcher calls the Session Manager admin API and prints the returned demo URL"],
+      "files": ["src/launch.cjs"],
+      "gate": ["npx vitest run src/__tests__/launch.test.cjs"],
+      "dependsOn": ["02-limits-constants"],
+      "prdPath": "scheduler/epics/epic-fixture/prds/03-launch-demo.md"
+    },
+    {
+      "slug": "04-readme",
+      "title": "Document the launcher",
+      "goal": "docs: README for the launcher",
+      "acceptanceCriteria": ["README.md explains how to run the launcher"],
+      "files": ["README.md"],
+      "gate": ["none"],
+      "dependsOn": [],
+      "prdPath": "scheduler/epics/epic-fixture/prds/04-readme.md"
+    }
+  ]
+}

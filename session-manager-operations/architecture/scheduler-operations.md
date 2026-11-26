@@ -208,6 +208,7 @@ same-tick path missed (app restarted mid-episode, etc.) — it re-runs the SAME 
 different algorithm.
 
 A needs_review park is the scheduler's self-heal state; the UI never presents it to the human as a question ([`needsHuman.ts`](../../src/renderer/lib/needsHuman.ts)).
+Auto-fix never runs on a row stamped `environmentLimit` (the job sandbox refused a `.claude/` write, an `AF_UNIX` socket, or a `/tmp` write — `lib/scheduler/sandboxEnvironmentLimit.cjs`): the investigation would hit the same wall, so `selectAutoFixTargets` skips it and the failed path emits `fail-environment`.
 
 | # | Rung | Entry condition | Exit |
 | --- | --- | --- | --- |

@@ -115,6 +115,8 @@ const ScheduleJobSchema = z
     // quietMachineWaitMs without the machine going quiet — tells a reader the
     // job's measurements ran under contention, not on a quiet machine.
     quietLeaseDegraded: z.boolean().optional(),
+    // Set when the job sandbox itself refused the run (sandboxEnvironmentLimit.cjs); auto-fix skips such rows.
+    environmentLimit: z.object({ kind: z.string(), evidence: z.string() }).optional(),
     // Salvaged uncommitted diff patch path (PRD 1098).
     salvagePatch: z.string().nullable().optional(),
     // Artifact evidence captured before the job worktree was removed, bound

@@ -69,6 +69,7 @@ const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/cl
 // as the authoritative guarantee.
 ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/scheduler/launchFailure.cjs');
+const { detectSandboxEnvironmentLimit, ENVIRONMENT_LIMIT_MESSAGE } = require('./lib/scheduler/sandboxEnvironmentLimit.cjs');
 const { decideVerifyDowngrade } = require('./lib/scheduler/refireCap.cjs');
 const { finalizeReasonFor } = require('./lib/scheduler/finalizeReason.cjs');
 const { shouldRunFlatSweep, FLAT_SWEEP_INTERVAL_MS } = require('./lib/scheduler/flatSweepThrottle.cjs');
@@ -5001,9 +5002,11 @@ const TRANSIENT_RETRY_CAP = 2;
  * transient (PRD 543/545 incident) — same bounded-retry treatment, not a
  * second parallel classifier.
  */
-function classifyFailureOutcome({ exitCode, networkError, durationMs, transientRetries, newlyDirtyCount, launchError }) {
+function classifyFailureOutcome({ exitCode, networkError, durationMs, transientRetries, newlyDirtyCount, launchError, environmentLimit }) {
   // The run never started (argv too large): not transient, not investigable.
   if (launchError) return { action: 'fail-launch', launchError };
+  // The job sandbox refused the run: not a code bug, and an investigation would hit the same wall.
+  if (environmentLimit) return { action: 'fail-environment', environmentLimit };
   const signalTransient = (exitCode === 143 || exitCode === 137) && durationMs < IDLE_OUTPUT_KILL_MS;
   const networkTransient = networkError === true;
   const transient = signalTransient || networkTransient;
@@ -6990,8 +6993,11 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           agentSnapshotId: personaResolution.agentSnapshotId || null,
         });
         removeSandboxTmp();
+        // Only the OS-sandboxed run can hit a sandbox refusal; stamped at finalize if the row ends failed/needs_review.
+        const sandboxLimit = sandboxMeta.level === 'os-sandbox'
+          ? detectSandboxEnvironmentLimit(readTail(logPath, 16384)) : null;
         resolve({
-          exitCode: effectiveCode, durationMs, rateLimited, networkError, launchFailure: launchFailed, resultStats,
+          exitCode: effectiveCode, durationMs, rateLimited, networkError, sandboxLimit, launchFailure: launchFailed, resultStats,
           leakedDescendants: leaked, sessionId, killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
           ...(memoryCapReason ? { error: memoryCapReason, memoryCapReason } : {}),
         });
@@ -9570,6 +9576,12 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // attribute" via its Array.isArray guard, same as an empty array.
           applyLeftoverFields(s.jobs[i2], newlyDirtyAll);
 
+          if (res.sandboxLimit && (effectiveStatus === 'failed' || effectiveStatus === 'needs_review')) {
+            s.jobs[i2].environmentLimit = res.sandboxLimit;
+            s.jobs[i2].error = ENVIRONMENT_LIMIT_MESSAGE;
+          } else {
+            delete s.jobs[i2].environmentLimit;
+          }
           if (effectiveStatus === 'completed' || effectiveStatus === 'failed' || effectiveStatus === 'needs_review') {
             outcomeRecordSnapshot = { ...s.jobs[i2] };
           }
@@ -9834,6 +9846,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         transientRetries: retries,
         newlyDirtyCount,
         launchError: res.launchError,
+        environmentLimit: failedJobSnapshot.environmentLimit,
       });
 
       if (decision.action === 'fail-launch') {
@@ -9843,6 +9856,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           if (i >= 0) {
             s.jobs[i].error = `launch failure (${decision.launchError}): ${res.error}; the run never started, so no investigation was spawned`;
           }
+        });
+        await broadcast({ flush: true });
+      } else if (decision.action === 'fail-environment') {
+        console.log(`[scheduler] environment limit (${decision.environmentLimit.kind}) for ${job.slug} — no investigation`);
+        await mutate((s) => {
+          const i = s.jobs.findIndex((x) => x.slug === job.slug);
+          if (i >= 0) s.jobs[i].error = ENVIRONMENT_LIMIT_MESSAGE;
         });
         await broadcast({ flush: true });
       } else if (decision.action === 'retry') {

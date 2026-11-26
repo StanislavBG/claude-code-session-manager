@@ -942,6 +942,8 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     // fix-plan investigation to diagnose — there is no code defect to
     // author a PRD against, only another job's still-uncommitted tree.
     if (job.blockedByForeignWip === true) return false;
+    // The job sandbox refused it (environmentLimit): an investigation runs in the same sandbox and hits the same wall.
+    if (job.environmentLimit) return false;
     // A budget-killed job parks for a human/ladder decision, never an
     // auto-fix investigation or auto-retry — the run didn't fail, it simply
     // overran its own estimate; there's no code defect to diagnose (Out of

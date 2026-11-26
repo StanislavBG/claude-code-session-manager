@@ -1378,7 +1378,7 @@ function logRelayFailure(op, r) {
   });
 }
 
-async function servicePairStart({ name, homeCwd, scope, projectRoot }) {
+async function startPairing({ name, homeCwd, scope, projectRoot }, pairedVia) {
   const device = await pairedDevice();
   if (!device) return { ok: false, error: 'no_paired_device' };
   const { SERVICE_TOOL_NAMES } = require('./lib/feedback-remote/servicePairings.cjs');
@@ -1400,13 +1400,35 @@ async function servicePairStart({ name, homeCwd, scope, projectRoot }) {
   let pairingId;
   try {
     ({ pairingId } = await getServiceStore().createPending({
-      name, homeCwd, scope, projectRoot: wantsProjectCreate ? projectRoot : undefined,
+      name, homeCwd, scope, projectRoot: wantsProjectCreate ? projectRoot : undefined, pairedVia,
     }));
   } catch (e) {
     return { ok: false, error: e?.message || 'pending pairing failed' };
   }
-  await auditLog(new Date().toISOString(), 'service:pair-start', device.deviceId, undefined, 'ok', null);
+  await auditLog(new Date().toISOString(), 'service:pair-start', device.deviceId, undefined, pairedVia === 'local' ? 'ok:paired-locally' : 'ok', null);
   return { ok: true, code, pairingId, codeExpiresAt, deviceId: device.deviceId };
+}
+
+function servicePairStart(input) {
+  return startPairing(input, 'window');
+}
+
+/** Same-machine pairing without the window: refused while Web remote is off. */
+async function servicePairStartLocal(input) {
+  if ((await loadConfig()).remoteEnabled !== true) return { ok: false, error: 'web_remote_off' };
+  return startPairing(input, 'local');
+}
+
+/** Confirms ONLY a 'local' pending pairing; the SAS check in confirmServiceSas still applies. */
+async function confirmServiceSasLocal(pairingId, sas) {
+  if ((await loadConfig()).remoteEnabled !== true) return { ok: false, error: 'web_remote_off' };
+  const pending = getServiceStore().listPending().find((p) => p.pairingId === pairingId);
+  if (!pending || pending.pairedVia !== 'local') return { ok: false, error: 'not_local_pairing' };
+  const r = await confirmServiceSas(pairingId, sas);
+  if (r.ok) {
+    await auditLog(new Date().toISOString(), 'service:confirm-sas', undefined, undefined, `ok:paired-locally:service=${auditToken(r.service.serviceId)}`, null);
+  }
+  return r;
 }
 
 async function servicesList() {
@@ -2192,6 +2214,8 @@ module.exports = {
   setServiceInvoker,
   getServiceStore,
   confirmServiceSas,
+  servicePairStartLocal,
+  confirmServiceSasLocal,
   servicePairCancel,
   attachWindow,
   registerRemoteHandlers,

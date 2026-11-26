@@ -71,6 +71,7 @@ test('confirmPending with relayClientId creates the service and consumes the pen
     relayClientId: RELAY_ID,
     pairedAt: clock,
     lastSeenAt: clock,
+    pairedVia: 'window',
   });
   expect(store.listPending()).toEqual([]);
   expect(store.findByPubKey(PUBKEY)).toMatchObject({ serviceId: svc.serviceId });
@@ -253,4 +254,24 @@ test('cancelPending of a non-string or empty pairingId resolves false and never 
   expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
   expect(fs.statSync(filePath).mtimeMs).toBe(mtime);
   expect(store.listPending().map((p) => p.pairingId)).toEqual([pairingId]);
+});
+
+test('pairedVia defaults to window, accepts local, rejects others, and carries onto the service', async () => {
+  await store.createPending(GOOD);
+  expect(store.listPending()[0].pairedVia).toBe('window');
+  await expect(store.createPending({ ...GOOD, pairedVia: 'phone' })).rejects.toThrow(/pairedVia/);
+  const l = await store.createPending({ ...GOOD, pairedVia: 'local' });
+  expect(store.listPending().find((p) => p.pairingId === l.pairingId).pairedVia).toBe('local');
+  const svc = await store.confirmPending(l.pairingId, PUBKEY, { relayClientId: RELAY_ID });
+  expect(svc.pairedVia).toBe('local');
+});
+
+test('a legacy record without pairedVia reads as window', async () => {
+  await store.createPending(GOOD);
+  await store.confirmPending(store.listPending()[0].pairingId, PUBKEY, { relayClientId: RELAY_ID });
+  const raw = readFile();
+  delete raw.services[0].pairedVia;
+  fs.writeFileSync(filePath, JSON.stringify(raw));
+  const fresh = createServicePairings({ filePath, now: () => clock });
+  expect(fresh.list()[0].pairedVia).toBe('window');
 });

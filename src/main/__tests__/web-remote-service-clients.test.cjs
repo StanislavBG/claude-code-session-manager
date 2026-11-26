@@ -355,4 +355,41 @@ describe('paired service clients', () => {
     expect(invokeCalls).toHaveLength(0)
     expect(sent.map((m) => m.type)).toEqual(['e2e:rekey'])
   })
+
+  it('local pairing: confirmServiceSasLocal pins a local pending pairing, refuses window ones and wrong SAS', async () => {
+    await setup()
+    const { pairingId } = await store.createPending({ name: 'Kiln', homeCwd: HOME_CWD, scope: ['macro_list'], pairedVia: 'local' })
+    const kp = generateE2EKeyPair()
+    await hello('svcL', kp.e2ePublicKey, { role: 'service', clientId: RELAY_ID })
+    const sas = deriveSas(kp.e2ePrivateKey, deviceKeys.pub, deviceId)
+    const wrong = sas === '000000' ? '111111' : '000000'
+    expect(await webRemote.confirmServiceSasLocal(pairingId, wrong)).toEqual({ ok: false, error: 'sas_mismatch' })
+    const ok = await webRemote.confirmServiceSasLocal(pairingId, sas)
+    expect(ok.ok).toBe(true)
+    expect(ok.service.pairedVia).toBe('local')
+    expect(store.findByPubKey(kp.e2ePublicKey).pairedVia).toBe('local')
+    expect(await readAudit()).toMatch(/service:confirm-sas.*result=ok:paired-locally:service=/)
+    // revoke works the same for a local pairing
+    expect(store.findByPubKey(kp.e2ePublicKey)).toBeTruthy()
+    const r = await handlers.get('webRemote:service-revoke')({}, { serviceId: ok.service.serviceId })
+    expect(r.ok).toBe(true)
+    expect(store.findByPubKey(kp.e2ePublicKey)).toBe(null)
+  })
+
+  it('confirmServiceSasLocal refuses a window pairing; both local functions refuse when remote is off', async () => {
+    await setup()
+    const { pairingId } = await store.createPending({ name: 'Kiln', homeCwd: HOME_CWD, scope: ['macro_list'] })
+    const kp = generateE2EKeyPair()
+    await hello('svcW', kp.e2ePublicKey, { role: 'service', clientId: RELAY_ID })
+    const sas = deriveSas(kp.e2ePrivateKey, deviceKeys.pub, deviceId)
+    expect(await webRemote.confirmServiceSasLocal(pairingId, sas)).toEqual({ ok: false, error: 'not_local_pairing' })
+    expect(await webRemote.confirmServiceSasLocal('missing', sas)).toEqual({ ok: false, error: 'not_local_pairing' })
+    expect((await webRemote.confirmServiceSas(pairingId, sas)).service.pairedVia).toBe('window')
+
+    await writeConfig({ remoteEnabled: false, remoteControlEnabled: false, devices: [device] })
+    webRemote.__test.invalidateConfigCache()
+    expect(await webRemote.servicePairStartLocal({ name: 'K', homeCwd: HOME_CWD, scope: ['macro_list'] })).toEqual({ ok: false, error: 'web_remote_off' })
+    expect(await webRemote.confirmServiceSasLocal(pairingId, sas)).toEqual({ ok: false, error: 'web_remote_off' })
+    expect(store.listPending()).toEqual([])
+  })
 })

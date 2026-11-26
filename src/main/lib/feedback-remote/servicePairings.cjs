@@ -120,6 +120,8 @@ function validateExternalRef(externalRef) {
   return externalRef;
 }
 
+const PAIRED_VIA = ['window', 'local'];
+
 function publicService(s) {
   return {
     serviceId: s.serviceId,
@@ -131,6 +133,7 @@ function publicService(s) {
     relayClientId: s.relayClientId,
     pairedAt: s.pairedAt,
     lastSeenAt: s.lastSeenAt,
+    pairedVia: s.pairedVia === 'local' ? 'local' : 'window',
   };
 }
 
@@ -143,6 +146,7 @@ function publicPending(p) {
     projectRoot: typeof p.projectRoot === 'string' ? p.projectRoot : null,
     createdAt: p.createdAt,
     expiresAt: p.expiresAt,
+    pairedVia: p.pairedVia === 'local' ? 'local' : 'window',
   };
 }
 
@@ -203,10 +207,11 @@ function createServicePairings({ filePath, now } = {}) {
   }
 
   return {
-    createPending({ name, homeCwd, scope, projectRoot } = /** @type {any} */ ({})) {
+    createPending({ name, homeCwd, scope, projectRoot, pairedVia = 'window' } = /** @type {any} */ ({})) {
       let entry;
       try {
         const t = clock();
+        if (!PAIRED_VIA.includes(pairedVia)) throw new Error(`pairedVia must be one of: ${PAIRED_VIA.join(', ')}`);
         const grants = validateScope(scope);
         entry = {
           pairingId: crypto.randomUUID(),
@@ -214,6 +219,7 @@ function createServicePairings({ filePath, now } = {}) {
           homeCwd: validateHomeCwd(homeCwd),
           scope: grants,
           projectRoot: validateProjectRoot(projectRoot, grants),
+          pairedVia,
           createdAt: t,
           expiresAt: t + PENDING_TTL_MS,
         };
@@ -263,6 +269,7 @@ function createServicePairings({ filePath, now } = {}) {
           relayClientId: relayId,
           pairedAt: t,
           lastSeenAt: t,
+          pairedVia: p.pairedVia === 'local' ? 'local' : 'window',
           opened: [],
         };
         s.services.push(svc);

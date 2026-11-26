@@ -47,6 +47,8 @@ export interface Draft {
   /** Gear: declared MCP servers / context packs. Absent until the gear panel edits them (servers otherwise derive from the mcp__ tools). */
   mcpServers?: string[]
   packs?: string[]
+  /** Declared sandbox environment profile (`environment:` frontmatter); absent = headless-default. */
+  environment?: string
 }
 
 export function toDraft(p: AgentPersona): Draft {
@@ -65,9 +67,9 @@ export function toDraft(p: AgentPersona): Draft {
   }
 }
 
-function gearOf(p: AgentPersona): Pick<Draft, 'mcpServers' | 'packs'> {
-  const g = p as AgentPersona & Pick<Draft, 'mcpServers' | 'packs'>
-  return { ...(g.mcpServers ? { mcpServers: g.mcpServers } : {}), ...(g.packs ? { packs: g.packs } : {}) }
+function gearOf(p: AgentPersona): Pick<Draft, 'mcpServers' | 'packs' | 'environment'> {
+  const g = p as AgentPersona & Pick<Draft, 'mcpServers' | 'packs' | 'environment'>
+  return { ...(g.mcpServers ? { mcpServers: g.mcpServers } : {}), ...(g.packs ? { packs: g.packs } : {}), ...(g.environment ? { environment: g.environment } : {}) }
 }
 
 export const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '', agentCli: 'claude', agentCliModel: '' }

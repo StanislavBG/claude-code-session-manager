@@ -18,6 +18,7 @@ import {
   ProjectOverrideBlock, overrideChipText, toDraft, type Draft, type OpenProject,
 } from './AgentDetail'
 import { GearPanel } from './GearPanel'
+import { ConstraintsPanel } from './ConstraintsPanel'
 import { loadoutOf, type LoadoutState } from './AgentRoster'
 
 /**
@@ -25,7 +26,7 @@ import { loadoutOf, type LoadoutState } from './AgentRoster'
  * 64 px avatar rail by default, the 316 px list when expanded — deviation 1), and the sheet itself:
  * header (avatar, name, loadout badge + counts, `edited`, class line + tags, Global | In project,
  * Duplicate, ⋯), DESCRIPTION, STATS, PERSONALITY & GROUNDING preview (Open editor = the shared
- * DocumentEditorPane, full screen), a right column with the Gear (GearPanel) / Constraints (sibling PRD) slots and THIS LOADOUT APPLIES TO, and the bottom save bar. Save / revert / delete /
+ * DocumentEditorPane, full screen), a right column with the Gear (GearPanel) / Constraints (ConstraintsPanel) cards and THIS LOADOUT APPLIES TO, and the bottom save bar. Save / revert / delete /
  * duplicate go through the same AgentLibrary handlers and IPC calls as before.
  */
 
@@ -143,16 +144,6 @@ export function AgentWorkbench({ expanded, onToggle, list, personas, selectedNam
 }
 
 // ---- the sheet ----------------------------------------------------------------------------------
-
-/** Right-column placeholder for the Constraints card — the constraints PRD fills it. */
-export function ConstraintsSlot() {
-  return (
-    <section data-testid="agent-constraints-slot" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-dashed border-line text-[12px] text-fg-faint">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.1em]">Constraints</div>
-      <div className="mt-1 italic">Sandbox, risk marks and banned tools appear here.</div>
-    </section>
-  )
-}
 
 function AppliesToCard() {
   const rows: Array<[string, string]> = [['Epic chat', 'the chat opens as this agent'], ['Scheduler jobs', 'PRDs with this agentType'], ['Tasks', 'headless runs that name it']]
@@ -504,7 +495,7 @@ export function AgentSheet({
 
           <div className="flex flex-col gap-4 min-w-0">
             <GearPanel obj={obj} set={set} />
-            <ConstraintsSlot />
+            <ConstraintsPanel obj={obj} set={set} />
             <AppliesToCard />
           </div>
         </div>

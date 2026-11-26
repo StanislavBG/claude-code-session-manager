@@ -25,8 +25,8 @@ import { normalizeCwd, projectNameFromCwd } from '../../lib/knownProjectAggregat
  * (agentLibrary.cjs), scoped to the global persona directory.
  *
  * Per-project overrides: this is a Home-face, machine-wide page, so it never
- * reads the active tab — no open project is special. The PROJECT OVERRIDES
- * row's '+ Add override' opens a PROJECT OVERRIDE block that carries an explicit project picker listing every open project
+ * reads the active tab — no open project is special. The sheet's '+ Add override'
+ * opens a PROJECT OVERRIDE block that carries an explicit project picker listing every open project
  * (one entry per unique tab cwd, nothing preselected); choosing one shows and
  * writes that project's frontmatter-only overlay at
  * `<cwd>/.claude/agents/<name>.md`, keyed by the chosen cwd. Any open
@@ -226,6 +226,11 @@ function AgentLibraryComponent() {
         // Always sent: 'claude' clears the agentCli: line. The model rides along only for a
         // non-Claude CLI with a non-blank value — the main-side schema rejects an empty one.
         agentCli: obj.agentCli,
+        // Gear: every field the draft holds rides along, or savePersona silently drops it.
+        ...(obj.mcpServers ? { mcpServers: obj.mcpServers } : {}),
+        ...(obj.packs ? { packs: obj.packs } : {}),
+        ...(obj.environment ? { environment: obj.environment } : {}),
+        ...(obj.loadout ? { loadout: obj.loadout } : {}),
         ...(obj.agentCli !== 'claude' && obj.agentCliModel.trim() ? { agentCliModel: obj.agentCliModel.trim() } : {}),
       }
       // savePersona rewrites the whole file, so an existing persona is the base: title and the
@@ -233,6 +238,10 @@ function AgentLibraryComponent() {
       const payload: AgentPersonaSaveInput = existing ? toPersonaSaveInput(existing, editorFields) : editorFields
       // The editor owns agentCliModel: a cleared/Claude model must not be resurrected from the saved base.
       if (!('agentCliModel' in editorFields)) delete payload.agentCliModel
+      // Same for gear: a draft that holds none must not resurrect it from the saved base.
+      if (!('mcpServers' in editorFields)) delete payload.mcpServers
+      if (!('packs' in editorFields)) delete payload.packs
+      if (!('environment' in editorFields)) delete payload.environment
       await window.api.agents.savePersona(payload)
       toast.info(isNew ? `created ${obj.name}` : `saved ${obj.name}`)
       setDraft(null); setCreating(false)

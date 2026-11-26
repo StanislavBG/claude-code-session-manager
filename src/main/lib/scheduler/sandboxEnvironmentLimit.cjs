@@ -15,8 +15,9 @@ const PATTERNS = [
   ['readonly-tmp', /(?:Errno 30|Read-only file system)[^\n]{0,80}\/tmp|\/tmp[^\n]{0,80}(?:Errno 30|Read-only file system)/i],
 ];
 
-const WINDOW_LINES = 3;
-const WINDOWED_KINDS = new Set(['unix-socket', 'readonly-tmp']);
+const MAX_BLOCK_LINES = 60;
+const TRACEBACK_START = /^Traceback \(most recent call last\):/;
+const ERROR_LINE = /(?:Operation not permitted|Errno 30|Read-only file system)/i;
 
 const ENVIRONMENT_LIMIT_MESSAGE =
   'environment limit (job sandbox), not a code bug — see PRD_AUTHORING.md#job-sandbox-limits';
@@ -31,21 +32,39 @@ function detectSandboxEnvironmentLimit(text) {
   return null;
 }
 
-/** Run the per-line matcher over each decoded physical line of `text`. */
+/** Plain per-line detection (single-line matches only). */
 function detectPerLine(text) {
   if (typeof text !== 'string' || !text) return null;
-  const lines = text.split(/\r?\n/);
-  for (const line of lines) {
+  for (const line of text.split(/\r?\n/)) {
     const hit = detectSandboxEnvironmentLimit(line);
     if (hit) return hit;
   }
-  // Python tracebacks split the call and the errno over adjacent lines.
-  for (let i = 0; i + 1 < lines.length; i++) {
-    const win = lines.slice(i, i + WINDOW_LINES).join(' ');
-    for (const [kind, re] of PATTERNS) {
-      if (!WINDOWED_KINDS.has(kind)) continue;
-      const m = re.exec(win);
-      if (m) return { kind, evidence: m[0].slice(0, 200) };
+  return null;
+}
+
+/**
+ * Bash tool_result bodies only: per-line detection, then a traceback-block
+ * scan. Anchor on an error line, look back to the nearest
+ * "Traceback (most recent call last):" (at most MAX_BLOCK_LINES lines) and
+ * classify unix-socket if AF_UNIX is in that block, readonly-tmp if /tmp is.
+ * A traceback header between blocks stops the look-back, so an earlier,
+ * separate traceback never counts. Linear: one pass tracking the block start.
+ */
+function detectBashBody(text) {
+  if (typeof text !== 'string' || !text) return null;
+  const lines = text.split(/\r?\n/);
+  const direct = detectPerLine(text);
+  if (direct) return direct;
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (TRACEBACK_START.test(lines[i])) { start = i; continue; }
+    if (start < 0 || !ERROR_LINE.test(lines[i]) || i - start > MAX_BLOCK_LINES) continue;
+    const block = lines.slice(start, i + 1).join('\n');
+    if (/Operation not permitted/i.test(lines[i]) && block.includes('AF_UNIX')) {
+      return { kind: 'unix-socket', evidence: lines[i].slice(0, 200) };
+    }
+    if (/Errno 30|Read-only file system/i.test(lines[i]) && block.includes('/tmp')) {
+      return { kind: 'readonly-tmp', evidence: lines[i].slice(0, 200) };
     }
   }
   return null;
@@ -90,7 +109,7 @@ function sandboxLimitFromStreamJson(text) {
           : Array.isArray(item.content)
             ? item.content.filter((b) => b && b.type === 'text').map((b) => b.text ?? '').join('')
             : '';
-        hit = detectPerLine(body);
+        hit = detectBashBody(body);
       }
     }
   }

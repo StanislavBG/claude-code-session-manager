@@ -82,16 +82,55 @@ test('claude-dir-write raw refusal', () => {
   expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', 'cat: x: Permission denied')].join('\n'))).toBeNull();
 });
 
-// ── multi-line tracebacks (3-line window) ──
-test('stream: CPython traceback splits AF_UNIX and errno over lines -> unix-socket', () => {
-  const tb = 'Traceback (most recent call last):\n  File "x.py", line 3, in <module>\n    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.bind(p)\nPermissionError: [Errno 1] Operation not permitted\n';
-  const log = [bashUse('b1'), toolRes('b1', tb)].join('\n');
-  expect(sandboxLimitFromStreamJson(log).kind).toBe('unix-socket');
+// ── multi-line tracebacks (traceback-block scan) ──
+// Fixtures: verbatim stdout/stderr of `python3 -I <script>` (CPython 3.12.3) run inside a job sandbox.
+const TB_SOCKET = `Traceback (most recent call last):
+  File "/tmp/smj-kFldD2/claude-1000/a.py", line 2, in <module>
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socket.py", line 233, in __init__
+    _socket.socket.__init__(self, family, type, proto, fileno)
+PermissionError: [Errno 1] Operation not permitted
+`;
+// Script: socket(AF_UNIX) then s.bind('x.sock'); the sandbox refuses at socket() so bind() is never reached,
+// and the real traceback is the one below (line 2, the socket() call).
+const TB_BIND = `Traceback (most recent call last):
+  File "/tmp/smj-kFldD2/claude-1000/b.py", line 2, in <module>
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socket.py", line 233, in __init__
+    _socket.socket.__init__(self, family, type, proto, fileno)
+PermissionError: [Errno 1] Operation not permitted
+`;
+const TB_TMP = `Traceback (most recent call last):
+  File "/tmp/smj-kFldD2/claude-1000/c.py", line 1, in <module>
+    open('/tmp/x_sm4727','w')
+OSError: [Errno 30] Read-only file system: '/tmp/x_sm4727'
+`;
+const TB_EPERM = `Traceback (most recent call last):
+  File "/tmp/smj-kFldD2/claude-1000/d.py", line 2, in <module>
+    os.setgroups([0])
+PermissionError: [Errno 1] Operation not permitted
+`;
+const stream = (body, is_error = true) => [bashUse('b1'), toolRes('b1', body, is_error)].join('\n');
+test('stream: verbatim socket(AF_UNIX) and bind() tracebacks -> unix-socket', () => {
+  expect(sandboxLimitFromStreamJson(stream(TB_SOCKET)).kind).toBe('unix-socket');
+  expect(sandboxLimitFromStreamJson(stream(TB_BIND)).kind).toBe('unix-socket');
 });
-test('stream: CPython traceback splits /tmp open and Errno 30 -> readonly-tmp', () => {
-  const tb = 'Traceback (most recent call last):\n  File "x.py", line 2, in <module>\n    open(\'/tmp/x\', \'w\')\nOSError: [Errno 30] Read-only file system: \'/tmp/x\'\n';
-  const log = [bashUse('b1'), toolRes('b1', tb)].join('\n');
-  expect(sandboxLimitFromStreamJson(log).kind).toBe('readonly-tmp');
+test('stream: verbatim open(/tmp) Errno 30 traceback -> readonly-tmp', () => {
+  expect(sandboxLimitFromStreamJson(stream(TB_TMP)).kind).toBe('readonly-tmp');
+});
+test('stream: Operation not permitted without AF_UNIX in block -> null; earlier separate block does not count', () => {
+  expect(sandboxLimitFromStreamJson(stream(TB_EPERM))).toBeNull();
+  const earlier = 'x = socket.AF_UNIX\n' + TB_EPERM;
+  expect(sandboxLimitFromStreamJson(stream(earlier))).toBeNull();
+  const sepBlocks = TB_SOCKET.replace('PermissionError: [Errno 1] Operation not permitted', 'ValueError: nope') + TB_EPERM;
+  expect(sandboxLimitFromStreamJson(stream(sepBlocks))).toBeNull();
+});
+test('stream: FAIL-reason path is plain per-line (no block scan)', () => {
+  const reason = 'SCHEDULER_VERDICT: FAIL socket.AF_UNIX\nPermissionError: [Errno 1] Operation not permitted';
+  expect(sandboxLimitFromStreamJson(j({ type: 'result', result: reason }))).toBeNull();
+  expect(sandboxLimitFromStreamJson(j({ type: 'result', result: 'SCHEDULER_VERDICT: FAIL Operation not permitted on socket(AF_UNIX)' })).kind).toBe('unix-socket');
 });
 test('stream: AF_UNIX and errno >3 lines apart -> null; success and Read -> null', () => {
   const far = 'socket.AF_UNIX\na\nb\nc\nPermissionError: [Errno 1] Operation not permitted\n';

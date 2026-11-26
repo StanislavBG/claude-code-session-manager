@@ -186,7 +186,7 @@ const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const agentSnapshot = require('./lib/claude/agentSnapshot.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv, resolvedMcpServerNames, resolveSkillDeny } = require('./lib/claude/personaToolScope.cjs');
-const { PLAN_REVIEW_SCHEMA } = require('./lib/scheduler/planReviewSchema.cjs');
+const { PLAN_REVIEW_SCHEMA, parsePlanReview, isAllOk: isAllOkPlanReview } = require('./lib/scheduler/planReviewSchema.cjs');
 const { reviewerModelFor } = require('./scheduler/planReviewHold.cjs');
 const { readSettingsModel } = require('./lib/claude/modelCatalog.cjs');
 const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured, expectedFromCriteria, formatCriteriaChecksSection } = require('./lib/scheduler/validatorVerdictSchema.cjs');
@@ -4610,6 +4610,8 @@ async function notifyOriginatingTab(job, {
   writeVerdictsFile = writeJsonAtomic,
   scheduleSettle = defaultScheduleSettle,
   loadValidatorCriteria = loadValidatorCriteriaContext,
+  planReviewRows = undefined,
+  planReviewStoreImpl = undefined,
 } = {}) {
   try {
     const prd = await resolveNotifyPrd(job, parsePrdRaw);
@@ -4790,6 +4792,9 @@ async function notifyOriginatingTab(job, {
         console.error('[scheduler] notifyOriginatingTab verdicts file write error', job?.slug, e);
       }
     }
+    if (job.agentType === 'plan-reviewer' && (job.status === 'completed' || job.status === 'failed')) {
+      await harvestPlanReview(job, epicId, logPath, { readStructured: readStructuredFromLog, sendPrompt, rows: planReviewRows, store: planReviewStoreImpl });
+    }
     if (epicId) {
       // PRD 986: the check-in event is born validation:'unvalidated' — never
       // 'verified' — regardless of the job's self-reported outcome. The
@@ -4844,6 +4849,102 @@ async function notifyOriginatingTab(job, {
     sendPrompt(targetTabId, message, { origin: 'scheduler', heldKind: 'job-notice' });
   } catch (e) {
     console.error('[scheduler] notifyOriginatingTab error', job?.slug, e);
+  }
+}
+
+/** Digest text for one harvested plan review (pure). */
+function buildPlanReviewDigest({ validateSlug, round, outcome, review, error }) {
+  const head = `PLAN REVIEWED: ${validateSlug} (round ${round})`;
+  if (outcome === 'failed') {
+    return `${head}\nThe independent review failed (${error || 'no structured output'}) — the plan was released without review (review-failed). Its PRDs are free to dispatch.`;
+  }
+  if (outcome === 'ok') {
+    return `${head}\nEvery PRD is ok and there are no plan findings — the plan was released automatically. Its PRDs are free to dispatch.`;
+  }
+  const lines = [head, 'The reviewer asks for changes before the PRDs dispatch.'];
+  for (const p of review.prds) {
+    lines.push('', `${p.prd}: ${p.decision}`);
+    for (const f of p.findings) {
+      lines.push(`  - [${f.severity}] ${f.check}: ${f.text}`);
+      if (f.suggestedEdit) lines.push(`    suggested edit: ${f.suggestedEdit}`);
+    }
+  }
+  if (review.planFindings.length) {
+    lines.push('', 'Plan findings:');
+    for (const f of review.planFindings) lines.push(`  - [${f.severity}] ${f.check}: ${f.text}`);
+  }
+  lines.push('', 'Apply the suggested edits with scheduler_update_prd, then call scheduler_release_plan with a one-line reason for each finding you reject.');
+  return lines.join('\n');
+}
+
+/**
+ * harvestPlanReview — a finished plan-reviewer job: parse its structured output,
+ * save the round, auto-release an all-ok plan (an unusable review releases as
+ * 'review-failed'), and send the planner's Epic ONE digest per (validateSlug,
+ * round). The sent round is persisted in the record (`digestSent`) so a restart
+ * does not resend. Never throws.
+ */
+async function harvestPlanReview(job, epicId, logPath, deps = {}) {
+  const store = deps.store || planReviewStore;
+  try {
+    if (!epicId || !job.cwd || !isSafeEpicId(epicId)) return;
+    const m = /^plan-review-(.+?)(?:-r(\d+))?$/.exec(bareSlug(job.slug));
+    if (!m) return;
+    const round = m[2] ? Number(m[2]) : 1;
+    const rows = (deps.rows || (await readQueue()).jobs || []);
+    const validator = rows.find((r) => r && r.agentType === 'validator' && r.planReview === 'required'
+      && bareSlug(r.slug) === m[1] && (!r.cwd || r.cwd === job.cwd));
+    if (!validator) {
+      console.error('[scheduler] harvestPlanReview: no validate row for', job.slug);
+      return;
+    }
+    const validateSlug = validator.slug;
+    const prior = store.readPlanReview(job.cwd, epicId, validateSlug);
+    const sentBefore = prior && Array.isArray(prior.digestSent) ? prior.digestSent.slice() : [];
+    if (sentBefore.includes(round)) return;
+
+    const members = planReviewHold.planMembers(validator, rows).map((r) => r.slug);
+    let structured = null;
+    try { structured = (deps.readStructured || extractStructuredOutputFromLog)(logPath); } catch { structured = null; }
+    const checked = job.status === 'completed' && structured
+      ? parsePlanReview(structured, { expected: members })
+      : { ok: false, error: job.status === 'completed' ? 'no structured output' : `reviewer ${job.status}` };
+
+    let outcome;
+    if (checked.ok) {
+      await store.savePlanReviewResult({
+        cwd: job.cwd, epicId, validateSlug, round, reviewer: job.slug,
+        runId: job.runId || null, model: job.model || null, review: checked.value,
+      });
+      if (isAllOkPlanReview(checked.value)) {
+        outcome = 'ok';
+        await store.recordPlanRelease({ cwd: job.cwd, epicId, validateSlug, by: 'auto', accepted: 0 });
+      } else {
+        outcome = 'amend';
+      }
+    } else {
+      outcome = 'failed';
+      console.error(`[scheduler] harvestPlanReview: ${job.slug} review rejected — ${checked.error}`);
+      await store.recordPlanRelease({
+        cwd: job.cwd, epicId, validateSlug, by: 'timeout',
+        rejected: [{ finding: 'plan-review', reason: 'review-failed' }],
+      });
+    }
+
+    // Persist the dedupe key (the store's own writes rebuild the record without it).
+    const rec = store.readPlanReview(job.cwd, epicId, validateSlug);
+    if (rec) {
+      const file = store.planReviewPath(job.cwd, epicId, validateSlug);
+      assertOpsWrite(file, 'scheduler');
+      await writeJsonAtomic(file, { ...rec, digestSent: [...new Set([...sentBefore, round])] });
+    }
+    const text = buildPlanReviewDigest({
+      validateSlug, round, outcome,
+      review: checked.ok ? checked.value : null, error: checked.ok ? null : checked.error,
+    });
+    (deps.sendPrompt || enqueueExternalPrompt)(epicId, text, { origin: 'scheduler', heldKind: 'scheduler-notice' });
+  } catch (e) {
+    console.error('[scheduler] harvestPlanReview error', job?.slug, e);
   }
 }
 

@@ -88,6 +88,13 @@ function queueBusyCount(jobs, extraInFlight = 0) {
   return n + (Number.isFinite(extraInFlight) ? extraInFlight : 0);
 }
 
+/** True when a request's requestedAt is earlier than bootedAt; unparsable/missing either → false. Pure. */
+function requestPredatesBoot(request, bootedAt) {
+  const requestedMs = Date.parse(request?.requestedAt ?? '');
+  const bootedMs = typeof bootedAt === 'string' ? Date.parse(bootedAt) : NaN;
+  return Number.isFinite(requestedMs) && Number.isFinite(bootedMs) && requestedMs < bootedMs;
+}
+
 /**
  * evaluateDrain({request, queueSnapshot, drainState, now, deadlineMs, bootedAt}) → {action, reason}
  *
@@ -113,8 +120,7 @@ function evaluateDrain({ request, queueSnapshot, drainState, now, deadlineMs = D
       : { action: 'none', reason: request ? 'request-complete' : 'no-request' };
   }
   const requestedMs = Date.parse(request.requestedAt ?? '');
-  const bootedMs = typeof bootedAt === 'string' ? Date.parse(bootedAt) : NaN;
-  if (Number.isFinite(requestedMs) && Number.isFinite(bootedMs) && requestedMs < bootedMs) {
+  if (requestPredatesBoot(request, bootedAt)) {
     return { action: 'abort', reason: 'request-predates-boot' };
   }
   if (Number.isFinite(requestedMs) && now - requestedMs >= deadlineMs) {
@@ -126,12 +132,13 @@ function evaluateDrain({ request, queueSnapshot, drainState, now, deadlineMs = D
 }
 
 /**
- * bootDrainAction({drainState, request}) → 'clear' | 'keep' | 'none'.
+ * bootDrainAction({drainState, request, bootedAt}) → 'clear' | 'keep' | 'none'.
  * A drain whose request is complete (the restart happened) or gone is stale.
  */
-function bootDrainAction({ drainState, request } = {}) {
+function bootDrainAction({ drainState, request, bootedAt } = {}) {
   if (!drainState || !drainState.active) return 'none';
   if (!request || request.drainCompletedAt) return 'clear';
+  if (requestPredatesBoot(request, bootedAt)) return 'clear';
   return 'keep';
 }
 
@@ -179,6 +186,7 @@ module.exports = {
   queueBusyCount,
   evaluateDrain,
   bootDrainAction,
+  requestPredatesBoot,
   effectivePaused,
   installedBuildDiffers,
   markRestarting,

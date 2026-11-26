@@ -127,6 +127,14 @@ describe('boot', () => {
     assert.equal(ud.bootDrainAction({ drainState: { active: true }, request: null }), 'clear');
     assert.equal(ud.bootDrainAction({ drainState: { active: true }, request: req() }), 'keep');
     assert.equal(ud.bootDrainAction({ drainState: null, request: req() }), 'none');
+    const after = new Date(T0 + 5000).toISOString();
+    const before = new Date(T0 - 5000).toISOString();
+    assert.equal(ud.bootDrainAction({ drainState: { active: true }, request: req(), bootedAt: after }), 'clear');
+    assert.equal(ud.bootDrainAction({ drainState: { active: true }, request: req(), bootedAt: before }), 'keep');
+    assert.equal(ud.bootDrainAction({ drainState: { active: true }, request: req({ drainCompletedAt: 'x' }), bootedAt: before }), 'clear');
+    assert.equal(ud.bootDrainAction({ drainState: { active: true }, request: null, bootedAt: before }), 'clear');
+    assert.equal(ud.bootDrainAction({ drainState: null, request: req(), bootedAt: after }), 'none');
+    assert.equal(ud.bootDrainAction({ drainState: { active: true }, request: req(), bootedAt: 'garbage' }), 'keep');
   });
 });
 

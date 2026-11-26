@@ -1409,9 +1409,9 @@ async function driveUpgradeDrain(state) {
 /** Boot: clear a leftover drain whose request is complete (the restart happened) or gone. */
 async function clearStaleDrainAtBoot(boot) {
   const request = upgradeDrain.readRestartRequest();
-  const action = upgradeDrain.bootDrainAction({ drainState: boot.drain, request });
+  const action = upgradeDrain.bootDrainAction({ drainState: boot.drain, request, bootedAt: SCHEDULER_BOOTED_AT });
   upgradeDrain.clearRestartingMarker();
-  if (request?.drainCompletedAt) upgradeDrain.retireRestartRequest();
+  if (request && (request.drainCompletedAt || (action === 'clear' && upgradeDrain.requestPredatesBoot(request, SCHEDULER_BOOTED_AT)))) upgradeDrain.retireRestartRequest();
   if (action === 'clear') await mutate((s) => { s.drain = null; });
   drainActive = action === 'keep';
 }

@@ -1,6 +1,6 @@
 /**
  * coverage-guard.test.cjs — end-to-end: the real CLI against commits made in a
- * detached temp worktree of HEAD.
+ * detached checkout of HEAD in a `git clone --shared` under os.tmpdir().
  *
  * Fixture module: src/renderer/lib/compactPath.ts. It is the single
  * coverer-by-name: only src/renderer/lib/__tests__/compactPath.test.ts
@@ -48,19 +48,17 @@ function runGuard() {
 beforeAll(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cov-guard-test-'));
   wt = path.join(tmp, 'wt');
-  git(REPO_ROOT, 'worktree', 'add', '--detach', wt, 'HEAD');
+  // A shared clone writes only under tmp (objects come via alternates), so the
+  // test never touches REPO_ROOT's .git — read-only in the job sandbox.
+  const headSha = git(REPO_ROOT, 'rev-parse', 'HEAD').trim();
+  git(tmp, 'clone', '--shared', '--no-checkout', '--quiet', REPO_ROOT, wt);
+  git(wt, 'checkout', '--detach', '--quiet', headSha);
   fs.symlinkSync(nodeModulesOf(REPO_ROOT), path.join(wt, 'node_modules'), 'dir');
   startSha = git(wt, 'rev-parse', 'HEAD').trim();
 }, 300000);
 
 afterAll(() => {
-  try {
-    git(REPO_ROOT, 'worktree', 'remove', '--force', wt);
-  } catch {
-    /* already gone */
-  }
-  fs.rmSync(tmp, { recursive: true, force: true });
-  git(REPO_ROOT, 'worktree', 'prune');
+  if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
 }, 60000);
 
 function commitFrom(mutate, msg) {

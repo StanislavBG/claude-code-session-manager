@@ -2798,9 +2798,9 @@ let lastAutoDispatchHoldKey = null;
 // auto_dispatch_hold_started written, its _ended not yet): { holdKey, reason,
 // window, threshold, resetsAt, startedAt, maxPercent, heldTicks, restored? },
 // continued under continuesOpenHold (same reason + window, resetsAt within
-// 60 s) so percent changes and reset jitter write nothing. Persisted in
-// scheduler-state.json so a restart neither re-opens nor loses it (the
-// heartbeat log keeps only ~18-37 h).
+// 60 s of the last-seen resetsAt, not the opening one) so percent changes and
+// reset jitter write nothing. Persisted in scheduler-state.json so a restart
+// neither re-opens nor loses it (the heartbeat log keeps only ~15-37 h).
 let openAutoDispatchHold = null;
 // True when this process's immediately preceding tick found no auto-dispatch
 // hold: a hold opening now was seen to start (startObserved: true); one that

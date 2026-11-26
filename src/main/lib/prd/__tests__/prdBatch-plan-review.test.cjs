@@ -30,6 +30,7 @@ let nextNn;
 let routes;
 let fetches;
 let mutateBody;
+let existingRows;
 
 function writeAdminConfig(extra) {
   fs.writeFileSync(process.env.SM_ADMIN_TOKEN_PATH, JSON.stringify({ port: 4321, token: 'tok', ...extra }));
@@ -48,6 +49,7 @@ beforeEach(async () => {
   nextNn = 900;
   fetches = 0;
   mutateBody = null;
+  existingRows = [];
   const remote = {
     async allocateParallelGroup() { return nextNn++; },
     async readPrd() { return { ok: false }; },
@@ -56,7 +58,7 @@ beforeEach(async () => {
       await fsp.writeFile(p, body);
       return { ok: true, path: p };
     },
-    async listPrds() { return { prds: [], total: 0, limit: 0, offset: 0, hasMore: false }; },
+    async listPrds() { return { prds: existingRows, total: existingRows.length, limit: existingRows.length, offset: 0, hasMore: false }; },
   };
   routes = new Map();
   registerAdminRoute({ registerRoute: (method, url, handler) => routes.set(`${method} ${url}`, handler) }, remote);
@@ -126,4 +128,23 @@ test('SM_PLAN_REVIEW=0: nothing stamped', async () => {
   expect(r.isError).toBeUndefined();
   for (const f of written()) expect(stamped(f)).toBe(false);
   expect(textOf(r)).not.toContain('plan held for plan review');
+});
+
+test('2 independent repair PRDs with fixes + validator: validator not stamped', async () => {
+  existingRows = [
+    { slug: '10-old-a', epicId: 'e', status: 'completed' },
+    { slug: '11-old-b', epicId: 'e', status: 'completed' },
+  ];
+  const fix = (p) => [{ prd: p, missKind: 'behavior-wrong', reason: 'validator passed a broken path' }];
+  const r = await callBatch([
+    prd('repair-a', { fixes: fix('10-old-a') }),
+    prd('repair-b', { fixes: fix('11-old-b') }),
+    val('v', ['repair-a', 'repair-b']),
+  ]);
+  expect(errOf(r)).toBe('');
+  expect(written()).toHaveLength(3);
+  expect(read('900-repair-a.md')).toMatch(/^fixes: /m);
+  expect(stamped('902-v.md')).toBe(false);
+  expect(read('902-v.md')).not.toContain('planReview');
+  expect(textOf(r)).not.toContain('plan review');
 });

@@ -108,4 +108,21 @@ describe('release-plan', () => {
     expect((await call({ validateSlug: '../../etc' })).status).toBe(400);
     expect((await call({ validateSlug: 'a/b' })).status).toBe(400);
   });
+
+  describe('bad cwd', () => {
+    const cases = () => [
+      ['relative', 'relative/dir'],
+      ['missing directory', path.join(cwd, 'nope', 'missing')],
+      ['inside session-manager-operations', path.join(cwd, 'session-manager-operations', 'scheduler')],
+    ];
+    test.each([0, 1, 2])('case %i is 400 bad_cwd and writes nothing', async (i) => {
+      const [, bad] = cases()[i];
+      const res = await call({ cwd: bad, accepted: 1 });
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ ok: false, error: 'bad_cwd' });
+      expect(readPlanReview(cwd, IDS.epicId, IDS.validateSlug)).toBeNull();
+      expect(fs.existsSync(path.join(cwd, 'nope'))).toBe(false);
+      expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'scheduler'))).toBe(false);
+    });
+  });
 });

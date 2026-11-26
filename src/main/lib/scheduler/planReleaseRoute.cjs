@@ -11,6 +11,7 @@
  *   - rereview: true instead asks for ONE more review after a block. Accepted
  *     only when the latest review has a `block` decision and round is 1 and the
  *     plan is not released; writes rereviewRequested: true, else 400 + reason.
+ *   - cwd must be an existing absolute project root outside session-manager-operations/ → else 400 bad_cwd.
  *   - unsafe epicId / validateSlug → 400.
  */
 'use strict';
@@ -18,7 +19,8 @@
 const { z } = require('zod');
 const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
 const { planReviewPath, readPlanReview, recordPlanRelease } = require('./planReviewStore.cjs');
-const { assertOpsWrite } = require('../opsOwnership.cjs');
+const fs = require('node:fs');
+const { assertOpsWrite, resolveProjectRoot } = require('../opsOwnership.cjs');
 const { writeJsonAtomic } = require('../util/atomicFs.cjs');
 const { EPIC_ID_RE } = require('./planRecordHarvest.cjs');
 
@@ -55,7 +57,16 @@ function registerPlanReleaseRoute(adminHttp) {
     try { json = JSON.parse(raw || '{}'); } catch { bad('body is not valid JSON'); return; }
     const parsed = bodySchema.safeParse(json);
     if (!parsed.success) { bad(parsed.error.issues); return; }
-    const { cwd, epicId, validateSlug, rejected, accepted, rereview } = parsed.data;
+    const { epicId, validateSlug, rejected, accepted, rereview } = parsed.data;
+    /** @type {string} */
+    let cwd;
+    try {
+      cwd = resolveProjectRoot(parsed.data.cwd, { opsInternal: 'refuse' });
+      if (!fs.statSync(cwd).isDirectory()) throw new Error('not a directory');
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'bad_cwd' });
+      return;
+    }
     if (!EPIC_ID_RE.test(epicId) || !SLUG_RE.test(validateSlug) || validateSlug.includes('..')) {
       bad('unsafe epicId or validateSlug');
       return;

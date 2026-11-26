@@ -39,6 +39,8 @@ export interface UiPrefs {
   chatVerbosityPerEpic?: Record<string, string>
   /** editor.ts — the Editor scene's open-files tab strip for this project. */
   editorSession?: EditorSessionPrefs
+  /** NewEpicCard.tsx — Agent the human last started a session with in this project; the card's default pick (lib/epicAgentDefault.ts). */
+  lastEpicAgent?: string
 }
 
 export function uiPrefsPath(cwd: string): string {

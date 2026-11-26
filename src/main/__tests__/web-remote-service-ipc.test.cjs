@@ -241,14 +241,17 @@ describe('webRemote:service-pair-start', () => {
       await setup()
       const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'web-remote-outside-'))
       const link = path.join(os.homedir(), 'escape-link')
-      await fsp.symlink(outside, link)
-      stubRelay('POST', '/api/sm-relay/client-otp', 200, { code: 'AB12CD34' })
-      expect(await call('webRemote:service-pair-start', { ...START, scope: PC_SCOPE, projectRoot: link }))
-        .toEqual({ ok: false, error: 'projectRoot must be an existing folder in your home folder' })
-      expect(relayCalls).toHaveLength(0)
-      expect(store.listPending()).toEqual([])
-      await fsp.rm(link, { force: true })
-      await fsp.rm(outside, { recursive: true, force: true })
+      try {
+        await fsp.symlink(outside, link)
+        stubRelay('POST', '/api/sm-relay/client-otp', 200, { code: 'AB12CD34' })
+        expect(await call('webRemote:service-pair-start', { ...START, scope: PC_SCOPE, projectRoot: link }))
+          .toEqual({ ok: false, error: 'projectRoot must be an existing folder in your home folder' })
+        expect(relayCalls).toHaveLength(0)
+        expect(store.listPending()).toEqual([])
+      } finally {
+        await fsp.rm(link, { force: true })
+        await fsp.rm(outside, { recursive: true, force: true })
+      }
     })
 
     it('drops projectRoot when project_create is not in scope', async () => {

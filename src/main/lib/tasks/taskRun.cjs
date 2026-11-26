@@ -74,7 +74,7 @@ function nonEmptyString(v) {
  *   declaredMcpServers?: readonly string[], knownMcpServers?: Record<string, object> }} o
  * @returns {string[]}
  */
-function buildTaskArgs({ model, effort, runtime, projectCwd, declaredMcpServers = [], knownMcpServers = {} } = /** @type {any} */ ({})) {
+function buildTaskArgs({ model, effort, runtime, projectCwd, declaredMcpServers = [], knownMcpServers = {}, skillDeny = [] } = /** @type {any} */ ({})) {
   if (!nonEmptyString(model)) throw new Error('buildTaskArgs: model is required');
   if (!nonEmptyString(effort)) throw new Error('buildTaskArgs: effort is required');
   const rt = runtime && typeof runtime === 'object' ? runtime : {};
@@ -119,6 +119,8 @@ function buildTaskArgs({ model, effort, runtime, projectCwd, declaredMcpServers 
   if (Array.isArray(rt.disallowedTools) && rt.disallowedTools.length) {
     for (const rule of rt.disallowedTools) args.push('--disallowedTools=' + String(rule));
   }
+  // Skills ride only inside the persona's packs (already '--disallowedTools=Skill(<name>)').
+  if (Array.isArray(skillDeny)) args.push(...skillDeny.filter((a) => typeof a === 'string' && a.startsWith('--disallowedTools=Skill(')));
 
   if (rt.outputFormat === 'stream-json') args.push('--output-format', 'stream-json', '--verbose');
   else args.push('--output-format', 'json');

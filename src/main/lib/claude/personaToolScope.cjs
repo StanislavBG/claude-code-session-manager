@@ -203,7 +203,32 @@ function skillDenyArgs({
   return out;
 }
 
+/**
+ * The skill-deny argv for one unattended spawn (job or Task): the real catalogs
+ * (packs, loose skills, CLI-bundled skills) fed to skillDenyArgs. Never throws;
+ * a catalog failure denies nothing (same as an unbound loadout).
+ * @param {{ packs?: readonly string[], loadout?: string|null, deps?: Record<string, any> }} [o]
+ * @returns {Promise<{ args: string[], denied: number }>}
+ */
+async function resolveSkillDeny({ packs = [], loadout, deps } = {}) {
+  const d = deps || {};
+  try {
+    if (!loadout) return { args: [], denied: 0 };
+    const catalog = require('../packs/packCatalog.cjs');
+    const packCatalog = (d.listPacks || catalog.listPacks)().packs || [];
+    const unpacked = [...(d.listUnpackedSkills || catalog.listUnpackedSkills)()];
+    const builtin = await (d.getBuiltinTools || require('./builtinTools.cjs').getBuiltinTools)();
+    const bundledSkills = (builtin && builtin.skills) || [];
+    const installedSkills = [...new Set([...packCatalog.flatMap((p) => p.skills || []), ...unpacked])];
+    const args = skillDenyArgs({ installedSkills, equippedPacks: packs, packCatalog, bundledSkills, loadout });
+    return { args, denied: args.length };
+  } catch {
+    return { args: [], denied: 0 };
+  }
+}
+
 module.exports = {
+  resolveSkillDeny,
   JOB_MCP_TOOLS_ENV,
   personaToolScopeEnv,
   HEADLESS_TOOL_FLOOR,

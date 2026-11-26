@@ -381,7 +381,16 @@ async function defaultResolveInfo({ cwd, agent }) {
     const p = readOverlayAwarePersona(agent, { cwd });
     declaredMcpServers = parseCapabilityList(p && p.fm ? p.fm.mcpServers : undefined);
   } catch { /* unreadable frontmatter → no declared servers (strict mode loads none) */ }
-  return { personaFound: true, resolvedModelId: model || null, personaEffort: effort || null, declaredMcpServers };
+  let skillDeny = [];
+  try {
+    const { readOverlayAwarePersona } = require('../claude/agentModelResolve.cjs');
+    const { loadoutState } = require('../persona-macro/personaLoadout.cjs');
+    const { resolveSkillDeny } = require('../claude/personaToolScope.cjs');
+    const p = readOverlayAwarePersona(agent, { cwd });
+    const fm = p && p.fm ? p.fm : null;
+    skillDeny = (await resolveSkillDeny({ packs: parseCapabilityList(fm ? fm.packs : undefined), loadout: fm ? loadoutState(fm) : null })).args;
+  } catch { /* no skill deny on failure */ }
+  return { personaFound: true, resolvedModelId: model || null, personaEffort: effort || null, declaredMcpServers, skillDeny };
 }
 
 /** A real `--model` value: a non-empty string that is not the 'inherit' sentinel. */
@@ -626,7 +635,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
     let args;
     try {
       const declaredMcpServers = Array.isArray(info.declaredMcpServers) ? info.declaredMcpServers : [];
-      args = buildArgs({ model, effort, runtime: argsRuntime, projectCwd: cwd, declaredMcpServers, knownMcpServers: knownMcpServers() });
+      args = buildArgs({ model, effort, runtime: argsRuntime, projectCwd: cwd, declaredMcpServers, knownMcpServers: knownMcpServers(), skillDeny: Array.isArray(info.skillDeny) ? info.skillDeny : [] });
     } catch (e) {
       reply(400, { ok: false, error: (e && /** @type {any} */ (e).code) || 'invalid_request', details: e instanceof Error ? e.message : String(e) });
       return;

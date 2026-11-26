@@ -182,7 +182,7 @@ const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/ep
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const agentSnapshot = require('./lib/claude/agentSnapshot.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
-const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv, resolvedMcpServerNames } = require('./lib/claude/personaToolScope.cjs');
+const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv, resolvedMcpServerNames, resolveSkillDeny } = require('./lib/claude/personaToolScope.cjs');
 const { VALIDATOR_VERDICT_SCHEMA, parseValidatorVerdict, verdictRowsFromStructured, expectedFromCriteria, formatCriteriaChecksSection } = require('./lib/scheduler/validatorVerdictSchema.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, emitJobEvent, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
@@ -5861,7 +5861,7 @@ function jobRiskToolsClearance(prdRiskTools, personaTools) {
   return out;
 }
 
-function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, mcpServerNames = [], pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null }) {
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, mcpServerNames = [], pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null, skillDeny = [] }) {
   let permissionArgs = Array.isArray(sandboxArgs) && sandboxArgs.length ? sandboxArgs : ['--dangerously-skip-permissions'];
   let riskArgs = [];
   if (typeof riskGuardSettingsPath === 'string' && riskGuardSettingsPath) {
@@ -5883,6 +5883,7 @@ function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, 
     ...permissionArgs,
     ...headlessPermissionArgs(),
     '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
+    ...(Array.isArray(skillDeny) ? skillDeny : []),
     '--output-format', 'stream-json',
     '--verbose',
     ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId]),
@@ -5999,6 +6000,7 @@ async function resolveJobAgentSnapshot(job, cwd, packs) {
       tools: Array.isArray(snap.tools) ? snap.tools : null,
       mcpServers: Array.isArray(snap.mcpServers) ? snap.mcpServers.map(String) : [],
       packs: Array.isArray(snap.packs) ? snap.packs.map(String) : [],
+      loadout: typeof snap.loadout === 'string' ? snap.loadout : null,
       personaPath: null,
       agentSnapshotId: job.agentSnapshotId,
       pinned: true,
@@ -6036,6 +6038,7 @@ async function resolveJobAgentSnapshot(job, cwd, packs) {
     tools: snap.tools,
     mcpServers: snap.mcpServers,
     packs: snap.packs,
+    loadout: typeof snap.loadout === 'string' ? snap.loadout : null,
     personaPath: null,
     agentSnapshotId: id,
     pinned: false,
@@ -6488,6 +6491,10 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   } catch (err) {
     safeLog(`[scheduler] context packs skipped for ${job.slug}: ${err && err.message ? err.message : String(err)}\n`);
   }
+  // Skills ride only inside packs: refuse every installed skill the persona's
+  // packs (snapshot-pinned when pinned) do not carry.
+  const skillDeny = await resolveSkillDeny({ packs: personaResolution.packs || [], loadout: personaResolution.loadout });
+  safeLog(`[scheduler] skills=${skillDeny.denied} denied for ${job.slug}\n`);
   // Declared capabilities, fail-closed: an MCP server (declared or tool-named)
   // missing from knownMcpServers(), or an unknown persona-declared pack,
   // parks the job needs_review 'capability_unknown: <name>' — never spawned
@@ -6824,6 +6831,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       pluginDirArgs: packArgs.pluginDirArgs,
       jsonSchema: isValidator ? VALIDATOR_VERDICT_SCHEMA : null,
       riskGuardSettingsPath,
+      skillDeny: skillDeny.args,
     });
     const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
 

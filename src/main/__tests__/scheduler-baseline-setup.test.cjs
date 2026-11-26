@@ -22,7 +22,9 @@ const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
 
 function git(args, cwd) { return execFileSync('git', args, { cwd, encoding: 'utf8' }); }
 
-function setup(name, baseConfig) {
+function setup(name, baseConfig, opts = {}) {
+  const gate = opts.gate || 'timeout 30 node -e "process.exit(3)"';
+  const sidecarReason = opts.sidecarReason === undefined ? 'r' : opts.sidecarReason;
   const cwd = path.join(tmpHome, name);
   fs.mkdirSync(cwd, { recursive: true });
   git(['init', '-q'], cwd);
@@ -31,6 +33,10 @@ function setup(name, baseConfig) {
   fs.writeFileSync(path.join(cwd, 'README.md'), 'x\n');
   fs.writeFileSync(path.join(cwd, '.gitignore'), 'session-manager-operations/\n');
   if (baseConfig) fs.writeFileSync(path.join(cwd, '.session-manager.json'), JSON.stringify(baseConfig));
+  for (const [rel, content] of Object.entries(opts.baseFiles || {})) {
+    fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true });
+    fs.writeFileSync(path.join(cwd, rel), content);
+  }
   git(['add', '-A'], cwd);
   git(['commit', '-q', '-m', 'base'], cwd);
   const base = git(['rev-parse', 'HEAD'], cwd).trim();
@@ -45,11 +51,13 @@ function setup(name, baseConfig) {
   fs.mkdirSync(prdDir, { recursive: true });
   const slug = `01-${name}`;
   fs.writeFileSync(path.join(prdDir, `${slug}.md`),
-    `---\ntitle: T\ncwd: ${cwd}\nestimateMinutes: 5\n---\n# Acceptance criteria\n\n- [ ] Gate: \`timeout 30 node -e "process.exit(3)"\`\n`);
+    `---\ntitle: T\ncwd: ${cwd}\nestimateMinutes: 5\n---\n# Acceptance criteria\n\n- [ ] Gate: \`${gate}\`\n`);
   const runId = `run-${name}`;
   const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
   fs.mkdirSync(runDir, { recursive: true });
-  fs.writeFileSync(path.join(runDir, `${slug}.verdicts.json`), JSON.stringify({ verdict: 'sentinel_fail', reason: 'r' }));
+  if (sidecarReason !== null) {
+    fs.writeFileSync(path.join(runDir, `${slug}.verdicts.json`), JSON.stringify({ verdict: 'sentinel_fail', reason: sidecarReason }));
+  }
   const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
   fs.mkdirSync(stateDir, { recursive: true });
   const queuePath = path.join(stateDir, 'queue.json');
@@ -92,4 +100,36 @@ test('no .session-manager.json: base gate runs as before (setup no-config)', asy
   const rec = await runGateShadow(t.job);
   assert.equal(rec.baseline.setup.reason, 'no-config');
   assert.equal(rec.baseline.outcome.status, 'red');
+});
+
+// The sidecar FAIL reason is read by runGateShadow and decides the baseline (PRD 4564 wiring).
+const FAIL_FIXTURE = {
+  gate: 'timeout 30 node fail.cjs',
+  baseFiles: { 'fail.cjs': "console.log('FAIL  src/a.test.cjs > s > t'); process.exit(1);\n" },
+};
+
+test('baseline completes when the sidecar FAIL reason names a failing file', async () => {
+  const t = setup('reason-names', null, { ...FAIL_FIXTURE, sidecarReason: 'gate red: src/a.test.cjs failed' });
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.baseline.reason, 'baseline-identical');
+  const row = rowOf(t);
+  assert.equal(row.status, 'completed');
+  assert.equal(row.verifierVerdict, 'pass_preexisting_gate_red');
+});
+
+test('baseline refuses when the sidecar FAIL reason names an outside blocker', async () => {
+  const t = setup('reason-outside', null, {
+    ...FAIL_FIXTURE,
+    sidecarReason: 'executor reported SCHEDULER_VERDICT: FAIL: HUMAN_ACTION_REQUIRED: owner must complete App Store Connect compliance forms SECURITYASF395E, AIGENERATEFD1DE',
+  });
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.baseline.reason, 'fail-not-about-gate');
+  assert.equal(rowOf(t).status, 'needs_review');
+});
+
+test('baseline refuses when the run has no verdicts sidecar', async () => {
+  const t = setup('reason-none', null, { ...FAIL_FIXTURE, sidecarReason: null });
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.baseline.reason, 'fail-not-about-gate');
+  assert.equal(rowOf(t).status, 'needs_review');
 });

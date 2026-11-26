@@ -139,3 +139,13 @@ test('stream: AF_UNIX and errno >3 lines apart -> null; success and Read -> null
   expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', adj, false)].join('\n'))).toBeNull();
   expect(sandboxLimitFromStreamJson([readUse('r1'), toolRes('r1', adj)].join('\n'))).toBeNull();
 });
+test('stream: AF_UNIX traceback ending in ValueError, then plain rm EPERM -> null', () => {
+  const body = TB_SOCKET.replace('PermissionError: [Errno 1] Operation not permitted', 'ValueError: nope')
+    + "rm: cannot remove y: Operation not permitted\n";
+  expect(sandboxLimitFromStreamJson(stream(body))).toBeNull();
+});
+test('stream: chained tracebacks still classify (new header opens fresh block)', () => {
+  const chained = TB_SOCKET.replace('PermissionError: [Errno 1] Operation not permitted', 'KeyError: 1')
+    + '\nDuring handling of the above exception, another exception occurred:\n\n' + TB_SOCKET;
+  expect(sandboxLimitFromStreamJson(stream(chained)).kind).toBe('unix-socket');
+});

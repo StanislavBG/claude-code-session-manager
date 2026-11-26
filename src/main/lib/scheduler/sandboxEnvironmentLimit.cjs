@@ -47,8 +47,9 @@ function detectPerLine(text) {
  * scan. Anchor on an error line, look back to the nearest
  * "Traceback (most recent call last):" (at most MAX_BLOCK_LINES lines) and
  * classify unix-socket if AF_UNIX is in that block, readonly-tmp if /tmp is.
- * A traceback header between blocks stops the look-back, so an earlier,
- * separate traceback never counts. Linear: one pass tracking the block start.
+ * A block ends at its exception line (the first non-indented line after the
+ * header), so a later unrelated line never joins it; each new header opens a
+ * fresh block (chained tracebacks work). Linear: one pass tracking the block start.
  */
 function detectBashBody(text) {
   if (typeof text !== 'string' || !text) return null;
@@ -58,8 +59,12 @@ function detectBashBody(text) {
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     if (TRACEBACK_START.test(lines[i])) { start = i; continue; }
-    if (start < 0 || !ERROR_LINE.test(lines[i]) || i - start > MAX_BLOCK_LINES) continue;
-    const block = lines.slice(start, i + 1).join('\n');
+    if (start < 0 || lines[i].trim() === '' || /^\s/.test(lines[i])) continue;
+    // First non-indented line after the header is the exception line: the block ends here.
+    const blockStart = start;
+    start = -1;
+    if (!ERROR_LINE.test(lines[i]) || i - blockStart > MAX_BLOCK_LINES) continue;
+    const block = lines.slice(blockStart, i + 1).join('\n');
     if (/Operation not permitted/i.test(lines[i]) && block.includes('AF_UNIX')) {
       return { kind: 'unix-socket', evidence: lines[i].slice(0, 200) };
     }

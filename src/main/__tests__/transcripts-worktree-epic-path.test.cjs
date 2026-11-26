@@ -24,7 +24,7 @@ let resolver;
 let encodeCwd;
 let proj;
 const SID = 'b8a5d6f4-0092-4db0-a687-009241f2a8b2';
-const WT = '/tmp/sm-wt-test-epic-worktree-dir';
+let WT;
 
 beforeAll(() => {
   originalHome = process.env.HOME;
@@ -33,11 +33,13 @@ beforeAll(() => {
   tr = require('../transcripts.cjs');
   resolver = require('../lib/epic/epicTranscriptPath.cjs');
   ({ encodeCwd } = require('../lib/util/encodeCwd.cjs'));
+  WT = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-wt-test-'));
 });
 
 afterAll(() => {
   process.env.HOME = originalHome;
   fs.rmSync(tmpHome, { recursive: true, force: true });
+  fs.rmSync(WT, { recursive: true, force: true });
 });
 
 beforeEach(() => {
@@ -79,6 +81,7 @@ test('worktree-present: transcript only under the worktree encoding resolves the
 
 test('worktree-swept: worktree dir gone from disk, transcript still found', () => {
   writeIndex();
+  fs.rmSync(WT, { recursive: true, force: true });
   expect(fs.existsSync(WT)).toBe(false);
   writeTranscript(plain(WT));
   expect(tr.transcriptPath(proj, SID)).toBe(plain(WT));

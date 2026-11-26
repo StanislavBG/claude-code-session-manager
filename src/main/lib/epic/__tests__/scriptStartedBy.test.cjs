@@ -7,7 +7,7 @@
 
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, describe } from 'vitest';
 const { CallerSchema, StartedBySchema, buildStartedBy } = require('../scriptStartedBy.cjs');
 const { EpicSourceSchema } = require('../../promptSessionSchema.cjs');
 const { schemas } = require('../../../ipcSchemas.cjs');
@@ -36,4 +36,31 @@ test('startedBy round-trips through EpicSourceSchema and promptSessionsCreateEpi
   expect(EpicSourceSchema.parse(source).startedBy).toEqual(source.startedBy);
   const parsed = schemas.promptSessionsCreateEpic.parse({ cwd: '/p', goalText: 'g', source });
   expect(parsed.source.startedBy).toEqual(source.startedBy);
+});
+
+describe('startedByFromRequest', () => {
+  const { startedByFromRequest } = require('../scriptStartedBy.cjs');
+  const route = '/admin/macros/run';
+  const caller = { runId: 'r1' };
+
+  test('resolved Epic adds fromCwd + fromEpicId', async () => {
+    const out = await startedByFromRequest({ route, caller, socket: {} }, {
+      resolvePeerChatSession: async () => ({ chatSessionId: 'chat-12345678', projectRoot: '/p' }),
+      findEpicByClaudeSessionId: (cwd, id) => (cwd === '/p' && id === 'chat-12345678' ? { id: 'epic-1' } : null),
+    });
+    expect(out).toEqual({ kind: 'script', route, caller, fromCwd: '/p', fromEpicId: 'epic-1' });
+  });
+
+  test('chat but no Epic', async () => {
+    const out = await startedByFromRequest({ route, caller, socket: {} }, {
+      resolvePeerChatSession: async () => ({ chatSessionId: 'chat-12345678', projectRoot: '/p' }),
+      findEpicByClaudeSessionId: () => null,
+    });
+    expect(out).toEqual({ kind: 'script', route, caller });
+  });
+
+  test('no chat', async () => {
+    const out = await startedByFromRequest({ route, socket: {} }, { resolvePeerChatSession: async () => null });
+    expect(out).toEqual({ kind: 'script', route });
+  });
 });

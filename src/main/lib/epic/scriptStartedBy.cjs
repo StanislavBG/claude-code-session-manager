@@ -43,4 +43,29 @@ function buildStartedBy({ route, caller, fromCwd, fromEpicId } = {}) {
   return StartedBySchema.parse(out);
 }
 
-module.exports = { CallerSchema, StartedBySchema, buildStartedBy };
+/**
+ * startedBy for a request: validated body caller + the chat that made the
+ * loopback call (resolved from the socket), mapped to its Epic when found.
+ * @param {{ route: string, caller?: object, socket?: object }} args
+ * @param {{ resolvePeerChatSession?: Function, findEpicByClaudeSessionId?: Function }} [deps]
+ */
+async function startedByFromRequest({ route, caller, socket } = {}, deps = {}) {
+  let fromCwd;
+  let fromEpicId;
+  try {
+    const resolve = deps.resolvePeerChatSession || require('../process/peerChatSession.cjs').resolvePeerChatSession;
+    const peer = await resolve(socket);
+    if (peer && peer.chatSessionId && peer.projectRoot) {
+      const find = deps.findEpicByClaudeSessionId || require('../claude/agentModelResolve.cjs').findEpicByClaudeSessionId;
+      const epic = find(peer.projectRoot, peer.chatSessionId);
+      if (epic) {
+        fromCwd = peer.projectRoot;
+        fromEpicId = epic.id || epic.epicId || undefined;
+        if (!fromEpicId) fromCwd = undefined;
+      }
+    }
+  } catch { /* resolution is best-effort */ }
+  return buildStartedBy({ route, caller, fromCwd, fromEpicId });
+}
+
+module.exports = { CallerSchema, StartedBySchema, buildStartedBy, startedByFromRequest };

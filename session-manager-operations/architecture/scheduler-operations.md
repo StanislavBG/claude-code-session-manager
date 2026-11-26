@@ -716,6 +716,10 @@ host's `127.0.0.1`. The decision it led to is the
 - Each fresh row stores `attempts`, `ranAt`, `stage: validator-dispatch` and `bodyPath` (the body sits in a sidecar file).
 - The verdict is cross-checked against those same results. The dispatch-time expected map is stamped on the queue row as `validatorCriteriaExpected`; `notifyOriginatingTab` never re-runs the checks.
 
+### Authenticated admin routes
+
+http criteria carry no credentials by design: a PRD-declared check would act with the admin token, the same widening the 2026-11-24 decision rejected for allow-listing localhost ([Loopback bullet](managed-agents-alignment.md#environments)). So a PRD gate or job probe of a bearer-authed `127.0.0.1` `/admin` route cannot pass from a sandboxed job; it ends `silent_no_op` (incident: release check 4539, 2026-11-24). Instead the architect runs the probe read-only at PLAN SETTLED, unsandboxed, and publishes its record with `artifact_publish`. A validator criterion then cites that stored path and its sha256, and judges the record.
+
 ### Residual risks
 
 - **The CLI sandbox wraps Bash only.** Hooks and MCP servers run outside it; in-process tools

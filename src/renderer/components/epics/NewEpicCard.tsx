@@ -23,6 +23,7 @@ import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
 import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult, PackListRow, RestorableSession } from '../../../preload/api'
 import { AgentPicker, agentDot, NO_AGENT } from './AgentPicker'
+import { pickDefaultEpicAgent, readLastEpicAgent, rememberEpicAgent } from '../../lib/epicAgentDefault'
 import { AgentCliPicker, type AgentCliChoice } from './AgentCliPicker'
 import { agentCliLabel } from '../../lib/agentCliCatalog'
 import { useAgentCliDetect } from '../../lib/useAgentCliDetect'
@@ -151,12 +152,12 @@ export function NewEpicCard({
   // Reference paths already saved on the draft; removable, merged ahead of new attachments.
   const [savedRefs, setSavedRefs] = useState<string[]>(seed?.referencePaths ?? [])
   // '' only until the Agent Library resolves (or when it is genuinely empty) —
-  // there is no "Default" pseudo-agent, the real 'architect' persona is the
-  // default pick, so the pinned "who is working" tile always names a real one.
+  // there is no "Default" pseudo-agent, the default pick is the project's last
+  // used Agent (else the real 'architect' persona), so the pinned "who is working" tile always names a real one.
   const [agentName, setAgentName] = useState(seed?.agentName ?? '')
   const { personas: agents } = useAgentPersonasState((e) => toast.error(e.message || 'failed to load Agent Library'))
   // Tracks whether the human has clicked an Agent chip, so the async
-  // 'architect' default (set once listPersonas() resolves) never clobbers
+  // default (set once listPersonas() / the last-agent read resolves) never clobbers
   // a manual pick made before or after that resolution.
   const agentTouchedRef = useRef(Boolean(seed))
   const att = useAttachments()
@@ -233,12 +234,14 @@ export function NewEpicCard({
   const [cliOverride, setCliOverride] = useState<{ cli: AgentCliChoice; model: string } | null>(() =>
     editDraft ? { cli: (editDraft.agentCli as AgentCliChoice | undefined) || 'claude', model: editDraft.agentCliModel ?? '' } : null)
 
+  // Per-cwd cache of the last Agent used to Start a session (null = none recorded).
+  const lastAgentByCwd = useRef<Map<string, string | null>>(new Map())
   // Default the Actor once the personas first resolve (never after a human pick).
   useEffect(() => {
     if (!agents) return
     if (!agentTouchedRef.current && agents.length === 0) setAgentName(NO_AGENT)
-    const preferred = agents.find((a) => a.name === 'architect') ?? agents[0]
-    if (!agentTouchedRef.current && preferred) setAgentName(preferred.name)
+    const preferred = pickDefaultEpicAgent(agents, lastAgentByCwd.current.get(effectiveCwdRef.current ?? '') ?? null)
+    if (!agentTouchedRef.current && preferred) setAgentName(preferred)
   }, [agents])
 
   useEffect(() => {
@@ -323,6 +326,20 @@ export function NewEpicCard({
   const canCreate = Boolean(effectiveCwd && trimmedGoal) && !personaCliPending
   const canSaveDraft = Boolean(effectiveCwd) && !personaCliPending && hasDraftContent({ title, goal, referenceCount: savedRefs.length + att.items.length })
   effectiveCwdRef.current = effectiveCwd
+
+  // Default the Agent to the project's last-used one; a manual pick is never clobbered.
+  useEffect(() => {
+    if (!effectiveCwd) return
+    let cancelled = false
+    readLastEpicAgent(effectiveCwd).then((value) => {
+      if (cancelled) return
+      lastAgentByCwd.current.set(effectiveCwd, value)
+      if (agentTouchedRef.current || editDraft || justClaude || !agents || agents.length === 0) return
+      setAgentName(pickDefaultEpicAgent(agents, value))
+    })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveCwd, editDraft, agents])
 
   // A pick is only good for the project it was listed in, and never once that
   // session is open as a tab (two writers on one transcript): drop it when either stops holding.
@@ -439,7 +456,7 @@ export function NewEpicCard({
     setGoal('')
     setTag('feature')
     agentTouchedRef.current = false
-    setAgentName((agents?.find((a) => a.name === 'architect') ?? agents?.[0])?.name ?? '')
+    setAgentName(pickDefaultEpicAgent(agents, lastAgentByCwd.current.get(effectiveCwd) ?? null))
     setAdvanced(false)
     setModelOverride('')
     setEffortOverride('')
@@ -473,7 +490,7 @@ export function NewEpicCard({
       setTag(prev.tag)
       agentTouchedRef.current = prev.touched
     } else {
-      setAgentName((agents?.find((a) => a.name === 'architect') ?? agents?.[0])?.name ?? '')
+      setAgentName(pickDefaultEpicAgent(agents, lastAgentByCwd.current.get(effectiveCwd) ?? null))
       setTag('feature')
       agentTouchedRef.current = false
     }
@@ -646,6 +663,11 @@ export function NewEpicCard({
       cwd: effectiveCwd,
       prompt: openingPrompt,
     })
+    if (selectedAgent && !justClaude) {
+      lastAgentByCwd.current.set(effectiveCwd, selectedAgent.name)
+      rememberEpicAgent(effectiveCwd, selectedAgent.name).catch((e) =>
+        toast.error(e instanceof Error ? e.message : String(e)))
+    }
     resetForm()
     onCreated(session.id)
     } catch (err) {

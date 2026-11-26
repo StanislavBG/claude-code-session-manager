@@ -152,6 +152,7 @@ beforeEach(() => {
     config: {
       readText: vi.fn().mockResolvedValue({ exists: false, text: '', mtimeMs: 0, error: null }),
       readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
+      writeJson: vi.fn().mockResolvedValue({ ok: true }),
       watch: vi.fn(),
       unwatch: vi.fn(),
       listDir: vi.fn().mockResolvedValue({ ok: true, entries: [], error: null }),
@@ -2208,5 +2209,76 @@ describe('NewEpicCard context packs', () => {
     packsListSpy.mockRejectedValue(new Error('boom'))
     el = await mountAdvanced()
     expect(q(el, 'new-epic-packs')).toBeNull()
+  })
+})
+
+describe('NewEpicCard last-used Agent default', () => {
+  const CWD = '/home/bilko/Projects/alpha'
+  const PREFS = `${CWD}/session-manager-operations/ui-prefs/prefs.json`
+  const mk = (name: string): AgentPersona => ({ name, description: 'x', tools: [], model: null, effort: null, color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] })
+  const lib = () => listPersonasSpy.mockResolvedValue([mk('architect'), mk('dev-lead'), mk('builder')])
+  const cfg = () => (window as unknown as { api: { config: { readJson: ReturnType<typeof vi.fn>; writeJson: ReturnType<typeof vi.fn> } } }).api.config
+  const prefsWith = (lastEpicAgent: string) => cfg().readJson.mockResolvedValue({ exists: true, raw: '', data: { lastEpicAgent }, parseError: null, mtimeMs: 0, error: null })
+  const sel = (el: HTMLElement, n: string) => el.querySelector(`[data-testid="new-epic-agent-${n}"]`)?.getAttribute('data-selected')
+  const start = async (el: HTMLElement) => {
+    const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
+    act(() => setNativeValue(goal, 'Do the thing'))
+    const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
+    act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => {})
+  }
+
+  it('(a) opens with the project\'s last agent selected', async () => {
+    lib(); prefsWith('dev-lead')
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    expect(cfg().readJson).toHaveBeenCalledWith(PREFS)
+    expect(sel(el, 'dev-lead')).toBe('true')
+  })
+
+  it('(b) a last agent missing from the library falls back to architect', async () => {
+    lib(); prefsWith('ghost')
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    expect(sel(el, 'architect')).toBe('true')
+  })
+
+  it('(c) no pref -> architect', async () => {
+    lib()
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    expect(sel(el, 'architect')).toBe('true')
+  })
+
+  it('(d) a manual pick before readJson resolves is kept', async () => {
+    lib()
+    let resolve!: (v: unknown) => void
+    cfg().readJson.mockReturnValue(new Promise((r) => { resolve = r }))
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    pickAgent(el, 'builder')
+    await act(async () => { resolve({ exists: true, raw: '', data: { lastEpicAgent: 'dev-lead' }, parseError: null, mtimeMs: 0, error: null }) })
+    expect(sel(el, 'builder')).toBe('true')
+    expect(sel(el, 'dev-lead')).toBe('false')
+  })
+
+  it('(e) Start with a non-architect agent records it for the cwd', async () => {
+    lib()
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    pickAgent(el, 'builder')
+    await start(el)
+    expect(cfg().writeJson).toHaveBeenCalledWith(PREFS, expect.objectContaining({ lastEpicAgent: 'builder' }), 'ui-prefs')
+  })
+
+  it('(f) Start under just Claude writes nothing', async () => {
+    lib()
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const sw = el.querySelector('[data-testid="new-epic-just-claude"]') as HTMLElement
+    act(() => sw.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await start(el)
+    expect(createPromptSessionSpy).toHaveBeenCalled()
+    expect(cfg().writeJson).not.toHaveBeenCalled()
   })
 })

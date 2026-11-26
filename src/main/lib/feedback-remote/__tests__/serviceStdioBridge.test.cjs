@@ -263,6 +263,17 @@ describe('service mcp', () => {
       expect(c.code).toBe(1);
     });
 
+    it('empty and malformed admin-api.json', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adm-'));
+      const f = path.join(dir, 'admin-api.json');
+      for (const body of ['', '   \n', '{not json']) {
+        fs.writeFileSync(f, body);
+        const r = await pairLocal({ stateDir: '/s', name: 'K', homeCwd: '/h', tools: ['a'], adminApiPath: f });
+        expect(r).toEqual({ ok: false, error: 'session manager is not running (no admin-api.json)' });
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+
     it('usage errors exit 2', async () => {
       for (const drop of ['--state-dir', '--name', '--home', '--tools']) {
         const argv = [...base];

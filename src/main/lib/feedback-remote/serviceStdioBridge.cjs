@@ -149,7 +149,7 @@ async function pairLocal(opts) {
   let admin;
   try {
     const adminApiPath = (opts && opts.adminApiPath) || require('../scheduler/schedulerPaths.cjs').adminTokenPath();
-    admin = JSON.parse(require('node:fs').readFileSync(adminApiPath, 'utf8'));
+    admin = require('../util/atomicFs.cjs').readJsonOrSync(adminApiPath, null);
   } catch { return { ok: false, error: NOT_RUNNING_MSG }; }
   if (!admin || !admin.port || !admin.token) return { ok: false, error: NOT_RUNNING_MSG };
   const base = `http://127.0.0.1:${admin.port}/admin/services/pair-local`;

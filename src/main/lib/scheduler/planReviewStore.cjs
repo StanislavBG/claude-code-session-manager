@@ -68,12 +68,14 @@ async function savePlanReviewResult({
   const n = Number.isFinite(round) ? round : reviews.length + 1;
   reviews.push({ round: n, at: new Date().toISOString(), reviewer, runId, model, review });
   const record = {
+    ...(prior || {}),
     validateSlug,
     epicId,
     round: n,
     reviews,
     release: prior && prior.release ? prior.release : null,
   };
+  if (n === 2) record.rereviewRequested = false;
   await writeRecord(cwd, record);
   return record;
 }
@@ -87,6 +89,7 @@ async function recordPlanRelease({
   const prior = readPlanReview(cwd, epicId, validateSlug);
   if (prior && prior.release) return { alreadyReleased: true };
   const record = {
+    ...(prior || {}),
     validateSlug,
     epicId,
     round: prior && Number.isFinite(prior.round) ? prior.round : 0,

@@ -48,6 +48,28 @@ describe('planReviewStore', () => {
     assert.equal(rec.reviews.length, 1);
   });
 
+  it('keeps digestSent and rereviewRequested across save and release; round 2 clears rereviewRequested', async () => {
+    await save(1);
+    const file = planReviewPath(cwd, base.epicId, base.validateSlug);
+    const seeded = JSON.parse(fs.readFileSync(file, 'utf8'));
+    seeded.digestSent = true;
+    seeded.rereviewRequested = true;
+    fs.writeFileSync(file, JSON.stringify(seeded));
+    await save(1);
+    let rec = readPlanReview(cwd, base.epicId, base.validateSlug);
+    assert.equal(rec.digestSent, true);
+    assert.equal(rec.rereviewRequested, true);
+    await recordPlanRelease({ cwd, ...base, by: 'auto' });
+    rec = readPlanReview(cwd, base.epicId, base.validateSlug);
+    assert.equal(rec.digestSent, true);
+    assert.equal(rec.rereviewRequested, true);
+    assert.deepEqual(await recordPlanRelease({ cwd, ...base, by: 'auto' }), { alreadyReleased: true });
+    await save(2);
+    rec = readPlanReview(cwd, base.epicId, base.validateSlug);
+    assert.equal(rec.rereviewRequested, false);
+    assert.equal(rec.digestSent, true);
+  });
+
   it('refuses unsafe ids without writing', async () => {
     for (const [e, s] of [['../x', 'v'], ['abc', '../v'], ['a/b', 'v'], ['abc', 'a/b'], ['abc', '..']]) {
       assert.throws(() => planReviewPath(cwd, e, s));

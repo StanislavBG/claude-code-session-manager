@@ -60,28 +60,37 @@ describe('GearPanel', () => {
     expect(q('[data-tool="Read"]')).toBeNull()
   })
 
-  it('equipping and removing an MCP server keeps tools and mcpServers in step', async () => {
+  it('has no honey class, equipped chips are solid and the floor is badged', async () => {
+    armory.mockResolvedValue({ ...ARMORY, builtins: [...ARMORY.builtins, item('Agent', ['floor'])] })
+    await mount({ tools: ['Edit', 'Bash'] })
+    expect(container.innerHTML).not.toContain('honey')
+    expect(q('[data-tool="Edit"]').className).not.toContain('border-dashed')
+    expect(q('[data-floor="Agent"]').textContent).toContain('floor')
+    expect(q('[data-testid="agent-gear-hint"]').textContent).toContain('Drag items here from the Armory, or Open Armory')
+  })
+
+  it('dashed slots open the armory', async () => {
     armory.mockResolvedValue(ARMORY)
     await mount({ tools: ['Edit'] })
-    const sel = q('[data-testid="agent-mcp-equip"]') as HTMLSelectElement
-    await act(async () => {
-      sel.value = 'blender'
-      sel.dispatchEvent(new Event('change', { bubbles: true }))
-    })
-    expect(latest.mcpServers).toEqual(['blender'])
-    expect(latest.tools).toEqual(['Edit', 'mcp__blender__a', 'mcp__blender__b'])
+    expect(q('[data-testid="agent-mcp-slot"]').textContent).toBe('Drop an MCP server')
+    expect(q('[data-testid="agent-pack-slot"]').textContent).toBe('Drop a pack')
+    expect(q('[data-testid="agent-armory"]')).toBeNull()
+    await act(async () => { q('[data-testid="agent-pack-slot"]').click() })
+    expect(q('[data-testid="agent-armory"]')).toBeTruthy()
+  })
+
+  it('removing an MCP server keeps tools and mcpServers in step', async () => {
+    armory.mockResolvedValue(ARMORY)
+    await mount({ tools: ['Edit', 'mcp__blender__a', 'mcp__blender__b'], mcpServers: ['blender'] })
     expect(q('[data-testid="agent-mcp-item"]').textContent).toContain('2 of 2 powers')
     await act(async () => { q('[data-testid="agent-mcp-remove"]').click() })
     expect(latest.mcpServers).toEqual([])
     expect(latest.tools).toEqual(['Edit'])
   })
 
-  it('equips and removes a pack', async () => {
+  it('removes an equipped pack', async () => {
     armory.mockResolvedValue(ARMORY)
-    await mount({ tools: ['Edit'] })
-    const sel = q('[data-testid="agent-pack-equip"]') as HTMLSelectElement
-    await act(async () => { sel.value = 'dev'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
-    expect(latest.packs).toEqual(['dev'])
+    await mount({ tools: ['Edit'], packs: ['dev'] })
     expect(q('[data-testid="agent-pack-item"]').textContent).toContain('/develop')
     await act(async () => { q('[data-testid="agent-pack-remove"]').click() })
     expect(latest.packs).toEqual([])

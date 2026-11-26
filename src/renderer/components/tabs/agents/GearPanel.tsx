@@ -10,7 +10,7 @@ import { ArmoryDrawer, type ArmoryKind } from './ArmoryDrawer'
  * click toggles; the always-granted floor as fixed chips), MCP servers, Packs and the Companions slot.
  * Every edit goes through `set` into the draft Save writes. Equipping or removing an MCP server keeps
  * `mcpServers` and its `mcp__<server>__<tool>` tool entries in step (whole server = all its tools).
- * Drag-and-drop and the Armory drawer are a later PRD; here "equip" is a select in the dashed slot.
+ * Empty dashed slots (and the hint) open the Armory drawer; drag-and-drop equips into a row.
  */
 
 const MCP_PREFIX = (server: string) => `mcp__${server}__`
@@ -33,7 +33,7 @@ function SubLabel({ children }: { children: ReactNode }) {
 function Badges({ badges }: { badges: ArmoryItem['badges'] }) {
   return (
     <>
-      {badges.includes('risky') && <span data-badge="risky" className="ml-1 px-1 rounded text-[9.5px] uppercase tracking-wide bg-honey/20 text-honey-dark">risky</span>}
+      {badges.includes('risky') && <span data-badge="risky" className="ml-1 px-1 rounded text-[9.5px] uppercase tracking-wide bg-accent/15 text-accent-dark">risky</span>}
       {badges.includes('banned') && <span data-badge="banned" className="ml-1 px-1 rounded text-[9.5px] uppercase tracking-wide bg-red-500/15 text-red-700">banned</span>}
     </>
   )
@@ -51,9 +51,9 @@ function Row({ testid, title, sub, children, drop }: { testid: string; title: st
       onDragOver={target ? (e) => { e.preventDefault(); setOver(true) } : undefined}
       onDragLeave={target ? () => setOver(false) : undefined}
       onDrop={drop ? (e) => { e.preventDefault(); setOver(false); drop.onDrop() } : undefined}
-      className={`relative grid grid-cols-[132px_1fr] gap-3 py-3 border-t border-line first:border-t-0 ${target ? `rounded-[12px] border border-dashed border-honey/60 ${over ? 'bg-honey/15' : 'bg-honey/5'}` : ''}`}
+      className={`relative grid grid-cols-[132px_1fr] gap-3 py-3 border-t border-line first:border-t-0 ${target ? `rounded-[12px] border border-dashed border-accent/60 ${over ? 'bg-accent/15' : 'bg-accent/5'}` : ''}`}
     >
-      {target && over && <span data-testid="agent-release-hint" className="absolute right-2 top-1 text-[11px] font-semibold text-honey-dark">Release to equip</span>}
+      {target && over && <span data-testid="agent-release-hint" className="absolute right-2 top-1 text-[11px] font-semibold text-accent-dark">Release to equip</span>}
       <div><div className="text-[13px] font-semibold text-fg">{title}</div><SubLabel>{sub}</SubLabel></div>
       <div className="min-w-0">{children}</div>
     </div>
@@ -105,7 +105,6 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
   // ---- MCP servers: draft.mcpServers (explicit) ∪ servers named by mcp__ tools
   const servers = [...new Set([...(obj.mcpServers ?? []), ...serversOfTools(obj.tools)])]
   const armoryServer = (id: string) => armory?.mcpServers.find((s) => s.id === id)
-  const availableServers = (armory?.mcpServers ?? []).filter((s) => !servers.includes(s.id))
 
   const equipServer = (s: ArmoryMcpItem) => {
     const next = unbound ? obj.tools : [...new Set([...obj.tools, ...s.tools.map((t) => t.id)])]
@@ -130,7 +129,6 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
 
   // ---- Packs
   const packs = obj.packs ?? []
-  const availablePacks = (armory?.packs ?? []).filter((p) => !packs.includes(p.id))
   const armoryPack = (id: string): ArmoryPackItem | undefined => armory?.packs.find((p) => p.id === id)
 
   // ---- Armory drawer: explicit equip / unequip per kind (drag, button and Enter all land here)
@@ -163,6 +161,8 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
     return () => document.removeEventListener('keydown', onKey)
   }, [open, dragging])
 
+  const openArmory = (_kind: ArmoryKind) => { setOpen(true); setDragging(null) }
+
   const slot = 'rounded-[12px] border border-dashed border-rule px-3 py-2 text-[12px] text-fg-faint flex items-center'
 
   return (
@@ -182,6 +182,11 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
         </span>
       </div>
 
+      <div data-testid="agent-gear-hint" className="text-[11.5px] text-fg-faint mb-1">
+        Drag items here from the Armory, or{' '}
+        <button type="button" data-testid="agent-gear-hint-open" onClick={() => openArmory('builtin')} className="underline text-fg-dim hover:text-fg">Open Armory</button>
+      </div>
+
       <Row testid="agent-tools-row" title="Built-in tools" sub="class abilities" drop={dropProps('builtin')}>
         <div className="flex flex-wrap gap-1.5">
           {builtins.map((b) => {
@@ -194,7 +199,7 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
                 data-tool={b.id}
                 onClick={() => toggleTool(b.id)}
                 className={`px-2 py-0.5 rounded-md text-[12px] font-mono border ${
-                  on ? 'bg-honey/20 text-honey-dark border-honey/40' : 'bg-transparent text-fg-faint border-dashed border-rule'
+                  on ? 'bg-bg text-fg border-rule' : 'bg-transparent text-fg-faint border-dashed border-rule'
                 }`}
               >
                 {b.label}<Badges badges={b.badges} />
@@ -206,7 +211,7 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
           <div data-testid="agent-floor-row" className="flex flex-wrap items-center gap-1.5 mt-2">
             <span className="text-[11.5px] text-fg-faint mr-1">Always granted</span>
             {floor.map((f) => (
-              <span key={f.id} data-floor={f.id} className="px-2 py-0.5 rounded-md text-[12px] font-mono border border-line bg-bg text-fg-dim cursor-default">{f.label}</span>
+              <span key={f.id} data-floor={f.id} className="px-2 py-0.5 rounded-md text-[12px] font-mono border border-line bg-bg text-fg-dim cursor-default">{f.label}<span className="ml-1 px-1 rounded text-[9.5px] uppercase tracking-wide bg-bg-hi text-fg-faint">floor</span></span>
             ))}
           </div>
         )}
@@ -259,20 +264,7 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
               </div>
             )
           })}
-          <div data-testid="agent-mcp-slot" className={slot}>
-            {availableServers.length > 0 ? (
-              <select
-                aria-label="Equip an MCP server"
-                data-testid="agent-mcp-equip"
-                value=""
-                onChange={(e) => { const s = availableServers.find((x) => x.id === e.target.value); if (s) equipServer(s) }}
-                className="bg-transparent text-[12px] text-fg-dim w-full"
-              >
-                <option value="">+ Equip an MCP server</option>
-                {availableServers.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
-            ) : '+ Drop an MCP server'}
-          </div>
+          <button type="button" data-testid="agent-mcp-slot" data-slot-kind="mcp" onClick={() => openArmory('mcp')} className={`${slot} w-full text-left`}>Drop an MCP server</button>
         </div>
       </Row>
 
@@ -295,20 +287,7 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
               </div>
             )
           })}
-          <div data-testid="agent-pack-slot" className={slot}>
-            {availablePacks.length > 0 ? (
-              <select
-                aria-label="Equip a pack"
-                data-testid="agent-pack-equip"
-                value=""
-                onChange={(e) => { if (e.target.value) set({ packs: [...packs, e.target.value] }) }}
-                className="bg-transparent text-[12px] text-fg-dim w-full"
-              >
-                <option value="">+ Equip a pack</option>
-                {availablePacks.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-            ) : '+ Drop a pack'}
-          </div>
+          <button type="button" data-testid="agent-pack-slot" data-slot-kind="pack" onClick={() => openArmory('pack')} className={`${slot} w-full text-left`}>Drop a pack</button>
         </div>
       </Row>
 

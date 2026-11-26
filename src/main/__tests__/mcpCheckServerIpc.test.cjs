@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { schemas, validated } = require('../ipcSchemas.cjs');
-const { checkConfiguredMcpServer, resolveMcpServerConfig } = require('../lib/mcpToolsProbe.cjs');
+const { checkConfiguredMcpServer, resolveMcpServerConfig, lastProbe, probedServers } = require('../lib/mcpToolsProbe.cjs');
 
 // A minimal stdio MCP server: answers initialize, and tools/list with one tool
 // named argv[2]. String.raw keeps the escapes intact.
@@ -212,6 +212,15 @@ describe('resolution (checkMcpServer stubbed)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].server).toEqual({ type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: 'Bearer project-token' } });
     expect(calls[0].options.cwd).toBe(project);
+  });
+
+  test('lastProbe keeps the last result per (scope, name)', async () => {
+    expect(lastProbe('plugin', 'gamma')).toBe(null);
+    const { check, result } = stubCheck();
+    await checkConfiguredMcpServer({ source: 'plugin', name: 'gamma', pluginKey: 'demo@market' }, { home, check });
+    expect(lastProbe('plugin', 'gamma')).toBe(result);
+    expect(lastProbe('user', 'gamma')).toBe(null);
+    expect(probedServers('plugin')).toEqual([{ name: 'gamma', scope: 'plugin' }]);
   });
 
   test('a source sees only its own servers', async () => {

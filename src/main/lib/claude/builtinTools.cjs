@@ -88,8 +88,8 @@ async function getBuiltinTools({ spawn, claudeBin, cliVersion } = {}) {
   try {
     if (!version) version = await probeClaudeVersion();
   } catch { /* version stays null */ }
-  const key = version || '';
-  const hit = version ? cache.get(key) : undefined;
+  const key = version || 'unknown';
+  const hit = cache.get(key);
   if (hit) return { ...hit, tools: [...hit.tools], skills: [...hit.skills] };
   try {
     const doSpawn = spawn || require('node:child_process').spawn;
@@ -97,7 +97,7 @@ async function getBuiltinTools({ spawn, claudeBin, cliVersion } = {}) {
     const tools = init ? strings(init.tools).filter((t) => !t.startsWith('mcp__')) : [];
     if (init && tools.length) {
       const result = { tools, skills: strings(init.skills), source: /** @type {const} */ ('cli'), cliVersion: version };
-      if (version) cache.set(key, result);
+      cache.set(key, result);
       return { ...result, tools: [...tools], skills: [...result.skills] };
     }
   } catch { /* fall through */ }

@@ -23,6 +23,11 @@ const path = require('node:path');
 /** @param {unknown} e */
 const msg = (e) => String((e && /** @type {Error} */ (e).message) || e);
 
+/** Default probe source: the last checkConfiguredMcpServer result held in memory. */
+function defaultGetMcpProbe({ name, scope }) {
+  return require('../mcpToolsProbe.cjs').lastProbe(scope, name);
+}
+
 /** Real MCP config reader: user ~/.claude.json + <cwd>/.mcp.json via claudeConfig (as mcpToolsProbe). */
 async function defaultListMcpServers({ cwd }) {
   const claudeConfig = require('../claudeConfig.cjs');
@@ -33,6 +38,8 @@ async function defaultListMcpServers({ cwd }) {
     const proj = await claudeConfig.read({ fileId: 'mcpJson', scope: 'project', cwd });
     for (const name of Object.keys((proj.data && proj.data.mcpServers) || {})) out.push({ name, scope: 'project' });
   }
+  // Plugin-provided servers have no config file here; they appear once checked.
+  for (const e of require('../mcpToolsProbe.cjs').probedServers('plugin')) out.push({ name: e.name, scope: 'plugin' });
   return out;
 }
 
@@ -101,7 +108,7 @@ async function buildArmory({ cwd, deps } = {}) {
     let status = 'not-checked';
     let tools = [];
     try {
-      const probe = d.getMcpProbe ? await d.getMcpProbe({ name: s.name, scope: s.scope, cwd }) : null;
+      const probe = await (d.getMcpProbe || defaultGetMcpProbe)({ name: s.name, scope: s.scope, cwd });
       if (probe && probe.ok === false) status = 'failing';
       else if (probe && Array.isArray(probe.tools)) {
         status = 'checked';

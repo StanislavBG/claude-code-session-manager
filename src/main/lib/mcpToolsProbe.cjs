@@ -825,7 +825,24 @@ async function checkConfiguredMcpServer(request, options) {
   const { home, check = checkMcpServer, timeoutMs, clientVersion } = options || {};
   const target = await resolveMcpServerConfig(request, { home });
   if (!target) return { ok: false, status: 'failed', error: 'server not found', checkedAt: Date.now() };
-  return check(target.server, { timeoutMs, clientVersion, cwd: target.cwd });
+  const result = await check(target.server, { timeoutMs, clientVersion, cwd: target.cwd });
+  const { source, name } = request;
+  if (typeof name === 'string' && typeof source === 'string') lastProbes.set(`${source}\u0000${name}`, { scope: source, name, result });
+  return result;
 }
 
-module.exports = { checkMcpServer, resolveMcpServerConfig, checkConfiguredMcpServer };
+/** Last checkConfiguredMcpServer result per (scope, name), this process only. */
+const lastProbes = new Map();
+
+/** @returns {object | null} the last result for the server, or null if never checked. */
+function lastProbe(scope, name) {
+  const hit = lastProbes.get(`${scope}\u0000${name}`);
+  return hit ? hit.result : null;
+}
+
+/** @param {string} scope @returns {{ name: string, scope: string }[]} servers with a stored result in the scope. */
+function probedServers(scope) {
+  return [...lastProbes.values()].filter((e) => e.scope === scope).map((e) => ({ name: e.name, scope: e.scope }));
+}
+
+module.exports = { checkMcpServer, resolveMcpServerConfig, checkConfiguredMcpServer, lastProbe, probedServers };

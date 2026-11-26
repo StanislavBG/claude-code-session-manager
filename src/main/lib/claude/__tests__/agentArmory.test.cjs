@@ -55,3 +55,26 @@ describe('buildArmory', () => {
     expect(r.errors.length).toBe(5);
   });
 });
+
+describe('buildArmory default probe', () => {
+  it('defaults getMcpProbe to mcpToolsProbe.lastProbe', async () => {
+    const probe = require('../../mcpToolsProbe.cjs');
+    const { getMcpProbe, ...rest } = baseDeps();
+    const run = () => buildArmory({ cwd: '/x', deps: { ...rest, listMcpServers: async () => [{ name: 'zz', scope: 'plugin' }] } });
+    expect((await run()).mcpServers[0].status).toBe('not-checked');
+    const check = async () => ({ ok: true, status: 'connected', tools: [{ name: 't' }], checkedAt: 1 });
+    // seed through the real writer with a stubbed plugin resolution
+    const pluginInstall = require('../../../pluginInstall.cjs');
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'armory-plug-'));
+    fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({ mcpServers: { zz: { command: 'x' } } }));
+    const spy = vi.spyOn(pluginInstall, 'listInstalled').mockReturnValue([{ key: 'k@m', installPath: root }]);
+    await probe.checkConfiguredMcpServer({ source: 'plugin', name: 'zz', pluginKey: 'k@m' }, { home: root, check });
+    spy.mockRestore();
+    const r = await run();
+    expect(r.mcpServers[0]).toMatchObject({ status: 'checked', scope: 'plugin' });
+    expect(r.mcpServers[0].tools[0].id).toBe('mcp__zz__t');
+  });
+});

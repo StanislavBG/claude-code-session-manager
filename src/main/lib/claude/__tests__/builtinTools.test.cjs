@@ -60,3 +60,14 @@ describe('getBuiltinTools', () => {
     expect(r.source).toBe('fallback');
   });
 });
+
+describe('getBuiltinTools unknown version', () => {
+  it('caches under "unknown" so the CLI spawns once per process', async () => {
+    __resetForTests();
+    const { spawn, calls } = fakeSpawn([init]);
+    const a = await getBuiltinTools({ spawn, claudeBin: 'x', cliVersion: null });
+    const b = await getBuiltinTools({ spawn, claudeBin: 'x', cliVersion: null });
+    expect(a.tools).toEqual(b.tools);
+    expect(calls.length).toBe(1);
+  });
+});

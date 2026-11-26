@@ -374,7 +374,8 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
 
 /**
  * Refresh one worktree node_modules (`rel`) against the main checkout's: link entries main
- * gained since the snapshot, unlink worktree links whose target is gone. Skips unless the
+ * gained since the snapshot, unlink dangling worktree links whose target lay inside main's
+ * `rel` (others are kept, counted in `counts.kept`). Skips unless the
  * worktree folder is a real directory (a whole-folder symlink is left alone). Reads main
  * only. Never throws.
  */
@@ -385,10 +386,13 @@ function syncModulesDir(mainCwd, worktreeCwd, rel, counts) {
     if (st.isSymbolicLink() || !st.isDirectory()) return;
     const src = path.join(mainCwd, rel);
     if (isDir(src)) counts.added += linkMissingModulesEntries(src, dest, false);
+    const ownPrefix = path.resolve(src) + path.sep; // trailing sep: main/node_modules-x is not inside
     for (const name of fs.readdirSync(dest)) {
       const link = path.join(dest, name);
       try {
         if (!fs.lstatSync(link).isSymbolicLink() || fs.existsSync(link)) continue;
+        const target = path.resolve(dest, fs.readlinkSync(link));
+        if (!target.startsWith(ownPrefix)) { counts.kept++; continue; } // not linker-made: leave it
         fs.unlinkSync(link); // removes the dangling link itself, never a target
         counts.removed++;
       } catch { /* best-effort per entry */ }
@@ -402,10 +406,12 @@ function syncModulesDir(mainCwd, worktreeCwd, rel, counts) {
  * considers). pnpm projects are skipped (their worktree node_modules is a real install).
  * No-op under SM_WORKTREE_DEP_LINK_DISABLE=1. Never throws.
  * @param {{ mainCwd: string, worktreeCwd: string }} opts
- * @returns {Promise<{ added: number, removed: number }>}
+ * Only dangling links into the main checkout's matching node_modules (the linker's own) are
+ * removed; any other dangling link (e.g. a workspace package mid-build) is kept and counted.
+ * @returns {Promise<{ added: number, removed: number, kept: number }>}
  */
 async function syncNodeModulesLinks({ mainCwd, worktreeCwd }) {
-  const counts = { added: 0, removed: 0 };
+  const counts = { added: 0, removed: 0, kept: 0 };
   try {
     if (process.env.SM_WORKTREE_DEP_LINK_DISABLE === '1') return counts;
     if (!mainCwd || !worktreeCwd || isPnpmProject(mainCwd)) return counts;

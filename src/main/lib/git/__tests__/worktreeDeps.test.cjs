@@ -470,12 +470,12 @@ test('sync links a main entry added after the initial link, skipping dot caches'
   fs.mkdirSync(path.join(main, 'node_modules', '.vite'));
   fs.mkdirSync(path.join(main, 'node_modules', '.bin'));
   const r = await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt });
-  expect(r).toEqual({ added: 2, removed: 0 });
+  expect(r).toEqual({ added: 2, removed: 0, kept: 0 });
   expect(fs.readlinkSync(path.join(wt, 'node_modules', 'newpkg'))).toBe(path.join(main, 'node_modules', 'newpkg'));
   expect(fs.readlinkSync(path.join(wt, 'node_modules', '.bin'))).toBe(path.join(main, 'node_modules', '.bin'));
   expect(fs.existsSync(path.join(wt, 'node_modules', '.vite'))).toBe(false);
   expect(git(wt, 'status', '--porcelain')).toBe('');
-  expect(await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt })).toEqual({ added: 0, removed: 0 });
+  expect(await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt })).toEqual({ added: 0, removed: 0, kept: 0 });
 });
 
 test('sync removes a dangling link and keeps a worktree-local real package', async () => {
@@ -487,11 +487,36 @@ test('sync removes a dangling link and keeps a worktree-local real package', asy
   fs.writeFileSync(path.join(wt, 'node_modules', 'local', 'index.js'), 'x');
   fs.mkdirSync(path.join(main, 'node_modules', 'local')); // same name in main: real worktree entry wins
   const r = await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt });
-  expect(r).toEqual({ added: 0, removed: 1 });
+  expect(r).toEqual({ added: 0, removed: 1, kept: 0 });
   expect(exists(path.join(wt, 'node_modules', 'gone'))).toBe(false);
   expect(fs.lstatSync(path.join(wt, 'node_modules', 'local')).isSymbolicLink()).toBe(false);
   expect(fs.readFileSync(path.join(wt, 'node_modules', 'local', 'index.js'), 'utf8')).toBe('x');
   expect(fs.existsSync(path.join(main, 'node_modules', 'local'))).toBe(true);
+});
+
+test('sync removes only linker-made dangling links; a dangling link elsewhere is kept', async () => {
+  const { syncNodeModulesLinks } = require('../worktreeDeps.cjs');
+  fs.mkdirSync(path.join(main, 'node_modules', 'gone'));
+  await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  fs.rmSync(path.join(main, 'node_modules', 'gone'), { recursive: true });
+  // workspace package mid-build: a worktree-made link whose target is briefly missing
+  fs.symlinkSync(path.join(wt, 'packages', 'ws'), path.join(wt, 'node_modules', 'ws'), 'dir');
+  // sibling-prefix target (main/node_modules-x) is NOT inside main/node_modules
+  fs.symlinkSync(`${path.join(main, 'node_modules')}-x`, path.join(wt, 'node_modules', 'prefix'), 'dir');
+  const r = await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt });
+  expect(r).toEqual({ added: 0, removed: 1, kept: 2 });
+  expect(exists(path.join(wt, 'node_modules', 'gone'))).toBe(false);
+  expect(fs.readlinkSync(path.join(wt, 'node_modules', 'ws'))).toBe(path.join(wt, 'packages', 'ws'));
+  expect(fs.lstatSync(path.join(wt, 'node_modules', 'prefix')).isSymbolicLink()).toBe(true);
+});
+
+test('sync keeps a dangling link pointing inside the worktree (kept: 1)', async () => {
+  const { syncNodeModulesLinks } = require('../worktreeDeps.cjs');
+  await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
+  fs.symlinkSync('../packages/ws', path.join(wt, 'node_modules', 'ws'), 'dir'); // relative target
+  const r = await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt });
+  expect(r).toEqual({ added: 0, removed: 0, kept: 1 });
+  expect(fs.readlinkSync(path.join(wt, 'node_modules', 'ws'))).toBe('../packages/ws');
 });
 
 test('sync refreshes a nested package node_modules too', async () => {
@@ -506,7 +531,7 @@ test('sync refreshes a nested package node_modules too', async () => {
   expect(r0.linked).toContain('web/app/node_modules');
   fs.mkdirSync(path.join(main, 'web', 'app', 'node_modules', 'b'));
   const r = await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt });
-  expect(r).toEqual({ added: 1, removed: 0 });
+  expect(r).toEqual({ added: 1, removed: 0, kept: 0 });
   expect(fs.readlinkSync(path.join(wt, 'web', 'app', 'node_modules', 'b'))).toBe(path.join(main, 'web', 'app', 'node_modules', 'b'));
 });
 
@@ -516,7 +541,7 @@ test('sync leaves a whole-folder node_modules symlink alone', async () => {
   fs.mkdirSync(path.join(main, 'node_modules', 'pkg'));
   fs.symlinkSync(path.join(root, 'nowhere'), path.join(main, 'node_modules', 'dangling-in-main'));
   const r = await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt });
-  expect(r).toEqual({ added: 0, removed: 0 });
+  expect(r).toEqual({ added: 0, removed: 0, kept: 0 });
   expect(fs.readlinkSync(path.join(wt, 'node_modules'))).toBe(path.join(main, 'node_modules'));
   expect(fs.readdirSync(path.join(main, 'node_modules')).sort()).toEqual(['dangling-in-main', 'pkg']);
   expect(fs.lstatSync(path.join(main, 'node_modules', 'pkg')).isDirectory()).toBe(true);
@@ -529,12 +554,12 @@ test('sync is a no-op under SM_WORKTREE_DEP_LINK_DISABLE=1 and never throws on a
   const prev = process.env.SM_WORKTREE_DEP_LINK_DISABLE;
   process.env.SM_WORKTREE_DEP_LINK_DISABLE = '1';
   try {
-    expect(await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt })).toEqual({ added: 0, removed: 0 });
+    expect(await syncNodeModulesLinks({ mainCwd: main, worktreeCwd: wt })).toEqual({ added: 0, removed: 0, kept: 0 });
     expect(exists(path.join(wt, 'node_modules', 'later'))).toBe(false);
   } finally {
     if (prev === undefined) delete process.env.SM_WORKTREE_DEP_LINK_DISABLE; else process.env.SM_WORKTREE_DEP_LINK_DISABLE = prev;
   }
-  expect(await syncNodeModulesLinks({ mainCwd: path.join(root, 'nope'), worktreeCwd: path.join(root, 'nope2') })).toEqual({ added: 0, removed: 0 });
+  expect(await syncNodeModulesLinks({ mainCwd: path.join(root, 'nope'), worktreeCwd: path.join(root, 'nope2') })).toEqual({ added: 0, removed: 0, kept: 0 });
 });
 
 function exists(p) { try { fs.lstatSync(p); return true; } catch { return false; } }

@@ -106,15 +106,50 @@ place to change it — click an agent's name on the Tags tab and you land right 
 can't do is invent a brand-new Mission from the app itself. The built-in list is fixed on purpose,
 so it stays small and every Session means the same thing by "Feature" or "Bug."</p>
 
+<h2>The Agents tab — roster and character sheet</h2>
+
+<p>The <strong>Agents</strong> tab lists every agent as a character. On the left is the roster, with a
+<strong>Filter agents</strong> box, a <strong>Global</strong> / <strong>In project</strong> scope
+switch, and a button to collapse or expand the list. Pick an agent and its sheet opens on the right: its
+name, description, <strong>Stats</strong> (model and effort), and where it is used (<strong>Epic
+chat</strong>, <strong>Scheduler jobs</strong>, <strong>Tasks</strong>). Edits show <strong>No unsaved
+changes</strong> or a Save prompt (Ctrl S), and <strong>Delete</strong> removes the agent.</p>
+
 <h2>Gear and loadouts</h2>
 
-<p>Every agent has a loadout: what it may use. <strong>Undecided</strong> means nobody chose yet, so
-it runs with everything. <strong>Bare</strong> means no extra tools at all. <strong>Equipped</strong>
-means exactly the tools listed. <strong>Unbound</strong> means everything, chosen on purpose.</p>
+<p>Every agent has a loadout: what it may use. The roster shows it as a state.
+<strong>Undecided</strong> means nobody chose yet, so it runs with everything.
+<strong>Bare</strong> means no extra tools at all, only the floor no agent can drop.
+<strong>Equipped</strong> means exactly the tools listed. <strong>Unbound</strong> means every tool on
+this machine, MCP servers added later included, chosen on purpose.</p>
 
-<p>For Sessions created after this release, the agent's gear applies to the chat too, so you can ask
-questions and troubleshoot with the same character that does the Session's work. Skills only come
-inside packs: an agent can use a skill only if one of its packs carries it.</p>
+<p>The sheet has two panels. <strong>Gear</strong> holds the loadout: <strong>Built-in tools</strong>,
+<strong>MCP servers</strong> and <strong>Packs</strong>, plus the buttons <strong>Choose a
+loadout</strong>, <strong>Go bare</strong>, <strong>Go unbound</strong> and <strong>Open the
+Armory</strong>. <strong>Constraints</strong> shows what limits the agent: <strong>Always
+granted</strong>, <strong>Banned in unattended runs</strong>, <strong>Risk marks</strong> (READ,
+WRITE, MONEY, PUBLIC, IRREVERSIBLE) and the <strong>Sandbox environment</strong>.</p>
+
+<h2>The Armory</h2>
+
+<p>The <strong>Armory</strong> drawer lists everything <strong>Installed on this machine</strong>, with a
+search box. Each item is added either by dragging it onto the sheet (<strong>Release to
+equip</strong>) or by pressing <strong>Equip</strong>; <strong>Unequip</strong> takes it off. For an
+equipped MCP server, open its <strong>Powers</strong> to tick the individual tools it may use
+(<strong>All</strong> / <strong>None</strong>, shown as "n of m powers"); risky ones carry a badge.</p>
+
+<h2>First run and project overrides</h2>
+
+<p>An agent that is still Undecided shows <strong>Needs a decision first</strong>, and the sheet offers
+<strong>Choose a loadout</strong> (or <strong>Not now</strong>). A loadout is global by default. Choose
+a project under <strong>This loadout applies to</strong> to give the agent a different loadout for
+that project only; project edits save as you make them, it reads <strong>Same as global.</strong>
+until you change it, and <strong>Reset to global</strong> drops the override.</p>
+
+<p>Changes apply to new sessions. The agent's gear applies to the chat too, so you can ask questions
+and troubleshoot with the same character that does the Session's work, and the same loadout governs
+scheduler jobs and Tasks. Skills only come inside packs: an agent can use a skill only if one of its
+packs carries it.</p>
 
 <h2>Actions — a favorite agent, one click away</h2>
 

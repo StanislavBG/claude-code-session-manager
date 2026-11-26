@@ -15,6 +15,7 @@ fails when it is out of date. For one tool in depth, call `session_manager_help`
 | `scheduler_list_jobs` | scheduler | — | List queued, running and finished jobs on this machine. |
 | `scheduler_create_prd` | scheduler | `title`, `goal`, `acceptanceCriteria`, `implementationNotes`, `gate`, `files` | Queue one PRD (a written work order) in an Epic a human approved. |
 | `scheduler_create_prds` | scheduler | `prds` | Queue a whole plan of PRDs in one all-or-nothing call. |
+| `scheduler_release_plan` | scheduler | `epicId`, `validateSlug` | Release a reviewed plan, or request its single re-review. |
 | `scheduler_list_prds` | scheduler | — | List PRDs and their job status, by project, Epic or status. |
 | `scheduler_get_prd` | scheduler | `slug` | Read one PRD in full, with its frontmatter. |
 | `scheduler_update_prd` | scheduler | `slug` | Edit a PRD that has not run yet or has stopped. |

@@ -86,12 +86,65 @@ export function overrideParts(d: OverrideDetail): string[] {
   return [...d.fields.filter((f) => f !== 'name'), ...(d.bodyOverridden ? ['full body'] : [])]
 }
 
-/** Chip text after the project name: the overlay's model · effort values, else what it overrides. */
-export function overrideChipText(d: OverrideDetail): string {
-  const vals = [d.values?.model, d.values?.effort].filter((v): v is string => !!v)
-  if (d.bodyOverridden) vals.push('full body')
-  if (vals.length) return vals.join(' · ')
-  return overrideParts(d).join(', ') || 'overlay'
+/** The keys a project overlay can carry (absent = inherits the global persona). `tools: []` = every tool. */
+export interface OverlayKeys {
+  model?: string
+  effort?: string
+  tools?: string[]
+  mcpServers?: string[]
+  packs?: string[]
+  environment?: string
+}
+const OVERLAY_ARRAY_KEYS = ['tools', 'mcpServers', 'packs'] as const
+const splitList = (v: string): string[] => v.split(',').map((x) => x.trim()).filter((x) => x && x !== '[]')
+
+/** A project's overlay as typed keys, parsed from the merged view's per-key values. */
+export function overlayOf(d: OverrideDetail): OverlayKeys {
+  const v = d.values ?? {}
+  const out: OverlayKeys = {}
+  if (d.fields.includes('model') && v.model) out.model = v.model
+  if (d.fields.includes('effort') && v.effort) out.effort = v.effort
+  if (d.fields.includes('environment') && v.environment) out.environment = v.environment
+  if (d.fields.includes('tools') && v.tools !== undefined) { const t = splitList(String(v.tools)); out.tools = t.includes('*') ? [] : t }
+  if (d.fields.includes('mcpServers') && v.mcpServers) out.mcpServers = splitList(String(v.mcpServers))
+  if (d.fields.includes('packs') && v.packs) out.packs = splitList(String(v.packs))
+  return out
+}
+
+/** Apply a draft-shaped edit to an overlay: 'inherit' / empty list / blank = the key goes back to global (tools [] is kept: every tool). */
+export function overlayEdit(overlay: OverlayKeys, patch: Partial<Draft>): OverlayKeys {
+  const next: OverlayKeys = { ...overlay }
+  for (const k of ['model', 'effort', 'environment'] as const) {
+    if (!(k in patch)) continue
+    const v = patch[k]
+    if (!v || v === 'inherit') delete next[k]
+    else next[k] = v
+  }
+  if (patch.tools) next.tools = patch.tools
+  for (const k of ['mcpServers', 'packs'] as const) {
+    if (!(k in patch)) continue
+    const v = patch[k]
+    if (v && v.length) next[k] = v
+    else delete next[k]
+  }
+  return next
+}
+
+/** Per overridden key: what differs from the global draft, as display lines. */
+export function overlayDiff(global: Draft, overlay: OverlayKeys): Array<{ label: string; keys: Array<keyof OverlayKeys>; lines: string[] }> {
+  const out: Array<{ label: string; keys: Array<keyof OverlayKeys>; lines: string[] }> = []
+  for (const k of ['model', 'effort', 'environment'] as const) {
+    const o = overlay[k]
+    if (o !== undefined) out.push({ label: k, keys: [k], lines: [`~ ${global[k] ?? 'default'} → ${o}`] })
+  }
+  for (const k of OVERLAY_ARRAY_KEYS) {
+    const o = overlay[k]
+    if (o === undefined) continue
+    const g = global[k] ?? []
+    const lines = [...o.filter((x) => !g.includes(x)).map((x) => `+ ${x}`), ...g.filter((x) => !o.includes(x)).map((x) => `− ${x}`)]
+    out.push({ label: k, keys: [k], lines: lines.length ? lines : ['same as global'] })
+  }
+  return out
 }
 
 export function MoreMenu({ items }: { items: ReadonlyArray<{ label: string; testId: string; danger?: boolean; disabled?: boolean; info?: boolean; onSelect: () => void }> }) {
@@ -444,129 +497,5 @@ function EffortPicker({ value, model, onChange, label = 'effort', testIdPrefix =
         </div>
       )}
     </Field>
-  )
-}
-
-/**
- * PROJECT OVERRIDE — an explicit project picker over every open project (one option per unique tab cwd,
- * nothing preselected: the page never reads the active tab, so no open project is special), then the CHOSEN
- * project's runtime model/effort for this persona, written as a frontmatter-only overlay at
- * `<cwd>/.claude/agents/<name>.md` (no body; lib/persona-macro/personaMerge.cjs inherits the rest from the
- * global persona). An option whose project already overrides this persona names what it overrides; two open
- * projects sharing a folder name are labelled by their home-shortened paths instead. Deliberately a separate
- * block from the global rows above it: those edit `~/.claude/agents/<name>.md` for the whole machine, these
- * edit only the chosen project's file. Each picker writes on change (no draft/Save step) so the two scopes
- * never share a Save button. The choice is AgentLibrary's page state (it survives switching personas) and
- * falls back to "Choose a project…" once that project's tab closes.
- */
-export function ProjectOverrideBlock({ saved, projects, selected, onSelect, busy, onSave, onClose }: {
-  saved: AgentPersona
-  onClose: () => void
-  projects: OpenProject[]
-  selected: OpenProject | null
-  onSelect: (cwd: string | null) => void
-  busy: boolean
-  onSave: (patch: { model: string; effort: string }) => void
-}) {
-  const home = useHomeDir()
-  const selectId = useId()
-  const nameCount = new Map<string, number>()
-  for (const p of projects) nameCount.set(p.name, (nameCount.get(p.name) ?? 0) + 1)
-  const optionLabel = (p: OpenProject) => {
-    const label = (nameCount.get(p.name) ?? 0) > 1 ? compactPath(p.cwd, home) : p.name
-    const d = saved.overrideDetails?.find((x) => x.cwd === p.cwd)
-    if (!d) return label
-    const parts = overrideParts(d)
-    return `${label} — ${parts.length ? `overrides ${parts.join(', ')}` : 'overlay'}`
-  }
-  // By cwd, not folder name: two open projects sharing a name must not read each other's overlay.
-  const detail = selected ? saved.overrideDetails?.find((d) => d.cwd === selected.cwd) : undefined
-  const fullBody = !!detail?.bodyOverridden
-  const model = detail?.values?.model ?? 'inherit'
-  const effort = detail?.values?.effort ?? 'inherit'
-  const globalModel = saved.model ?? 'inherit'
-  const globalEffort = saved.effort ?? 'inherit'
-
-  return (
-    <div
-      data-testid="project-override-block"
-      className={selected ? 'border border-accent/40 rounded p-3 space-y-3 bg-accent/5' : 'border border-dashed border-line rounded p-3 space-y-3'}
-    >
-      <div className="flex items-center gap-2">
-        <label htmlFor={selectId} className={`flex-1 text-[10.5px] font-semibold uppercase tracking-wide font-mono ${selected ? 'text-accent' : 'text-fg-faint'}`}>
-          project override
-        </label>
-        <button type="button" data-testid="override-close" onClick={onClose} className="text-[11px] text-fg-faint hover:text-fg">
-          Done
-        </button>
-      </div>
-      <div className="flex flex-col gap-1">
-        <select
-          id={selectId}
-          data-testid="override-project-select"
-          value={selected?.cwd ?? ''}
-          onChange={(e) => onSelect(e.target.value || null)}
-          disabled={busy || projects.length === 0}
-          className="rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[12.5px] text-fg disabled:opacity-60"
-        >
-          <option value="">Choose a project…</option>
-          {projects.map((p) => (
-            <option key={p.cwd} value={p.cwd}>{optionLabel(p)}</option>
-          ))}
-        </select>
-      </div>
-      {projects.length === 0 ? (
-        <div data-testid="project-override-none" className="text-[11px] text-fg-faint leading-snug">
-          No open project tabs — open a project tab to override this persona&apos;s model or effort for it.
-        </div>
-      ) : !selected ? (
-        <div data-testid="project-override-unselected" className="text-[11px] text-fg-faint leading-snug">
-          Pick an open project to see or set this persona&apos;s model and effort for that project only. A project that
-          already overrides this persona says what it overrides.
-        </div>
-      ) : (
-        <div data-testid="project-override" className="space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge tone="accent">{selected.name} only</Badge>
-            <span className="ml-auto min-w-0"><SourceChip path={`${selected.cwd}/.claude/agents/${saved.name}.md`} /></span>
-          </div>
-          <div className="text-[11px] text-fg-faint leading-snug">
-            Changes what the SCHEDULER (and new Epics) spawn for <strong>{selected.name}</strong> only — a frontmatter-only overlay with just the keys you set;
-            the persona&apos;s body stays the global one. The global model/effort rows edit the machine-wide persona and are never touched here.
-          </div>
-          {fullBody && (
-            <div data-testid="project-override-fullbody" className="text-[11px] text-amber-400 leading-snug">
-              {selected.name} already has a FULL-BODY override of this persona (its own definition text). It is shown as-is and not converted to a
-              frontmatter-only overlay — edit that file directly, or drop it with its × in the &quot;project overrides&quot; row above.
-            </div>
-          )}
-          <fieldset disabled={busy || fullBody} className="space-y-3 border-0 p-0 m-0 min-w-0">
-            <ModelPicker
-              value={model}
-              onChange={(v) => { if (!fullBody) onSave({ model: v, effort }) }}
-              label="project model"
-              hint="'use global' writes no model: line in the overlay."
-              testIdPrefix="override-"
-              inheritLabel="use global"
-            />
-            <EffortPicker
-              value={effort}
-              model={model !== 'inherit' ? model : globalModel}
-              onChange={(v) => { if (!fullBody) onSave({ model, effort: v }) }}
-              label="project effort"
-              testIdPrefix="override-"
-              inheritLabel="use global"
-            />
-          </fieldset>
-          <div data-testid="override-provenance" className="text-[11px] font-mono text-fg-dim space-y-0.5">
-            {[['model', globalModel, model], ['effort', globalEffort, effort]].map(([k, g, o]) => (
-              <div key={k} data-testid={`override-provenance-${k}`}>
-                {k}: {o !== 'inherit' ? <>{g} <span className="text-fg-faint">(global)</span> → <span className="text-accent">{o}</span> <span className="text-fg-faint">(this project)</span></> : <>{g} <span className="text-fg-faint">(global — not overridden)</span></>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
   )
 }

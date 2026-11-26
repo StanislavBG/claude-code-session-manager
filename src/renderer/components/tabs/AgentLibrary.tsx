@@ -4,7 +4,7 @@ import { Badge } from '../ui/Badge'
 import { ConfigFileCard, ConfigListRow, ConfigListToolbar, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { TagLibrary } from './TagLibrary'
 import { AgentRoster } from './agents/AgentRoster'
-import { BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject } from './agents/AgentDetail'
+import { BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject, type OverlayKeys } from './agents/AgentDetail'
 import { AgentSheet, AgentWorkbench, useAgentsListExpanded } from './agents/AgentSheet'
 import { toast } from '../../state/toast'
 import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
@@ -288,19 +288,24 @@ function AgentLibraryComponent() {
   // set = overlay, never the global file); clearing both keys drops the overlay via removeOverride.
   // Keyed by the picked project's normalized cwd, never its folder name (two open projects can share one).
   // A tab closed between render and click makes main throw ("project not open") → the toast below.
-  const saveOverride = async (patch: { model: string; effort: string }) => {
+  const saveOverride = async (overlay: OverlayKeys) => {
     if (!saved || !overrideProject) return
     const { cwd: projectCwd, name: projectLabel } = overrideProject
     setBusy(true)
     try {
-      if (patch.model === 'inherit' && patch.effort === 'inherit') {
+      if (Object.keys(overlay).length === 0) {
         await window.api.agents.removeOverride({ name: saved.name, projectCwd })
         toast.info(`cleared ${projectLabel}'s override of ${saved.name}`)
       } else {
         await window.api.agents.savePersona({
-          name: saved.name, projectCwd, description: '', tools: [], color: '', tags: [], body: '',
-          model: patch.model, effort: patch.effort,
-        })
+          name: saved.name, projectCwd, description: '', tools: overlay.tools ?? [], color: '', tags: [], body: '',
+          ...(overlay.model ? { model: overlay.model } : {}),
+          ...(overlay.effort ? { effort: overlay.effort } : {}),
+          ...(overlay.tools ? { loadout: overlay.tools.length ? 'equipped' : 'unbound' } : {}),
+          ...(overlay.mcpServers ? { mcpServers: overlay.mcpServers } : {}),
+          ...(overlay.packs ? { packs: overlay.packs } : {}),
+          ...(overlay.environment ? { environment: overlay.environment } : {}),
+        } as Parameters<typeof window.api.agents.savePersona>[0])
         toast.info(`saved ${projectLabel}'s override of ${saved.name}`)
       }
       await load(saved.name)

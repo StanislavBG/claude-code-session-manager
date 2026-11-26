@@ -152,7 +152,7 @@ describe('AgentLibrary', () => {
   it('selects the first persona by default and shows its detail, incl. the overriding project (AC 6: builder overridden by session-manager)', async () => {
     const el = await mount()
     expect(el.textContent).toContain('Watch git history and drive the next publish.')
-    expect(el.textContent).toContain('session-manager')
+    expect(el.textContent).toContain('1 override')
     expect(el.textContent).toContain('Read')
   })
 
@@ -161,7 +161,7 @@ describe('AgentLibrary', () => {
     const runtime = el.querySelector('[data-testid="agent-runtime-card"]')!
     for (const label of ['model', 'effort', 'runs on']) expect(runtime.textContent).toContain(label)
     expect(el.querySelector('[data-testid="agent-tools-row"]')).toBeTruthy()
-    expect(el.querySelector('[data-testid="agent-overrides-row"]')!.textContent).toContain('project overrides')
+    expect(el.querySelector('[data-testid="agent-overrides-row"]')).toBeNull()
     expect((el.querySelector('[data-testid="model-select"]') as HTMLSelectElement).title).toContain("This persona's default model for its Epics")
   })
 
@@ -173,7 +173,7 @@ describe('AgentLibrary', () => {
       await Promise.resolve()
     })
     expect(el.textContent).toContain('Diagnose a failing test.')
-    expect(el.textContent).toContain('no open project overlays this agent')
+    expect(el.querySelector('[data-testid="agent-overrides-row"]')).toBeNull()
   })
 
   it('has no Action section, and a save passes existing projects/action/actionLabel through untouched', async () => {
@@ -414,7 +414,7 @@ describe('AgentLibrary', () => {
     expect(el.textContent).toContain('agents carrying this tag')
   })
 
-  it('renders a project override chip for a persona with an overlay', async () => {
+  it('a persona with an overlay: no chip row; In project shows the picker and marks the overridden model', async () => {
     installWindowApiMock([
       {
         ...PERSONAS[1],
@@ -423,16 +423,11 @@ describe('AgentLibrary', () => {
       },
     ])
     const el = await mount()
-    const chips = el.querySelectorAll('[data-testid="agent-override-chip"]')
-    expect(chips).toHaveLength(1)
-    expect(chips[0].textContent).toContain('Self')
-    expect(chips[0].textContent).toContain('sonnet · medium')
-    expect(el.querySelector('[data-testid="agent-overrides-row"]')!.textContent).toContain('a local copy in ~/Self/.claude/agents/ wins there')
-    expect(el.querySelector('[data-testid="project-override-block"]')).toBeNull()
-    const add = el.querySelector('[data-testid="agent-override-add"]') as HTMLElement
-    expect(add.textContent).toBe('+ Add override')
-    await act(async () => { add.click(); await Promise.resolve() })
-    expect(el.querySelector('[data-testid="override-project-select"]')).toBeTruthy()
+    expect(el.querySelector('[data-testid="agent-override-chip"]')).toBeNull()
+    expect(el.querySelector('[data-testid="agent-project-select"]')).toBeNull()
+    const inProject = Array.from(el.querySelectorAll('[data-testid="agent-scope-switch"] button')).find((b) => b.textContent === 'In project') as HTMLElement
+    await act(async () => { inProject.click(); await Promise.resolve() })
+    expect(el.querySelector('[data-testid="agent-project-select"]')).toBeTruthy()
   })
 
   it('the body is edited in DocumentEditorPane (Document mode) and saved as the body, Revert discards it', async () => {
@@ -481,7 +476,7 @@ describe('AgentLibrary config-search focus', () => {
     })
     expect(selectedRow(el)).toBe('debugger')
     expect((el.querySelector('input[placeholder="Filter"]') as HTMLInputElement).value).toBe('')
-    expect(el.textContent).toContain('no open project overlays this agent')
+    expect(el.querySelector('[data-testid="agent-overrides-row"]')).toBeNull()
     expect(useConfigSearchFocus.getState()).toMatchObject({ tab: null, id: null })
   })
 

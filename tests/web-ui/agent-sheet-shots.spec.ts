@@ -60,7 +60,13 @@ const FRAMES: Frame[] = [
   { name: 'mcp-powers', testid: 'agent-roster', reference: '1f-mcp-powers.png', setUp: async (page) => { await openSheet('blender-artist')(page); await page.locator('[data-testid="agent-mcp-item"][data-server="blender"] [data-testid="agent-mcp-powers-open"]').click(); await page.getByTestId('agent-mcp-powers').waitFor() } },
   // 1g: an Undecided agent's sheet shows the first-run choice in the gear area.
   { name: 'undecided', testid: 'agent-roster', reference: '1g-undecided-first-run.png', setUp: async (page) => { await openSheet('page-history')(page); await page.getByTestId('agent-undecided-choice').waitFor() } },
-  { name: 'project-override', testid: 'agent-project-override', reference: '1h-project-override.png' },
+  // 1h: builder's sheet in project mode — Global | In project ▾ picks Self, whose overlay overrides the model.
+  { name: 'project-override', testid: 'agent-roster', reference: '1h-project-override.png', setUp: async (page) => {
+    await openSheet('builder')(page)
+    await page.getByRole('button', { name: 'In project' }).click()
+    await page.getByTestId('agent-project-select').selectOption({ label: 'Self' })
+    await page.getByTestId('agent-project-override').waitFor()
+  } },
 ]
 
 let browser: Browser

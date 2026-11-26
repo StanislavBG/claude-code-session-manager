@@ -15,7 +15,7 @@ import { Z } from '../../../lib/zLayers'
 import type { AgentPersona } from '../../../../preload/api'
 import {
   COLORS, COLOR_SWATCH, MoreMenu, RowLabel, ModelSelect, EffortSelect, RunsOnSelect,
-  ProjectOverrideBlock, overrideChipText, toDraft, type Draft, type OpenProject,
+  toDraft, overlayOf, overlayEdit, overlayDiff, type OverlayKeys, type Draft, type OpenProject,
 } from './AgentDetail'
 import { GearPanel } from './GearPanel'
 import { LoadoutFirstRun } from './LoadoutFirstRun'
@@ -194,22 +194,37 @@ export function AgentSheet({
   projects: OpenProject[]
   selected: OpenProject | null
   onSelect: (cwd: string | null) => void
-  onSaveOverride: (patch: { model: string; effort: string }) => void
+  /** Writes the project's whole overlay (absent key = inherits global); an empty overlay removes the file. */
+  onSaveOverride: (overlay: OverlayKeys) => void
 }) {
   const home = useHomeDir()
   const { catalog, loading: catalogLoading, degraded, refresh: refreshCatalog } = useModelCatalog(null)
   const { checking: cliChecking, recheck: recheckClis } = useAgentCliDetect()
-  const [addingOverride, setAddingOverride] = useState(false)
+  const [projectMode, setProjectMode] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const path = !isNew && saved ? saved.path : `${home ?? '~'}/.claude/agents/${obj.name}.md`
   const canRevertOrSave = dirty || isNew
-  const overrides = saved && !isNew ? saved.overrideDetails ?? [] : []
-  const showOverridePicker = !isNew && !!saved && (addingOverride || selected !== null)
+  const inProject = !isNew && !!saved && (projectMode || selected !== null)
+  const detail = inProject && selected ? saved?.overrideDetails?.find((d) => d.cwd === selected.cwd) : undefined
+  const fullBody = !!detail?.bodyOverridden
+  const overlay: OverlayKeys = detail ? overlayOf(detail) : {}
+  const globalDraft = saved ? toDraft(saved) : obj
+  const projectView: Draft = { ...globalDraft, ...overlay }
+  const view = inProject && selected ? projectView : obj
+  const diffs = inProject && selected ? overlayDiff(globalDraft, overlay) : []
+  const edit = (patch: Partial<Draft>) => { if (selected && !fullBody && !busy) onSaveOverride(overlayEdit(overlay, patch)) }
+  const reset = (keys: ReadonlyArray<keyof OverlayKeys>) => {
+    const next = { ...overlay }
+    for (const k of keys) delete next[k]
+    onSaveOverride(next)
+  }
+  const editing = inProject && selected ? edit : set
+  const overridden = (k: keyof OverlayKeys) => diffs.some((d) => d.keys.includes(k))
   const changes = canRevertOrSave ? changedFields(obj, saved, isNew) : []
   const state: LoadoutState = saved && !isNew ? loadoutOf(saved) : 'undecided'
-  const servers = new Set(obj.tools.map((t) => /^mcp__(.+?)__/.exec(t)?.[1]).filter(Boolean)).size
-  const builtins = obj.tools.filter((t) => t !== '*' && !t.startsWith('mcp__')).length
-  const counts = obj.tools.length === 0 ? 'every tool' : `${builtins} tools${servers ? ` · ${servers} server${servers > 1 ? 's' : ''}` : ''}`
+  const servers = new Set(view.tools.map((t) => /^mcp__(.+?)__/.exec(t)?.[1]).filter(Boolean)).size
+  const builtins = view.tools.filter((t) => t !== '*' && !t.startsWith('mcp__')).length
+  const counts = view.tools.length === 0 ? 'every tool' : `${builtins} tools${servers ? ` · ${servers} server${servers > 1 ? 's' : ''}` : ''}`
 
   useEffect(() => {
     if (!editorOpen) return
@@ -233,12 +248,6 @@ export function AgentSheet({
     ...(!isNew ? [{ label: 'Delete agent…', testId: 'agent-detail-delete', danger: true, disabled: busy, onSelect: () => setConfirmDelete(true) }] : []),
   ]
 
-  const overrideNote = overrides.length === 0
-    ? (isNew ? 'save first to see project overrides.' : 'no open project overlays this agent — the global definition applies everywhere.')
-    : overrides.length === 1
-      ? `a local copy in ${compactPath(overrides[0].cwd, home)}/.claude/agents/ wins there`
-      : "each project's local copy in its .claude/agents/ wins there"
-
   const onKeyDown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault()
@@ -246,7 +255,6 @@ export function AgentSheet({
     }
   }
 
-  const inProject = showOverridePicker
   const previewLines = obj.body.split('\n').slice(0, 9).join('\n')
 
   return (
@@ -284,6 +292,22 @@ export function AgentSheet({
             <div role="group" aria-label="Scope" data-testid="agent-scope-switch" className="inline-flex items-center p-0.5 rounded bg-bg-hi border border-line">
               {(['Global', 'In project'] as const).map((label) => {
                 const on = (label === 'In project') === inProject
+                if (label === 'In project' && on) {
+                  return (
+                    <select
+                      key={label}
+                      data-testid="agent-project-select"
+                      aria-label="Project"
+                      value={selected?.cwd ?? ''}
+                      onChange={(e) => onSelect(e.target.value || null)}
+                      disabled={busy}
+                      className="px-2 py-1 text-[12px] rounded bg-bg text-fg font-medium shadow-sm border-0 max-w-[180px]"
+                    >
+                      <option value="">In project ▾</option>
+                      {projects.map((p) => <option key={p.cwd} value={p.cwd}>{p.name}</option>)}
+                    </select>
+                  )
+                }
                 return (
                   <button
                     key={label}
@@ -291,8 +315,8 @@ export function AgentSheet({
                     aria-pressed={on}
                     disabled={label === 'In project' && (isNew || !saved)}
                     onClick={() => {
-                      if (label === 'In project') setAddingOverride(true)
-                      else { setAddingOverride(false); onSelect(null) }
+                      if (label === 'In project') setProjectMode(true)
+                      else { setProjectMode(false); onSelect(null) }
                     }}
                     className={`px-2.5 py-1 text-[12px] rounded disabled:opacity-40 ${on ? 'bg-bg text-fg font-medium shadow-sm' : 'text-fg-dim hover:text-fg'}`}
                   >
@@ -324,14 +348,36 @@ export function AgentSheet({
           </div>
         )}
 
+        {inProject && !selected ? (
+          <div data-testid={projects.length === 0 ? 'project-override-none' : 'project-override-unselected'} className="flex-1 px-9 py-6 text-[13px] text-fg-dim">
+            {projects.length === 0
+              ? 'No open project tabs — open a project tab to override this agent for it.'
+              : `Pick an open project (In project ▾) to see ${obj.name} as it runs there and override its model, effort, gear or environment for that project only.`}
+          </div>
+        ) : (
         <div data-testid="agent-detail-body" className="flex-1 shrink-0 grid grid-cols-[minmax(0,1fr)_340px] gap-4 px-9 py-6 items-start">
           <div className="flex flex-col gap-4 min-w-0">
+            {inProject && selected && (
+              <section data-testid="agent-project-override" className="px-[18px] py-3.5 rounded-[14px] border border-accent/40 bg-accent/5 flex items-center gap-3">
+                <span className="px-2 py-0.5 rounded bg-accent text-white text-[10.5px] font-bold uppercase tracking-wide">{selected.name} overlay</span>
+                <span className="flex-1 text-[13px] text-fg">
+                  Showing <strong>{obj.name}</strong> as it runs in <strong>{selected.name}</strong>. {diffs.length ? `This project overrides ${diffs.map((d) => d.label).join(', ')} — everything else comes from the global sheet.` : 'Nothing is overridden yet — everything comes from the global sheet.'}
+                </span>
+                {fullBody && <span data-testid="project-override-fullbody" className="text-[11px] text-amber-400">full-body override — edit its file directly</span>}
+                {detail && (
+                  <button type="button" data-testid="agent-reset-all" disabled={busy} onClick={() => onDropOverride(selected.cwd, selected.name)} className="h-8 px-3 rounded-[10px] bg-bg border border-line text-[12.5px] font-medium text-fg hover:border-rule disabled:opacity-40">
+                    Reset to global
+                  </button>
+                )}
+              </section>
+            )}
             <ConfigCard label="DESCRIPTION" labelNote="CLAUDE READS THIS TO PICK THE AGENT">
               <textarea
                 data-testid="agent-detail-description"
                 aria-label="Description"
                 rows={2}
                 value={obj.description}
+                readOnly={inProject}
                 // A description is one frontmatter line: Enter never inserts a break.
                 onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault() }}
                 onChange={(e) => set({ description: e.target.value.replace(/\r?\n/g, ' ') })}
@@ -343,8 +389,17 @@ export function AgentSheet({
             <section data-testid="agent-runtime-card" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line flex flex-col gap-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Stats</div>
               <div data-testid="agent-runtime-row" className="grid grid-cols-3 gap-4">
-                <ModelSelect value={obj.model} onChange={(v) => set({ model: v })} />
-                <EffortSelect value={obj.effort} model={obj.model} onChange={(v) => set({ effort: v })} />
+                <div className="min-w-0" data-overridden={overridden('model') ? 'true' : undefined}>
+                  {inProject && overridden('model') && <div data-testid="agent-overridden-model" className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-accent">overridden · global: {globalDraft.model}</div>}
+                  <ModelSelect value={view.model} onChange={(v) => editing({ model: v })} />
+                </div>
+                <div className="min-w-0" data-overridden={overridden('effort') ? 'true' : undefined}>
+                  {inProject && overridden('effort') && <div data-testid="agent-overridden-effort" className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-accent">overridden · global: {globalDraft.effort}</div>}
+                  <EffortSelect value={view.effort} model={view.model} onChange={(v) => editing({ effort: v })} />
+                </div>
+                {inProject ? (
+                  <div className="min-w-0 text-[13px] font-mono text-fg-dim" data-testid="agent-runs-on-readonly">runs on {obj.agentCli} <span className="text-fg-faint">(global)</span></div>
+                ) : (
                 <div className="min-w-0 flex flex-col gap-1.5">
                   <RunsOnSelect value={obj.agentCli} onChange={(id) => set({ agentCli: id, agentCliModel: '' })} />
                   {obj.agentCli !== 'claude' && (
@@ -359,52 +414,18 @@ export function AgentSheet({
                     />
                   )}
                 </div>
+                )}
               </div>
               <div data-testid="agent-effort-pips" aria-hidden="true" className="flex items-center gap-1">
                 {EFFORT_PIPS.map((l, i) => (
-                  <span key={l} className={`w-1.5 h-1.5 rounded-full ${i <= EFFORT_PIPS.indexOf(obj.effort) ? 'bg-fg-dim' : 'bg-line'}`} />
+                  <span key={l} className={`w-1.5 h-1.5 rounded-full ${i <= EFFORT_PIPS.indexOf(view.effort) ? 'bg-fg-dim' : 'bg-line'}`} />
                 ))}
               </div>
             </section>
 
-            <section className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line flex flex-col gap-4">
-              <div className="flex items-start gap-3" data-testid="agent-overrides-row">
-                <RowLabel>project overrides</RowLabel>
-                <div className="flex-1 min-w-0 flex flex-wrap items-center gap-2 pt-0.5">
-                  {overrides.map((d) => (
-                    <span
-                      key={d.cwd}
-                      data-testid="agent-override-chip"
-                      title={`${compactPath(d.cwd, home)}/.claude/agents/${saved!.name}.md`}
-                      className="inline-flex items-center gap-1.5 bg-bg-elev border border-line rounded-md px-2 py-0.5 text-[12px] font-mono text-fg-dim"
-                    >
-                      <strong className="font-sans font-semibold text-fg">{d.project}</strong>
-                      {overrideChipText(d)}
-                      <button onClick={() => onDropOverride(d.cwd, d.project)} title="Drop the local copy" className="text-fg-faint hover:text-fg">×</button>
-                    </span>
-                  ))}
-                  <span className={`text-[12px] text-fg-faint ${overrides.length === 0 ? 'italic' : ''}`}>{overrideNote}</span>
-                  {!isNew && saved && !showOverridePicker && (
-                    <button type="button" data-testid="agent-override-add" onClick={() => setAddingOverride(true)} className="text-[12px] font-medium text-accent hover:underline">
-                      + Add override
-                    </button>
-                  )}
-                </div>
-              </div>
-              {showOverridePicker && saved && (
-                <ProjectOverrideBlock
-                  saved={saved}
-                  projects={projects}
-                  selected={selected}
-                  onSelect={onSelect}
-                  busy={busy}
-                  onSave={onSaveOverride}
-                  onClose={() => { setAddingOverride(false); onSelect(null) }}
-                />
-              )}
-
+            <section hidden={inProject} className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line flex flex-col gap-4">
               {/* Name / colour / tags: still editable, folded away. A new draft opens it (its name is the one thing it must set). */}
-              <details data-testid="agent-details" open={isNew || undefined} className="group border-t border-line pt-3">
+              <details data-testid="agent-details" open={isNew || undefined} hidden={inProject} className="group">
                 <summary className="cursor-pointer select-none flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">
                   <span>details</span>
                   <span className="normal-case tracking-normal font-normal font-mono text-fg-dim flex items-center gap-1.5">
@@ -479,14 +500,14 @@ export function AgentSheet({
                 <span className="flex-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">
                   Personality &amp; grounding <span className="font-serif italic normal-case tracking-normal font-normal text-fg-dim">the persona body</span>
                 </span>
-                <button
+                {!inProject && <button
                   type="button"
                   data-testid="agent-open-editor"
                   onClick={() => setEditorOpen(true)}
                   className="h-8 px-3 rounded-[10px] bg-bg border border-line text-[12.5px] font-medium text-fg hover:border-rule"
                 >
                   Open editor
-                </button>
+                </button>}
               </div>
               <pre data-testid="agent-personality-preview" className="mt-2 max-h-44 overflow-hidden whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-fg-dim">
                 {previewLines || 'No personality text yet.'}
@@ -496,12 +517,35 @@ export function AgentSheet({
 
           <div className="flex flex-col gap-4 min-w-0">
             {state === 'undecided' && !isNew && saved && <LoadoutFirstRun obj={obj} savedTools={saved.tools} set={set} />}
-            <GearPanel obj={obj} set={set} />
-            <ConstraintsPanel obj={obj} set={set} />
+            {inProject && selected && (
+              <section data-testid="agent-changed-card" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Changed in {selected.name} <span className="font-normal">{diffs.length}</span></div>
+                {diffs.length === 0 && <div className="mt-2 text-[12px] italic text-fg-faint">Same as global.</div>}
+                {diffs.map((d) => (
+                  <div key={d.label} data-testid={`agent-overridden-${d.label}`} className="mt-2 pt-2 border-t border-line first:border-0 first:pt-0">
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 text-[12.5px] font-mono text-fg">{d.label}</span>
+                      <span className="px-1.5 rounded bg-accent/10 text-accent text-[10px] font-semibold uppercase">overridden</span>
+                      <button type="button" data-testid={`agent-reset-${d.label}`} disabled={busy || fullBody} onClick={() => reset(d.keys)} className="text-[11.5px] text-accent hover:underline disabled:opacity-40">Reset to global</button>
+                    </div>
+                    {d.lines.map((l) => <div key={l} className="text-[12px] font-mono text-fg-dim">{l}</div>)}
+                  </div>
+                ))}
+              </section>
+            )}
+            <GearPanel obj={view} set={editing} />
+            <ConstraintsPanel obj={view} set={editing} />
             <AppliesToCard />
           </div>
         </div>
 
+        )}
+
+        {inProject ? (
+          <div data-testid="agent-project-bar" role="status" className="sticky bottom-0 shrink-0 px-9 py-3 border-t border-line bg-bg-elev text-[13px] text-fg-dim">
+            {selected ? `Project edits write on change to ${compactPath(selected.cwd, home)}/.claude/agents/${obj.name}.md · apply to new sessions in ${selected.name}` : 'Choose a project — project edits write on change'}
+          </div>
+        ) : (
         <div
           data-testid="agent-save-bar"
           role="status"
@@ -531,6 +575,7 @@ export function AgentSheet({
             Save <span className="font-normal opacity-80 text-[11px]">Ctrl S</span>
           </button>
         </div>
+        )}
       </div>
 
       {editorOpen && (

@@ -106,6 +106,7 @@ test('an open Epic record joins session, events, jobs, needs-input and busy', as
     createdAt: '2026-11-01T00:00:00.000Z',
     completedAt: null,
     verdicts: [],
+    planReviews: [],
   });
 
   // chatBusy flips to working; needsInput from the exchanges log.
@@ -542,4 +543,15 @@ test('source.startedBy: valid is returned, absent and malformed read as null', a
   expect((await get('sb-1')).source.startedBy).toEqual(good);
   expect((await get('sb-2')).source.startedBy).toBeNull();
   expect((await get('sb-3')).source.startedBy).toBeNull();
+});
+
+test('planReviews: populated from plan-records/<epic>/*.plan-review.json, [] when none', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  setup(cwd, [session('e-pr', cwd), session('e-nopr', cwd)]);
+  const rec0 = { epicId: 'e-pr', validateSlug: 'validate-x', round: 1, reviews: [{ runId: 'r1' }], release: null };
+  writeVerdictFile(cwd, 'e-pr', 'validate-x.plan-review.json', rec0);
+  writeVerdictFile(cwd, 'e-pr', 'broken.plan-review.json', '{ nope');
+  const rec = await getEpicRecord(cwd, opts(cwd, { id: 'e-pr' }));
+  expect(rec.planReviews).toEqual([rec0]);
+  expect((await getEpicRecord(cwd, opts(cwd, { id: 'e-nopr' }))).planReviews).toEqual([]);
 });

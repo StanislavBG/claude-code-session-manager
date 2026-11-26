@@ -94,6 +94,7 @@ const CONTRACT = deepFreeze({
   epicRecordFields: [
     'epicId', 'cwd', 'title', 'goal', 'tag', 'agentType', 'status', 'state', 'phase', 'blocked', 'prds',
     'verified', 'refuted', 'unvalidated', 'externalRef', 'source', 'createdAt', 'completedAt', 'verdicts',
+    'planReviews',
   ],
   receiptFields: ['jobs', 'chat'],
   epicStateChangedFields: ['at', 'kind', 'cwd', 'epicId', 'from', 'to', 'blockedKind', 'externalRef'],
@@ -170,6 +171,7 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
   // then usage_hold_get: the MCP tool over GET /admin/usage-hold (scheduler-mcp-server.cjs).
   // then POST /admin/projects/create (feedback-remote/projectCreate.cjs); no tool entry, mirroring macro_run.
   // then POST /admin/services/pair-local + /confirm (feedback-remote/servicePairLocalRoutes.cjs).
+  // then 'planReviews' on epicRecordFields (stored plan-review records + release from plan-records/*.plan-review.json).
   1: Object.freeze([
     '5a56abbb70184ff4a34346a5c6da4c5e6edbd756b54573c199b812d3f5a04101',
     '7383ff32c80561b1b2c505a78a1e8313ae2851bdc6e8fce6c6a88e1ab119bf5a',
@@ -182,6 +184,7 @@ const CONTRACT_FINGERPRINTS = Object.freeze({
     '9490d3b89b9468f20666553747b3d4be3558e78ffcb5b79d63397cfa4ddd5235',
     '799f062f9dd858b81afa20cf2153357e8fc7a3be2c748573d0f4c12b430d6683',
     'feaad10fabd300203314318c5484a8aed9b1cef496d2fbfb48464b06ff64628a',
+    'e0ee3a1a0970e44c52b336d935ac59d05c4bfba3b4f3c602222292fbb5c77174',
   ]),
 });
 

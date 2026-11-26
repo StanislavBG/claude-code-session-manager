@@ -15381,6 +15381,7 @@ module.exports = {
   __harvestJobPlanRecords: harvestJobPlanRecords,
   __driveUpgradeDrain: driveUpgradeDrain,
   __clearStaleDrainAtBoot: clearStaleDrainAtBoot,
+  __getDrainActive: () => drainActive,
   __setRestartHandlerForTests: setRestartHandler,
 };
 

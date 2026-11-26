@@ -71,3 +71,30 @@ test('a request predating boot is aborted by one driveUpgradeDrain pass', async 
   const state = await scheduler._mutateForTests((s) => ({ drain: s.drain ?? null }));
   expect(state?.drain ?? null).toBeNull();
 });
+
+function writeRequestAt(offsetMs) {
+  const requestedAt = new Date(Date.parse(scheduler.SCHEDULER_BOOTED_AT) + offsetMs).toISOString();
+  fs.writeFileSync(schedulerPaths.restartRequestPath(), JSON.stringify({ reason: 't', requestedBy: 'test', requestedAt }));
+}
+
+test('clearStaleDrainAtBoot with an active drain and a request predating boot retires it and clears the drain', async () => {
+  writeRequestAt(-60_000);
+  const drain = { active: true, startedAt: new Date().toISOString() };
+  await scheduler._mutateForTests((s) => { s.drain = drain; return {}; });
+  await scheduler.__clearStaleDrainAtBoot({ drain });
+  expect(fs.existsSync(schedulerPaths.restartRequestPath())).toBe(false);
+  const state = await scheduler._mutateForTests((s) => ({ drain: s.drain ?? null }));
+  expect(state?.drain ?? null).toBeNull();
+  expect(scheduler.__getDrainActive()).toBe(false);
+});
+
+test('clearStaleDrainAtBoot with an active drain and a request after boot keeps both', async () => {
+  writeRequestAt(60_000);
+  const drain = { active: true, startedAt: new Date().toISOString() };
+  await scheduler._mutateForTests((s) => { s.drain = drain; return {}; });
+  await scheduler.__clearStaleDrainAtBoot({ drain });
+  expect(fs.existsSync(schedulerPaths.restartRequestPath())).toBe(true);
+  expect(scheduler.__getDrainActive()).toBe(true);
+  await scheduler._mutateForTests((s) => { s.drain = null; return {}; });
+  await scheduler.__clearStaleDrainAtBoot({ drain: null });
+});

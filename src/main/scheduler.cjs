@@ -12482,6 +12482,8 @@ async function runGateShadow(job) {
   // still complete when every HEAD failure already failed at the job's base
   // commit. The base run is memoized per HEAD on gateShadow.baseline.
   let baselineDecision = null;
+  const runId = job.runId || reviewLadder.resolveRunId(job);
+  const verdictsPath = runId ? path.join(schedulerPaths.runsDir(), runId, `${job.slug}.verdicts.json`) : null;
   if (
     job.verifierVerdict === 'sentinel_fail'
     && outcome.status === 'red' && definitive
@@ -12529,26 +12531,18 @@ async function runGateShadow(job) {
       }
     }
     // The run's recorded FAIL reason (read-only; runVerify owns the sidecar).
-    const reasonRunId = job.runId || reviewLadder.resolveRunId(job);
-    const sidecar = reasonRunId
-      ? readJsonOrSync(path.join(schedulerPaths.runsDir(), reasonRunId, `${job.slug}.verdicts.json`), null)
-      : null;
+    const sidecar = verdictsPath ? readJsonOrSync(verdictsPath, null) : null;
     const failReason = sidecar && typeof sidecar.reason === 'string' ? sidecar.reason : '';
     baselineDecision = decideBaselineAuthority({ job, headOutcome: outcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable, failReason });
     gateShadow.baseline = { head: headBefore, base: job.guardHeadBefore, outcome: baseOutcome, setup: baseSetup, ...baselineDecision };
   }
 
-  const runId = job.runId || reviewLadder.resolveRunId(job);
-  if (runId) {
-    const verdictsPath = path.join(schedulerPaths.runsDir(), runId, `${job.slug}.verdicts.json`);
-    // Read-merge (single-writer law: runVerify owns the sidecar's other keys).
-    // Only merge into an existing run dir — never conjure one.
-    if (fs.existsSync(path.dirname(verdictsPath))) {
-      let existing = {};
-      try { existing = JSON.parse(fs.readFileSync(verdictsPath, 'utf8')) || {}; } catch { /* absent/unparseable → fresh */ }
-      const criteriaRecord = gateShadow.criteriaChecks ? { criteriaChecks: { head: headBefore, ranAt: gateShadow.ranAt, results: gateShadow.criteriaChecks } } : {};
-      try { config.writeJsonSync(verdictsPath, { ...existing, gateShadow, ...criteriaRecord }); } catch { /* best-effort */ }
-    }
+  // Read-merge (single-writer law: runVerify owns the sidecar's other keys).
+  // Only merge into an existing run dir — never conjure one.
+  if (verdictsPath && fs.existsSync(path.dirname(verdictsPath))) {
+    const existing = readJsonOrSync(verdictsPath, {}) || {}; // absent/unparseable → fresh
+    const criteriaRecord = gateShadow.criteriaChecks ? { criteriaChecks: { head: headBefore, ranAt: gateShadow.ranAt, results: gateShadow.criteriaChecks } } : {};
+    try { config.writeJsonSync(verdictsPath, { ...existing, gateShadow, ...criteriaRecord }); } catch { /* best-effort */ }
   }
 
   const headShort = headBefore ? headBefore.slice(0, 7) : 'unknown';

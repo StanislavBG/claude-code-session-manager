@@ -81,6 +81,8 @@ test('clearStaleDrainAtBoot with an active drain and a request predating boot re
   writeRequestAt(-60_000);
   const drain = { active: true, startedAt: new Date().toISOString() };
   await scheduler._mutateForTests((s) => { s.drain = drain; return {}; });
+  scheduler.__setDrainActiveForTests(true);
+  expect(scheduler.__getDrainActive()).toBe(true);
   await scheduler.__clearStaleDrainAtBoot({ drain });
   expect(fs.existsSync(schedulerPaths.restartRequestPath())).toBe(false);
   const state = await scheduler._mutateForTests((s) => ({ drain: s.drain ?? null }));

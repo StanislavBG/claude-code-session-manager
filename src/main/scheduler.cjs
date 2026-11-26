@@ -15382,6 +15382,7 @@ module.exports = {
   __driveUpgradeDrain: driveUpgradeDrain,
   __clearStaleDrainAtBoot: clearStaleDrainAtBoot,
   __getDrainActive: () => drainActive,
+  __setDrainActiveForTests: (v) => { drainActive = Boolean(v); },
   __setRestartHandlerForTests: setRestartHandler,
 };
 

@@ -369,8 +369,8 @@ test('summary schema rejects pipes, backticks, newlines and bad lengths', () => 
   expect(() => s.parse('A fine summary line.')).not.toThrow();
 });
 
-test('catalog has 53 entries and every summary is unique', () => {
-  expect(MCP_TOOL_CATALOG).toHaveLength(53);
+test('catalog has 54 entries and every summary is unique', () => {
+  expect(MCP_TOOL_CATALOG).toHaveLength(54);
   const summaries = MCP_TOOL_CATALOG.map((e) => e.summary);
   expect(new Set(summaries).size).toBe(summaries.length);
 });
@@ -747,4 +747,59 @@ test('feedback_reply notes describe release.commits claims and the placeholder r
   expect(notes).toMatch(/unfilled placeholder/);
   expect(notes).toMatch(/done reply that names a Session Manager version must carry release\.commits/);
   expect(notes).toMatch(/never hand-type/i);
+});
+
+// ── service_pair_local (same-machine service pairing, no window step) ──
+describe('service_pair_local handler', () => {
+  const { handleCallTool } = require(path.join(__dirname, '../../../../scripts/scheduler-mcp-server.cjs'));
+  const bridge = require('../feedback-remote/serviceStdioBridge.cjs');
+  const { SERVICE_TOOL_NAMES } = require('../feedback-remote/servicePairings.cjs');
+  const ENV = ['SM_CHAT_SESSION_ID', 'SM_SCHEDULER_JOB_SLUG', 'SM_SCHEDULER_JOB_MCP_TOOLS', 'SM_KG_INTERNAL'];
+  let saved; let orig;
+  beforeEach(() => {
+    saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
+    for (const k of ENV) delete process.env[k];
+    process.env.SM_CHAT_SESSION_ID = 'chat-1';
+    orig = bridge.pairLocal;
+  });
+  afterEach(() => {
+    bridge.pairLocal = orig;
+    for (const k of ENV) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  });
+  const args = { stateDir: '/tmp/state', name: 'Kiln', homeCwd: '/tmp/kiln', tools: ['feedback_list_projects'], projectRoot: '/tmp/kiln' };
+  const call = (a) => handleCallTool({ params: { name: 'service_pair_local', arguments: a } });
+
+  test('catalog + schema', () => {
+    const tool = TOOLS.find((t) => t.name === 'service_pair_local');
+    expect(tool.inputSchema.required).toEqual(['stateDir', 'name', 'homeCwd', 'tools']);
+    expect(tool.inputSchema.properties.tools.items.enum).toEqual([...SERVICE_TOOL_NAMES]);
+    for (const s of ['THIS machine', 'no window step', 'Web remote must be on', 'App Settings → Web remote']) {
+      expect(tool.description).toContain(s);
+    }
+  });
+
+  test('forwards inputs to pairLocal and returns the service', async () => {
+    let seen;
+    bridge.pairLocal = async (o) => { seen = o; return { ok: true, service: { id: 's1' } }; };
+    const r = await call(args);
+    expect(r.isError).toBeFalsy();
+    expect(seen).toEqual(args);
+    expect(JSON.parse(r.content[0].text)).toEqual({ ok: true, service: { id: 's1' } });
+  });
+
+  test('maps a refusal to isError', async () => {
+    bridge.pairLocal = async () => ({ ok: false, error: 'web remote is off' });
+    const r = await call(args);
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain('web remote is off');
+  });
+
+  test('refused inside a scheduled job without calling pairLocal', async () => {
+    let called = false;
+    bridge.pairLocal = async () => { called = true; return { ok: true, service: {} }; };
+    process.env.SM_SCHEDULER_JOB_SLUG = 'job-x';
+    const r = await call(args);
+    expect(r.isError).toBe(true);
+    expect(called).toBe(false);
+  });
 });

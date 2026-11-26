@@ -1,6 +1,6 @@
 # claude-code-session-manager
 
-> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->53<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills.
+> A free desktop app for Claude Code. Each piece of work is a session with its own agent, mission and copy of the repo. Queued work runs on its own, within your plan's usage limits. It is checked before it counts as done. Agents drive the app through an MCP server with <!-- gen:mcp-tool-count -->54<!-- /gen:mcp-tool-count --> tools and a plugin with <!-- gen:skill-count -->4<!-- /gen:skill-count --> skills.
 
 ## Facts
 

@@ -402,6 +402,25 @@ const MCP_TOOL_CATALOG = [
       + 'refused): write `{version}`, never hand-type a version.',
   },
   {
+    name: 'service_pair_local',
+    group: 'feedback',
+    purpose: 'Pair a service that runs on THIS machine with Session Manager in one call, with no window step: '
+      + 'the same pairing as `service pair-local`, through the loopback admin API. Returns the paired service (never its key).',
+    summary: 'Pair a same-machine service with Session Manager, no window step.',
+    whenToUse: 'Use when the human asked you to pair a service running on this same machine (for example Kiln). '
+      + 'Give the absolute stateDir the service keeps its pairing in, a name, its homeCwd, and the tools it may call.',
+    whenNotToUse: 'Do not use for a service on another machine (that needs the window pairing). Web remote must be on or the '
+      + 'call is refused. Refused inside a scheduled job and outside a Session Manager chat or terminal session. '
+      + 'The pairing can be revoked in App Settings → Web remote.',
+    exampleArgs: {
+      stateDir: '/home/bilko/.local/state/kiln',
+      name: 'Kiln',
+      homeCwd: '/home/bilko/Projects/kiln',
+      tools: ['feedback_list_projects', 'feedback_open_session'],
+    },
+    notes: 'Result: { ok: true, service } or an error with the route\'s refusal text. Report only what was paired; the human revokes it in App Settings → Web remote.',
+  },
+  {
     name: 'project_home_write',
     group: 'project-home',
     purpose: "ALIAS of project_page_write for the Overview page: write this project's Project Home Overview page — ONE self-contained HTML document — to "

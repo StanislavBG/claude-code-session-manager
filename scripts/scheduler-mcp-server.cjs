@@ -78,6 +78,7 @@ const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription, FIXES_INPUT_SCHEMA } 
 const {
   FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA, FEEDBACK_OPEN_SESSION_INPUT_SCHEMA, MACRO_LIST_INPUT_SCHEMA, EPIC_GET_INPUT_SCHEMA,
 } = require('../src/main/lib/feedback-remote/serviceMcpTools.cjs');
+const { SERVICE_TOOL_NAMES } = require('../src/main/lib/feedback-remote/servicePairings.cjs');
 const { EPIC_OUTSIDE_STATES } = require('../src/main/lib/epic/epicOutsideState.cjs');
 const { KINDS: ARTIFACT_KINDS } = require('../src/main/lib/epic/artifactStore.cjs');
 const { REVIEW_TEXT_MAX, REVIEW_IMAGES_MAX, REVIEW_IMAGE_BYTES_MAX } = require('../src/main/lib/project-pages/videoReview.cjs');
@@ -964,6 +965,25 @@ const TOOLS = [
     name: 'feedback_open_session',
     description: descriptionFor('feedback_open_session'),
     inputSchema: FEEDBACK_OPEN_SESSION_INPUT_SCHEMA,
+  },
+  {
+    name: 'service_pair_local',
+    description: descriptionFor('service_pair_local'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        stateDir: { type: 'string', description: 'Absolute path of the directory where the service keeps its pairing state.' },
+        name: { type: 'string', description: 'Display name of the service.' },
+        homeCwd: { type: 'string', description: 'Absolute path of the service\'s home project.' },
+        tools: {
+          type: 'array', minItems: 1,
+          items: { type: 'string', enum: [...SERVICE_TOOL_NAMES] },
+          description: 'The Session Manager tools the service may call.',
+        },
+        projectRoot: { type: 'string', description: 'Optional: the service\'s project root.' },
+      },
+      required: ['stateDir', 'name', 'homeCwd', 'tools'],
+    },
   },
   {
     name: 'feedback_reply',
@@ -2122,6 +2142,22 @@ async function handleCallTool(request) {
         }
       }
       return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };
+    }
+    if (name === 'service_pair_local') {
+      const refused = humanSessionRefusal('refused: service_pair_local runs only in a Session Manager chat or terminal session where the human asked for the pairing; '
+        + 'say in your final result which service the human should pair.');
+      if (refused) return refused;
+      if (process.env.SM_KG_INTERNAL === '1') return errorResult('refused: service_pair_local is not available to internal headless runs.');
+      for (const key of ['stateDir', 'name', 'homeCwd']) {
+        if (!args || typeof args[key] !== 'string' || !args[key].trim()) return errorResult(`missing required argument: ${key}`);
+      }
+      if (!path.isAbsolute(args.stateDir)) return errorResult('stateDir must be an absolute path');
+      if (!Array.isArray(args.tools) || args.tools.length === 0) return errorResult('missing required argument: tools');
+      const opts = { stateDir: args.stateDir, name: args.name, homeCwd: args.homeCwd, tools: args.tools };
+      if (typeof args.projectRoot === 'string' && args.projectRoot.trim()) opts.projectRoot = args.projectRoot;
+      const r = await require('../src/main/lib/feedback-remote/serviceStdioBridge.cjs').pairLocal(opts);
+      if (!r || r.ok !== true) return errorResult(String((r && r.error) || 'pairing failed'));
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, service: r.service }) }] };
     }
     if (name === 'feedback_reply') {
       // Only the Epic's own interactive session can reply: a scheduled job has

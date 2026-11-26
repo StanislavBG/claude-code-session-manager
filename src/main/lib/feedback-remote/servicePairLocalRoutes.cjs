@@ -38,7 +38,11 @@ function registerAdminRoute(adminHttp, { webRemote } = {}) {
     sas: z.string().regex(/^\d{6}$/),
   }).strict();
 
-  /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res @param {z.ZodTypeAny} schema */
+  /**
+   * @template {z.ZodTypeAny} S
+   * @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res @param {S} schema
+   * @returns {Promise<z.infer<S> | null>}
+   */
   async function parse(req, res, schema) {
     const raw = await readBody(req);
     let json;

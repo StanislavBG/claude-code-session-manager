@@ -26,6 +26,7 @@ fails when it is out of date. For one tool in depth, call `session_manager_help`
 | `feedback_list_projects` | feedback | — | List the other projects on this machine that can take feedback. |
 | `feedback_open_session` | feedback | `toCwd`, `fromCwd`, `title`, `motivation`, `acceptanceCriteria`, `body` | Hand a finding to another project as a proposed session there. |
 | `feedback_reply` | feedback | `message`, `outcome` | Answer the project that sent this session its feedback. |
+| `service_pair_local` | feedback | `stateDir`, `name`, `homeCwd`, `tools` | Pair a same-machine service with Session Manager, no window step. |
 | `project_home_write` | project-home | `html` | Write the Overview page of Project Home (same as project_page_write). |
 | `project_page_write` | project-home | `pageId`, `title`, one of `html` / `htmlPath` | Write one HTML knowledge page for Project Home. |
 | `project_matrix_read` | project-home | — | Read the saved competitor feature matrix and its schema. |

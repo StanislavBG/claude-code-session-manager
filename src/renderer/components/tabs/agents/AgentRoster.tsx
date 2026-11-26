@@ -24,9 +24,11 @@ export function loadoutOf(p: AgentPersona): LoadoutState {
   return (STATES as readonly string[]).includes(v ?? '') ? (v as LoadoutState) : 'undecided'
 }
 
-/** Needs-a-decision first (Undecided), then everyone else by name. */
+const RANK: Record<LoadoutState, number> = { undecided: 0, unbound: 1, equipped: 2, bare: 3 }
+
+/** Needs-a-decision first: Undecided → Unbound → Equipped → Bare, then by name. */
 export function sortRoster(list: readonly AgentPersona[]): AgentPersona[] {
-  const rank = (p: AgentPersona) => (loadoutOf(p) === 'undecided' ? 0 : 1)
+  const rank = (p: AgentPersona) => RANK[loadoutOf(p)]
   return [...list].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
 }
 
@@ -66,6 +68,17 @@ function summaryOf(p: AgentPersona, state: LoadoutState): string {
   return parts.join(' · ')
 }
 
+const GLYPH: Record<Chip, string> = { all: '', undecided: '?', equipped: '●', bare: '○', unbound: '∞' }
+
+function cardSummary(p: AgentPersona, state: LoadoutState): string {
+  if (state === 'undecided') return 'No tools decision on record'
+  if (state === 'unbound') return 'Every tool on this machine, MCP included'
+  if (state === 'bare') return 'Floor only — Agent, Skill, ToolSearch, TodoWrite'
+  return summaryOf(p, state)
+}
+
+const FIELD_WORD: Record<string, string> = { tools: 'gear', mcpServers: 'gear', packs: 'gear' }
+
 function avatarColor(c: string | null): string {
   if (!c) return '#8a7a60'
   return COLOR_SWATCH[c] ?? (c.startsWith('#') ? c : '#8a7a60')
@@ -76,10 +89,13 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 function Pips({ value }: { value: string | null }) {
   const at = value ? EFFORTS.indexOf(value as (typeof EFFORTS)[number]) : -1
   return (
-    <span className="inline-flex items-center gap-0.5" aria-hidden="true">
-      {EFFORTS.map((l, i) => (
-        <span key={l} className={`w-1.5 h-1.5 rounded-full ${i <= at ? 'bg-fg-dim' : 'bg-line'}`} />
-      ))}
+    <span className="inline-flex items-center gap-1.5">
+      <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+        {EFFORTS.map((l, i) => (
+          <span key={l} className={`w-1.5 h-1.5 rounded-full ${i <= at ? 'bg-accent' : 'bg-line'}`} />
+        ))}
+      </span>
+      <span data-testid="agent-row-effort" className="text-fg-dim">{value ?? 'inherit'}</span>
     </span>
   )
 }
@@ -146,9 +162,11 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
     <div data-testid="agent-roster" className="flex flex-col gap-4 p-6 h-full min-h-0 overflow-auto">
       <div className="flex items-end gap-4">
         <div className="flex-1 min-w-0">
-          <div className="text-[10.5px] font-semibold tracking-[0.1em] text-fg-faint uppercase">Claude config · ~/.claude/agents/</div>
-          <h2 className="text-2xl font-semibold text-fg">
-            Agents <span className="font-serif italic font-normal text-fg-dim">the roster</span>
+          <div data-testid="roster-kicker" className="text-[10.5px] font-semibold tracking-[0.1em] text-fg-faint uppercase">Agents folder · ~/.claude/agents/ · {personas.length} personas</div>
+          <h2 className="text-2xl font-semibold text-fg flex items-baseline gap-2.5 flex-wrap">
+            <span>Agents</span>
+            <span className="font-serif italic font-normal text-fg-dim">the roster</span>
+            <span className="text-[13px] font-normal text-fg-dim">The actor a session opens with — “you are acting as …”</span>
           </h2>
         </div>
         <div role="group" aria-label="Agents view" data-testid="agent-view-switch" className="inline-flex items-center p-0.5 rounded bg-bg-hi border border-line">
@@ -162,7 +180,7 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
           ))}
         </div>
         <input
-          value={filter} onChange={(e) => onFilterChange(e.target.value)} placeholder="Filter" aria-label="Filter agents"
+          value={filter} onChange={(e) => onFilterChange(e.target.value)} placeholder="Filter agents, tools, packs" aria-label="Filter agents"
           className="h-9 w-56 px-3 rounded-lg bg-bg-hi border border-line text-sm text-fg placeholder:text-fg-faint"
         />
         <button type="button" onClick={onNew} className="h-9 px-4 rounded-lg bg-accent text-white text-sm font-semibold">+ New</button>
@@ -175,11 +193,11 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
             onClick={() => setChip(c.key)}
             className={`px-3 py-1 rounded-full text-xs border transition-colors ${chip === c.key ? 'bg-fg text-bg border-fg font-semibold' : 'bg-bg-hi text-fg-dim border-line hover:text-fg'}`}
           >
-            {c.label} <span className="opacity-70">{counts[c.key]}</span>
+            {GLYPH[c.key] && <span aria-hidden="true" className="mr-1" style={{ color: c.key === 'undecided' ? HONEY : c.key === 'unbound' ? RUST : undefined }}>{GLYPH[c.key]}</span>}{c.label} <span className="opacity-70">{counts[c.key]}</span>
           </button>
         ))}
         <span className="flex-1" />
-        <span className="text-xs text-fg-faint">Sort: Needs a decision first</span>
+        <span className="text-xs text-fg-faint">Sort <b className="text-fg font-semibold">Needs a decision first</b> ▾</span>
       </div>
 
       {undecided > 0 && (
@@ -188,9 +206,9 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
           className="flex items-center gap-3 px-4 py-2.5 rounded-xl border text-sm"
           style={{ background: 'rgba(211,162,60,.12)', borderColor: 'rgba(211,162,60,.45)', color: HONEY_FG }}
         >
-          <span className="w-2 h-2 rounded-full" style={{ background: HONEY }} />
-          <span className="flex-1 font-medium">{undecided} agent{undecided > 1 ? 's have' : ' has'} no loadout decision</span>
-          <button type="button" data-testid="roster-review" onClick={() => setChip('undecided')} className="font-semibold underline-offset-2 hover:underline">
+          <span aria-hidden="true" className="w-6 h-6 shrink-0 rounded-full border border-dashed flex items-center justify-center text-xs font-semibold" style={{ borderColor: HONEY }}>?</span>
+          <span className="flex-1"><b>{undecided} agent{undecided > 1 ? 's have' : ' has'} no loadout decision.</b> Until you choose, they run with every tool on this machine — in Epic chat, scheduler jobs and Tasks.</span>
+          <button type="button" data-testid="roster-review" onClick={() => setChip('undecided')} className="px-3 py-1.5 rounded-lg bg-accent text-white font-semibold">
             Review the {undecided} →
           </button>
         </div>
@@ -205,8 +223,14 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
             const servers = serversOf(p)
             const bad = servers.filter((s) => failing.has(s))
             const overrides = p.overridingProjects.length
-            const note = bad.length ? `${bad[0]} server failing` : overrides ? `${overrides} project override${overrides > 1 ? 's' : ''}` : null
+            const details = p.overrideDetails ?? []
+            const keys = [...new Set(details.flatMap((d) => d.fields.map((f) => FIELD_WORD[f] ?? f)))]
+            const overrideNote = details.length
+              ? `Overridden in ${details.map((d) => d.project).join(', ')}${keys.length ? ` — ${keys.join(', ')}` : ''}`
+              : overrides ? `Overridden in ${p.overridingProjects.join(', ')}` : null
+            const note = bad.length ? `${bad[0]} is failing — check it in MCP` : overrideNote
             const gear = builtinsOf(p)
+            const packs = (p as AgentPersona & { packs?: string[] }).packs ?? []
             return (
               <button
                 type="button" role="option" aria-selected={false} key={p.name}
@@ -214,7 +238,8 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
                 ref={(el) => { cards.current[i] = el }}
                 onClick={() => onOpen(p.name)}
                 onKeyDown={(e) => onKey(e, i)}
-                className="relative text-left flex flex-col gap-2 p-3.5 pt-4 rounded-2xl bg-bg-hi border border-line overflow-hidden hover:border-fg-faint focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                style={state === 'undecided' ? { borderColor: HONEY } : undefined}
+                className="relative text-left flex flex-col gap-2 p-3.5 pt-4 rounded-2xl bg-bg-hi border overflow-hidden hover:border-fg-faint ${state === 'undecided' ? 'border-dashed' : 'border-line'} focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
               >
                 {state === 'unbound' && (
                   <span
@@ -230,10 +255,11 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
                   >
                     {p.name[0]?.toUpperCase()}
                   </span>
-                  <span className="min-w-0">
+                  <span className="min-w-0 flex-1">
                     <span className="block font-mono text-[13px] font-semibold text-fg truncate">{p.name}</span>
-                    <span className="block font-serif italic text-xs text-fg-dim truncate">{p.description || 'no description'}</span>
+                    <span className="block font-serif italic text-xs text-fg-dim truncate">{p.title || p.description || 'no description'}</span>
                   </span>
+                  <span aria-hidden="true" data-testid="agent-card-menu" className="ml-auto self-start text-fg-faint">…</span>
                 </div>
                 <div className="flex items-center gap-3 text-[10.5px] text-fg-faint">
                   <span className="flex items-center gap-1.5">MODEL <span data-testid="agent-row-model" className="font-mono text-fg-dim">{p.model ?? 'inherit'}</span></span>
@@ -248,21 +274,31 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
                       : undefined
                     }
                   >
-                    {state}
+                    <span aria-hidden="true" className="mr-1">{GLYPH[state]}</span>{state}
                   </span>
-                  <span className="text-fg-dim truncate" style={state === 'undecided' ? { color: HONEY_FG } : undefined}>{summaryOf(p, state)}</span>
+                  <span className="text-fg-dim truncate" style={state === 'undecided' ? { color: HONEY_FG } : undefined}>{cardSummary(p, state)}</span>
                 </div>
-                <div className="flex flex-wrap gap-1 min-h-[20px]">
-                  {gear.slice(0, 4).map((g) => (
-                    <span key={g} className="px-1.5 py-0.5 rounded bg-bg border border-line text-[10.5px] font-mono text-fg-dim">{g}</span>
-                  ))}
-                  {gear.length > 4 && <span className="text-[10.5px] text-fg-faint self-center">+{gear.length - 4}</span>}
-                  {servers.slice(0, 2).map((s) => (
-                    <span key={s} className="px-1.5 py-0.5 rounded bg-bg border border-line text-[10.5px] font-mono text-fg-dim">{s}</span>
-                  ))}
-                </div>
+                {state === 'equipped' && (
+                  <div className="flex flex-wrap gap-1 min-h-[20px]">
+                    {gear.length > 0 && (gear.length <= 4
+                      ? gear.map((g) => <span key={g} className="px-1.5 py-0.5 rounded bg-bg border border-line text-[10.5px] font-mono text-fg-dim">{g}</span>)
+                      : <span className="px-1.5 py-0.5 rounded bg-bg border border-line text-[10.5px] font-mono text-fg-dim">{gear.length} tools</span>)}
+                    {servers.map((s) => (
+                      <span key={s} className="px-1.5 py-0.5 rounded bg-bg border border-line text-[10.5px] font-mono text-fg-dim">{s}</span>
+                    ))}
+                    {packs.map((s) => (
+                      <span key={s} className="px-1.5 py-0.5 rounded bg-bg border border-line text-[10.5px] font-mono text-fg-dim">{s}</span>
+                    ))}
+                  </div>
+                )}
+                {state === 'undecided' && (
+                  <div className="mt-auto pt-2 text-[11.5px] font-semibold text-accent">Choose a loadout →</div>
+                )}
+                {state === 'unbound' && !note && (
+                  <div className="mt-auto pt-2 text-[11px] text-fg-faint">Risk marks and job bans still apply</div>
+                )}
                 {note && (
-                  <div className="mt-auto pt-2 border-t border-line text-[11px] text-fg-faint" style={bad.length ? { color: RUST } : undefined}>{note}</div>
+                  <div data-testid="agent-card-note" className="mt-auto pt-2 text-[11px] text-fg-faint" style={bad.length ? { color: RUST } : undefined}>{note}</div>
                 )}
               </button>
             )

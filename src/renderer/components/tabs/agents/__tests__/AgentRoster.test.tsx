@@ -60,11 +60,18 @@ describe('AgentRoster', () => {
     expect(container.querySelector('[data-testid="roster-banner"]')).toBeNull()
   })
 
-  it('sorts Undecided first, then by name; unbound gets the hatch', async () => {
-    expect(sortRoster(SET).map((p) => p.name)).toEqual(['ann', 'mid', 'amy', 'bob', 'eve', 'zed'])
+  it('sorts Undecided → Unbound → Equipped → Bare, then by name; unbound gets the hatch', async () => {
+    expect(sortRoster(SET).map((p) => p.name)).toEqual(['ann', 'mid', 'bob', 'eve', 'zed', 'amy'])
     await mount(SET)
-    expect(names()).toEqual(['ann', 'mid', 'amy', 'bob', 'eve', 'zed'])
+    expect(names()).toEqual(['ann', 'mid', 'bob', 'eve', 'zed', 'amy'])
     expect(container.querySelectorAll('[data-testid="agent-card-hatch"]')).toHaveLength(1)
+  })
+
+  it('override footer names the project and keys; undecided cards offer a loadout', async () => {
+    const o = { ...mk('olly', 'equipped'), overridingProjects: ['Self'], overrideDetails: [{ project: 'Self', cwd: '/s', fields: ['model', 'tools'], bodyOverridden: false, issue: null }] } as AgentPersona
+    await mount([o, mk('u', 'undecided')])
+    expect(container.querySelector('[data-agent-row="olly"] [data-testid="agent-card-note"]')!.textContent).toBe('Overridden in Self — model, gear')
+    expect(container.querySelector('[data-agent-row="u"]')!.textContent).toContain('Choose a loadout →')
   })
 
   it('arrow keys move focus and Enter opens the focused card', async () => {
@@ -76,6 +83,6 @@ describe('AgentRoster', () => {
     await act(async () => { cards[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
     expect(onOpen).toHaveBeenCalledWith('mid')
     await click(cards[2])
-    expect(onOpen).toHaveBeenLastCalledWith('amy')
+    expect(onOpen).toHaveBeenLastCalledWith('bob')
   })
 })

@@ -185,6 +185,7 @@ const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/ep
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const agentSnapshot = require('./lib/claude/agentSnapshot.cjs');
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
+const { resolveHeadlessMcpServers } = require('./lib/claude/headlessMcpServers.cjs');
 const { buildPersonaToolScope, personaToolScopeArgs, personaToolScopeEnv, resolvedMcpServerNames, resolveSkillDeny } = require('./lib/claude/personaToolScope.cjs');
 const { PLAN_REVIEW_SCHEMA, parsePlanReview, isAllOk: isAllOkPlanReview } = require('./lib/scheduler/planReviewSchema.cjs');
 const { readSettingsModel } = require('./lib/claude/modelCatalog.cjs');
@@ -5918,13 +5919,6 @@ const HEADLESS_DISALLOWED_TOOLS = Object.freeze([
  * and a large prompt failed with spawn E2BIG before the job started (the
  * 2026-10-26 incident). `claude -p` with no positional prompt reads stdin.
  */
-// MCP servers whose definition the scheduler knows. Lazy require: avoids a
-// load-order cycle with seedSchedulerMcp.cjs.
-function knownMcpServers() {
-  const seed = require('./seedSchedulerMcp.cjs');
-  return { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
-}
-
 /**
  * The CLI keeps only the LAST --settings value, and the job sandbox argv
  * already carries one inline JSON --settings. When it does, fold the
@@ -5975,7 +5969,7 @@ function jobRiskToolsClearance(prdRiskTools, personaTools) {
   return out;
 }
 
-function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, mcpServerNames = [], pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null, skillDeny = [] }) {
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, mcpServerNames = [], pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null, skillDeny = [], knownServers = null }) {
   let permissionArgs = Array.isArray(sandboxArgs) && sandboxArgs.length ? sandboxArgs : ['--dangerously-skip-permissions'];
   let riskArgs = [];
   if (typeof riskGuardSettingsPath === 'string' && riskGuardSettingsPath) {
@@ -5990,7 +5984,7 @@ function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, 
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
     // Always strict: exactly the persona's resolved servers (dispatch already
     // parked any job whose set names an unknown server — capability_unknown).
-    ...personaToolScopeArgs(toolScope, { mcpServers: knownMcpServers(), declaredServers: mcpServerNames }).args,
+    ...personaToolScopeArgs(toolScope, { mcpServers: knownServers || resolveHeadlessMcpServers({}).known, declaredServers: mcpServerNames }).args,
     ...(Array.isArray(pluginDirArgs) ? pluginDirArgs : []),
     ...(jsonSchema && typeof jsonSchema === 'object' ? ['--json-schema', JSON.stringify(jsonSchema)] : []),
     ...riskArgs,
@@ -6553,7 +6547,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   if (personaResolution.refusal) {
     const { code, detail } = personaResolution.refusal;
     const refusalError = `${code}: ${detail}`;
-    safeLog(`[scheduler] persona refused for ${job.slug} — not spawned: ${refusalError}\n`);
+    safeLog(`[scheduler] persona refused for ${job.slug} — not spawned: ${refusalError}${code === 'capability_unknown' ? ` (an MCP server must be defined in ~/.claude.json or ${path.join(cwd, '.mcp.json')})` : ''}\n`);
     closeFd();
     config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: refusalError, personaRefusal: { code, detail }, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY, ...setupMeta });
     return { exitCode: -1, durationMs: 0, error: refusalError, sessionId, personaRefusal: { code, detail } };
@@ -6620,18 +6614,31 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   const skillDeny = await resolveSkillDeny({ packs: personaResolution.packs || [], loadout: personaResolution.loadout });
   safeLog(`[scheduler] skills=${skillDeny.denied} denied for ${job.slug}\n`);
   // Declared capabilities, fail-closed: an MCP server (declared or tool-named)
-  // missing from knownMcpServers(), or an unknown persona-declared pack,
-  // parks the job needs_review 'capability_unknown: <name>' — never spawned
-  // with a widened (every-server) config.
-  const capabilityCheck = personaToolScopeArgs(personaToolScope, {
-    mcpServers: knownMcpServers(),
-    declaredServers: personaResolution.mcpServers || [],
-    packs: unknownPacks ? personaPackIds : [],
-    knownPacks: unknownPacks ? personaPackIds.filter((p) => !unknownPacks.includes(p)) : [],
-  });
-  if (capabilityCheck.refusal) {
-    const code = capabilityCheck.refusal.code;
-    const detail = capabilityCheck.refusal.name;
+  // missing from the resolved known map, or an unknown persona-declared pack,
+  // parks the job needs_review 'capability_unknown: <name>'; a credential-bearing
+  // one parks 'capability_credentialed'. Never spawned with a widened config.
+  const mcpResolution = resolveHeadlessMcpServers({ cwd });
+  let capRefusal = null;
+  for (const name of resolvedMcpServerNames(personaToolScope?.tools, personaResolution.mcpServers || [])) {
+    if (Object.prototype.hasOwnProperty.call(mcpResolution.credentialed, name)) {
+      capRefusal = { code: 'capability_credentialed', detail: mcpResolution.credentialed[name] };
+      break;
+    }
+  }
+  if (!capRefusal) {
+    const capabilityCheck = personaToolScopeArgs(personaToolScope, {
+      mcpServers: mcpResolution.known,
+      declaredServers: personaResolution.mcpServers || [],
+      packs: unknownPacks ? personaPackIds : [],
+      knownPacks: unknownPacks ? personaPackIds.filter((p) => !unknownPacks.includes(p)) : [],
+    });
+    if (capabilityCheck.refusal) {
+      const { code, name } = capabilityCheck.refusal;
+      capRefusal = { code, detail: name };
+    }
+  }
+  if (capRefusal) {
+    const { code, detail } = capRefusal;
     const refusalError = `${code}: ${detail}`;
     safeLog(`[scheduler] capability refused for ${job.slug} — not spawned: ${refusalError}\n`);
     closeFd();
@@ -6956,6 +6963,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       jsonSchema: isValidator ? VALIDATOR_VERDICT_SCHEMA : (isPlanReviewer ? PLAN_REVIEW_SCHEMA : null),
       riskGuardSettingsPath,
       skillDeny: skillDeny.args,
+      knownServers: mcpResolution.known,
     });
     const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
 

@@ -81,3 +81,22 @@ test('claude-dir-write raw refusal', () => {
   expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', 'Bash writes under .claude/ are refused')].join('\n'))).toBeNull();
   expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', 'cat: x: Permission denied')].join('\n'))).toBeNull();
 });
+
+// ── multi-line tracebacks (3-line window) ──
+test('stream: CPython traceback splits AF_UNIX and errno over lines -> unix-socket', () => {
+  const tb = 'Traceback (most recent call last):\n  File "x.py", line 3, in <module>\n    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.bind(p)\nPermissionError: [Errno 1] Operation not permitted\n';
+  const log = [bashUse('b1'), toolRes('b1', tb)].join('\n');
+  expect(sandboxLimitFromStreamJson(log).kind).toBe('unix-socket');
+});
+test('stream: CPython traceback splits /tmp open and Errno 30 -> readonly-tmp', () => {
+  const tb = 'Traceback (most recent call last):\n  File "x.py", line 2, in <module>\n    open(\'/tmp/x\', \'w\')\nOSError: [Errno 30] Read-only file system: \'/tmp/x\'\n';
+  const log = [bashUse('b1'), toolRes('b1', tb)].join('\n');
+  expect(sandboxLimitFromStreamJson(log).kind).toBe('readonly-tmp');
+});
+test('stream: AF_UNIX and errno >3 lines apart -> null; success and Read -> null', () => {
+  const far = 'socket.AF_UNIX\na\nb\nc\nPermissionError: [Errno 1] Operation not permitted\n';
+  expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', far)].join('\n'))).toBeNull();
+  const adj = 'socket.AF_UNIX\nPermissionError: [Errno 1] Operation not permitted\n';
+  expect(sandboxLimitFromStreamJson([bashUse('b1'), toolRes('b1', adj, false)].join('\n'))).toBeNull();
+  expect(sandboxLimitFromStreamJson([readUse('r1'), toolRes('r1', adj)].join('\n'))).toBeNull();
+});

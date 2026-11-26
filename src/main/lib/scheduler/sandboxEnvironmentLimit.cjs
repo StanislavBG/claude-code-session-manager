@@ -15,6 +15,9 @@ const PATTERNS = [
   ['readonly-tmp', /(?:Errno 30|Read-only file system)[^\n]{0,80}\/tmp|\/tmp[^\n]{0,80}(?:Errno 30|Read-only file system)/i],
 ];
 
+const WINDOW_LINES = 3;
+const WINDOWED_KINDS = new Set(['unix-socket', 'readonly-tmp']);
+
 const ENVIRONMENT_LIMIT_MESSAGE =
   'environment limit (job sandbox), not a code bug — see PRD_AUTHORING.md#job-sandbox-limits';
 
@@ -31,9 +34,19 @@ function detectSandboxEnvironmentLimit(text) {
 /** Run the per-line matcher over each decoded physical line of `text`. */
 function detectPerLine(text) {
   if (typeof text !== 'string' || !text) return null;
-  for (const line of text.split(/\r?\n/)) {
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
     const hit = detectSandboxEnvironmentLimit(line);
     if (hit) return hit;
+  }
+  // Python tracebacks split the call and the errno over adjacent lines.
+  for (let i = 0; i + 1 < lines.length; i++) {
+    const win = lines.slice(i, i + WINDOW_LINES).join(' ');
+    for (const [kind, re] of PATTERNS) {
+      if (!WINDOWED_KINDS.has(kind)) continue;
+      const m = re.exec(win);
+      if (m) return { kind, evidence: m[0].slice(0, 200) };
+    }
   }
   return null;
 }

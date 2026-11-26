@@ -83,8 +83,8 @@ function splitFrontmatter(raw) {
  * JSON array of { id, statement, check: { kind, spec? } } — see parseCriteria.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'voiceId', 'riskTools', 'preflight', 'criteria']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'voiceId', 'riskTools', 'preflight', 'criteria'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'voiceId', 'riskTools', 'preflight', 'criteria', 'planReview']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'fixes', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths', 'macroId', 'effort', 'voiceId', 'riskTools', 'preflight', 'criteria', 'planReview'];
 // Mirrors modelCatalog.cjs CATALOG_FLOOR.effortLevels. A closed set so the
 // value is always safe as a frontmatter line and as a --effort argv token.
 const PRD_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -273,6 +273,9 @@ function applyKey(fm, key, after) {
       // Library happens in prdAgentType.cjs, not here — this parser only
       // round-trips the string.
       fm.agentType = String(v);
+      return;
+    case 'planReview':
+      if (String(v) === 'required') fm.planReview = 'required';
       return;
     case 'createdVia':
       fm.createdVia = String(v);

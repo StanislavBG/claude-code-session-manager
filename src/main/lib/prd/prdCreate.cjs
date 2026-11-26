@@ -35,6 +35,7 @@ const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveI
 const { splitFrontmatter, PRD_EFFORT_LEVELS, formatQuotedInlineList } = require('./prdFrontmatter.cjs');
 const { parseRule: parseToolRiskRule } = require('../claude/toolRiskMarks.cjs');
 const { normalizePreflight } = require('../scheduler/preflightCheck.cjs');
+const { qualifiesForReview, planReviewEnabled } = require('../../scheduler/planReviewHold.cjs');
 
 // Cap on riskTools entries — mirrors ipcSchemas.cjs RiskToolsSchema.
 const RISK_TOOLS_MAX = 20;
@@ -138,7 +139,7 @@ function isValidMacroId(id) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort, voiceId, riskTools, preflight,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId, macroId, effort, voiceId, riskTools, preflight, planReview,
     gate, files, budgetExempt, fixes,
   } = input;
   // Structured criteria (prdCriteria.cjs): createPrd() normalizes once and
@@ -207,6 +208,7 @@ function buildPrdBody(input) {
   // Precondition command — validated by createPrd() via normalizePreflightField.
   // JSON-string form, matching prdFrontmatter.cjs's serializer.
   if (typeof preflight === 'string' && preflight) fmLines.push(`preflight: ${JSON.stringify(preflight)}`);
+  if (planReview === 'required') fmLines.push('planReview: required');
   if (quietMachine === true) fmLines.push('quietMachine: true');
   // Budget exemption is for a sweep validator that cannot be split further;
   // every other caller's budgetExempt is ignored.
@@ -1277,6 +1279,26 @@ async function createPrdBatch(inputs, remote, opts = {}) {
     return fail([{ index: at, slug: cycle[0], error: `dependsOn cycle inside batch: ${cycle.join(' -> ')}` }]);
   }
 
+  // Plan review: stamp planReview: required on each validator whose in-batch
+  // dependsOn closure qualifies (planReviewHold.qualifiesForReview). Batch-only.
+  const stampReview = new Set();
+  if (planReviewEnabled()) {
+    prepared.forEach((p, i) => {
+      if (p.input.agentType !== 'validator') return;
+      const seen = new Set();
+      const stack = [...edges[i]];
+      while (stack.length) {
+        const n = stack.pop();
+        if (seen.has(n)) continue;
+        seen.add(n);
+        stack.push(...edges[n]);
+      }
+      const members = [...seen].filter((n) => prepared[n].input.agentType !== 'validator')
+        .map((n) => ({ slug: slugs[n], dependsOn: edges[n].map((m) => slugs[m]) }));
+      if (qualifiesForReview(members)) stampReview.add(i);
+    });
+  }
+
   // One planId for the whole batch unless an entry inherits one from existing deps.
   const planId = prepared.map((p) => p.inheritedPlanId).find(Boolean) || mintPlanId();
 
@@ -1365,14 +1387,16 @@ async function createPrdBatch(inputs, remote, opts = {}) {
       try {
         nn = nns[i];
         filenameSlug = `${nn}-${p.slug}`;
-        const body = buildPrdBody({ ...p.input, dependsOn: fullDeps(p.input.dependsOn), planId, gate: p.gateCommands, files: p.filesList });
+        const body = buildPrdBody({ ...p.input, dependsOn: fullDeps(p.input.dependsOn), planId, planReview: stampReview.has(i) ? 'required' : undefined, gate: p.gateCommands, files: p.filesList });
         // A validated preflight must reach the file (PRD 3805 ran unheld when one
         // was lost); a body without the line rolls the whole batch back.
         if (p.input.preflight && !/^preflight: /m.test(body)) throw new Error('preflight was not written to the PRD frontmatter');
         const w = await remote.writePrd(filenameSlug, body, p.input.cwd);
         if (!w?.ok) throw new Error(w?.error ?? 'write failed');
         written.push({ filenameSlug, path: w.path ?? null, cwd: p.input.cwd });
-        results.push({ slug: p.slug, nn, filename: `${filenameSlug}.md`, preflight: p.input.preflight || null, warnings: [...p.warnings, ...overlapWarnings[i]] });
+        results.push({ slug: p.slug, nn, filename: `${filenameSlug}.md`, preflight: p.input.preflight || null,
+          ...(stampReview.has(i) ? { planReview: 'required' } : {}),
+          warnings: [...p.warnings, ...overlapWarnings[i], ...(stampReview.has(i) ? ['plan held for plan review before dispatch'] : [])] });
       } catch (e) {
         await rollback();
         return { failed: fail([{ index: i, slug: p.slug, error: `write failed (batch rolled back): ${e?.message ?? e}` }]) };

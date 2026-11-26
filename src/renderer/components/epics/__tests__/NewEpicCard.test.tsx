@@ -310,9 +310,8 @@ describe('NewEpicCard', () => {
         `${CONTEXT_INJECTIONS['general-behavior'].text}\n\n` +
         `${CONTEXT_INJECTIONS['delegate-implementation'].text}\n\n` +
         'You are planning new functionality. Treat the goal below as the full objective — ' +
-        'establish scope, then decompose and queue the work as scheduled PRDs via the /develop ' +
-        'skill, rather than editing files inline in this conversation: this interactive session ' +
-        'is a planner-tier model and the headless claude -p executor does the typing.\n\n' +
+        'establish scope, then decompose and queue the substantial work as scheduled PRDs via the ' +
+        '/develop skill; small provable tweaks follow the Actor\'s own rule for what to do here.\n\n' +
         'Goal: Flaky test\n\nMake CI stop flaking',
     })
   })

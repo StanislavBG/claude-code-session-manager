@@ -501,7 +501,7 @@ test('upgrade adds art to an installed seedVersion-2 architect with shipped tags
   await seedAgentPersonas({ logger: silentLogger() });
   let out = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'architect.md'), 'utf8')).fm;
   expect(out.tags).toBe('feature, bug, discussion, art');
-  expect(out.seedVersion).toBe('6');
+  expect(out.seedVersion).toBe('7');
 
   fs.writeFileSync(path.join(agentsDir(), 'architect.md'), installed('feature, mine'));
   await seedAgentPersonas({ logger: silentLogger() });

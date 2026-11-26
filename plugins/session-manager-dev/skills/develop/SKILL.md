@@ -32,9 +32,9 @@ new work. **report** = your final message to the human.
    human settles that code is wanted. An Epic with no tag (No mission) is treated like `discussion`.
    If `developLoop` is `false`, do not author PRDs (the API refuses them): tell the human this
    session was started without the develop loop and a new session with it on is needed to queue work. Stop.
-3. **Never hand-implement in this session**, even when the plan is agreed. Why: this session
-   runs an expensive planner model; a cheaper executor runs each PRD as a headless `claude -p`
-   job.
+3. **Never hand-implement a PRD's work in this session**, even when the plan is agreed. Work
+   small enough to do inline (the Actor persona's lane rule) never becomes a PRD. Why: this
+   session runs an expensive planner model; a cheaper executor runs each PRD headless.
 4. **Never delegate PRD authoring.** You write scope, title, goal, criteria and notes. Calling
    `scheduler_create_prd` with your own text is not delegation.
 5. **Never restate the engineering rules.** They live in `standards.md` beside this file, with

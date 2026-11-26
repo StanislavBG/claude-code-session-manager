@@ -99,6 +99,19 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Edit, Write",
       },
     },
+    {
+      commit: "seed-v7-two-lanes",
+      bodySha256: "468d365253a94fb7c48ff181a90c1bea133743748a93290dc0f781dcd49fa6c8",
+      fm: {
+        description: "The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, does operations and small provable tweaks itself, queues substantial work as scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a queued PRD — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+        model: "opus",
+        effort: "medium",
+        environment: "open-web",
+        tags: "feature, bug, discussion, art",
+        title: "Engineering — Architect",
+        tools: "Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, Task",
+      },
+    },
   ],
   "dev-lead": [
     {

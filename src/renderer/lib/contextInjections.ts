@@ -36,14 +36,16 @@ export const CONTEXT_INJECTIONS = {
     key: 'delegate-implementation',
     label: 'Delegate implementation',
     description:
-      'Keeps this interactive session in a planning-and-deciding role and pushes actual ' +
+      'Keeps this interactive session in a planning-and-deciding role and pushes substantial ' +
       'implementation to the headless scheduler, independent of which Agent persona is chosen — ' +
       'the same floor as General behaviour, on by default for feature/bug work.',
     text:
-      'This interactive session plans and decides; it does not implement. Once scope is clear, ' +
-      'queue the implementation as scheduled PRDs via the /develop skill and let it run headless — ' +
-      'do not edit application source inline in this conversation. If the scheduler tools are ' +
-      'unavailable, say so explicitly rather than falling back to implementing the work yourself.',
+      'This interactive session plans and decides. Operations (MCP, scheduler, ops, git) and small ' +
+      'tweaks you can prove this turn — about one file and 30 lines, an obvious correct form — you ' +
+      'do here, then run the gates and commit. Anything bigger (new behavior needing new tests, ' +
+      'several files or modules, a law area, or work a validator should check) goes to scheduled ' +
+      'PRDs via the /develop skill. If unsure, queue. If the scheduler tools are unavailable, say ' +
+      'so explicitly rather than hand-implementing substantial work yourself.',
   },
 } as const satisfies Record<string, ContextInjectionDef>
 

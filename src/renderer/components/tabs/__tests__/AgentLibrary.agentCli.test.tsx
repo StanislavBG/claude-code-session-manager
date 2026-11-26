@@ -8,6 +8,12 @@ import type { AgentCliDetectRow, AgentPersona } from '../../../../preload/api'
 
 // The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
 // controlled body text, Document mode by default, and the status bar's Save/Revert.
+// These tests drive the expanded 316 px list; the default (collapsed rail) has its own spec, AgentSheet.test.tsx.
+vi.mock('../../../lib/uiSettingsPrefs', () => ({
+  readUiSettingsPrefs: async () => ({ agentsListExpanded: true }),
+  writeUiSettingsPrefs: async () => {},
+}))
+
 vi.mock('../editor/DocumentEditorPane', () => ({
   DocumentEditorPane: (p: { path: string; value: string; defaultMode?: string; dirty?: boolean; onChange: (v: string) => void; onSave?: () => void; onRevert?: () => void }) =>
     createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-path': p.path }, [
@@ -74,7 +80,7 @@ const click = async (b: HTMLElement | null | undefined) => {
   await act(async () => { b!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
 }
 const saveClick = async (el: HTMLElement) => {
-  await click(el.querySelector('[data-testid="editor-save"]') as HTMLElement)
+  await click(el.querySelector('[data-testid="agent-save"]') as HTMLElement)
   await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve() })
 }
 const type = async (input: HTMLInputElement, value: string) => {

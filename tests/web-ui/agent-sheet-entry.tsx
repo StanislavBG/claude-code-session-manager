@@ -91,6 +91,7 @@ const api = {
     readJson: async () => ({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
     exists: async () => false,
     canWrite: async () => ({ ok: true }),
+    writeJson: ok,
     watch: () => {}, unwatch: () => {}, onChanged: () => () => {},
   },
   agentCli: { detect: async () => [] },

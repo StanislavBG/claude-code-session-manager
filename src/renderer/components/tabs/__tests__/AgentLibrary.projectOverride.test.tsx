@@ -11,6 +11,12 @@ import type { AgentPersona } from '../../../../preload/api'
 
 // The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
 // controlled body text, Document mode by default, and the status bar's Save/Revert.
+// These tests drive the expanded 316 px list; the default (collapsed rail) has its own spec, AgentSheet.test.tsx.
+vi.mock('../../../lib/uiSettingsPrefs', () => ({
+  readUiSettingsPrefs: async () => ({ agentsListExpanded: true }),
+  writeUiSettingsPrefs: async () => {},
+}))
+
 vi.mock('../editor/DocumentEditorPane', () => ({
   DocumentEditorPane: (p: { path: string; value: string; defaultMode?: string; dirty?: boolean; onChange: (v: string) => void; onSave?: () => void; onRevert?: () => void }) =>
     createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-path': p.path }, [
@@ -260,7 +266,7 @@ describe('AgentLibrary project override', () => {
       s.dispatchEvent(new Event('change', { bubbles: true }))
       await flush()
     })
-    const save = el.querySelector('[data-testid="editor-save"]') as HTMLElement
+    const save = el.querySelector('[data-testid="agent-save"]') as HTMLElement
     await click(save)
     expect(savePersona.mock.calls[0][0].projectCwd).toBeUndefined()
     expect(savePersona.mock.calls[0][0]).not.toHaveProperty('projectName')

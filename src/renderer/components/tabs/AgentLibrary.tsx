@@ -4,7 +4,8 @@ import { Badge } from '../ui/Badge'
 import { ConfigFileCard, ConfigListRow, ConfigListToolbar, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { TagLibrary } from './TagLibrary'
 import { AgentRoster } from './agents/AgentRoster'
-import { AgentDetail, BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject } from './agents/AgentDetail'
+import { BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject } from './agents/AgentDetail'
+import { AgentSheet, AgentWorkbench, useAgentsListExpanded } from './agents/AgentSheet'
 import { toast } from '../../state/toast'
 import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
 import { toKnownTags, toPersonaSaveInput } from '../../lib/personaSavePayload'
@@ -16,10 +17,10 @@ import { useConfigSearchFocus } from '../../state/configSearchFocus'
 import { normalizeCwd, projectNameFromCwd } from '../../lib/knownProjectAggregate'
 
 /**
- * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas,
+ * Agent Library — list+sheet editor over `~/.claude/agents/*.md` personas (the sheet is ./agents/AgentSheet.tsx),
  * on the claude-config ConfigLayout kit (render 15): AGENTS FOLDER card (which also
  * carries the Personas | Tags switch — DESIGN_SPEC.md §5.3), Filter + '+ New', one row per agent (name, model, description); the detail
- * lives in ./agents/AgentDetail.tsx. Component-local fetch, real CRUD: New/Duplicate/Save/
+ * lives in ./agents/AgentSheet.tsx (the list column collapses to an avatar rail). Component-local fetch, real CRUD: New/Duplicate/Save/
  * Revert/Delete write straight through to disk via `window.api.agents.*`
  * (agentLibrary.cjs), scoped to the global persona directory.
  *
@@ -64,6 +65,7 @@ const VIEWS = [{ key: 'personas', label: 'Personas' }, { key: 'tags', label: 'Ta
 
 function AgentLibraryComponent() {
   const [view, setView] = useState<'personas' | 'tags'>('personas')
+  const [listExpanded, toggleListExpanded] = useAgentsListExpanded()
   const { personas, refresh } = useAgentPersonasState((e) => toast.error(e.message || 'failed to load agent personas'))
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -417,11 +419,16 @@ function AgentLibraryComponent() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <ConfigWorkbench
+      <AgentWorkbench
+        expanded={listExpanded}
+        onToggle={toggleListExpanded}
         list={list}
+        personas={filtered}
+        selectedName={isNew ? null : saved?.name ?? null}
+        onPick={pick}
         detail={
           obj ? (
-            <AgentDetail
+            <AgentSheet
               obj={obj}
               set={set}
               saved={saved}

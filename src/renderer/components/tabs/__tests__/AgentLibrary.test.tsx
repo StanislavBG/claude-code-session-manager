@@ -9,6 +9,12 @@ import { useConfigSearchFocus } from '../../../state/configSearchFocus'
 
 // The real pane mounts Tiptap/Monaco; the stub keeps the contract this page relies on:
 // controlled body text, Document mode by default, and the status bar's Save/Revert.
+// These tests drive the expanded 316 px list; the default (collapsed rail) has its own spec, AgentSheet.test.tsx.
+vi.mock('../../../lib/uiSettingsPrefs', () => ({
+  readUiSettingsPrefs: async () => ({ agentsListExpanded: true }),
+  writeUiSettingsPrefs: async () => {},
+}))
+
 vi.mock('../editor/DocumentEditorPane', () => ({
   DocumentEditorPane: (p: { path: string; value: string; defaultMode?: string; dirty?: boolean; onChange: (v: string) => void; onSave?: () => void; onRevert?: () => void }) =>
     createElement('div', { 'data-testid': 'document-editor-pane', 'data-mode': p.defaultMode, 'data-path': p.path }, [
@@ -153,7 +159,9 @@ describe('AgentLibrary', () => {
   it('surfaces the model field as this persona\'s per-Epic default model (agent-model-nav-consolidation)', async () => {
     const el = await mount()
     const runtime = el.querySelector('[data-testid="agent-runtime-card"]')!
-    for (const label of ['model', 'effort', 'runs on', 'tools', 'project overrides']) expect(runtime.textContent).toContain(label)
+    for (const label of ['model', 'effort', 'runs on']) expect(runtime.textContent).toContain(label)
+    expect(el.querySelector('[data-testid="agent-tools-row"]')).toBeTruthy()
+    expect(el.querySelector('[data-testid="agent-overrides-row"]')!.textContent).toContain('project overrides')
     expect((el.querySelector('[data-testid="model-select"]') as HTMLSelectElement).title).toContain("This persona's default model for its Epics")
   })
 
@@ -176,7 +184,7 @@ describe('AgentLibrary', () => {
     expect(el.textContent).not.toContain('every project')
     const tag = Array.from(el.querySelectorAll('button')).find((b) => /^#/.test(b.textContent ?? ''))!
     await act(async () => { tag.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
-    const save = el.querySelector('[data-testid="editor-save"]') as HTMLElement
+    const save = el.querySelector('[data-testid="agent-save"]') as HTMLElement
     await act(async () => { save.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
     expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
     expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ projects: ['*'], action: 'Sweep it.', actionLabel: 'Sweep' })
@@ -273,7 +281,7 @@ describe('AgentLibrary', () => {
       field.dispatchEvent(new Event('input', { bubbles: true }))
       await Promise.resolve()
     })
-    const save = el.querySelector('[data-testid="editor-save"]') as HTMLElement
+    const save = el.querySelector('[data-testid="agent-save"]') as HTMLElement
     await act(async () => { save.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
     expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
     expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ description: 'Edited description.', title: 'Engineering — Software Engineer' })
@@ -325,7 +333,7 @@ describe('AgentLibrary', () => {
     expect(el.querySelector('[data-testid="agent-tools-note"]')!.textContent).toContain('All tools')
     await act(async () => { (row.querySelector('[data-tool="Bash"]') as HTMLElement).click(); await Promise.resolve() })
     expect((row.querySelector('[data-tool="Bash"]') as HTMLElement).className).toContain('border-dashed')
-    await act(async () => { (el.querySelector('[data-testid="editor-save"]') as HTMLElement).click(); await Promise.resolve() })
+    await act(async () => { (el.querySelector('[data-testid="agent-save"]') as HTMLElement).click(); await Promise.resolve() })
     const sent = api.agents.savePersona.mock.calls[0][0].tools as string[]
     expect(sent).not.toContain('Bash')
     expect(sent).toContain('Read')
@@ -354,17 +362,20 @@ describe('AgentLibrary', () => {
     }
   })
 
-  it('the detail fills the pane at least, grows with its content (scrolled by the workbench), and the editor takes the rest', async () => {
+  it('the sheet fills the pane at least, grows with its content (scrolled by the workbench), with a right column and the save bar', async () => {
     const el = await mount()
-    const detail = el.querySelector('[data-testid="agent-detail"]')!
+    const detail = el.querySelector('[data-testid="agent-sheet"]')!
     expect(detail.parentElement!.getAttribute('data-testid')).toBe('config-workbench-detail')
     const detailCls = detail.className.split(/\s+/)
     for (const c of ['flex', 'flex-col', 'min-h-full', 'shrink-0']) expect(detailCls).toContain(c)
     expect(detailCls).not.toContain('min-h-0')
     expect(el.querySelector('[data-testid="agent-detail-body"]')!.className).not.toContain('min-h-0')
-    const editorCls = el.querySelector('[data-testid="agent-detail-editor"]')!.className.split(/\s+/)
-    for (const c of ['flex-1', 'min-h-[320px]']) expect(editorCls).toContain(c)
-    expect(editorCls).not.toContain('min-h-[480px]')
+    for (const id of ['agent-gear-slot', 'agent-constraints-slot', 'agent-applies-to', 'agent-save-bar']) expect(el.querySelector(`[data-testid="${id}"]`)).toBeTruthy()
+    expect(el.querySelector('[data-testid="agent-applies-to"]')!.textContent).toContain('Changes apply to new sessions')
+    // The persona body editor opens full screen from the preview, not inline.
+    expect(el.querySelector('[data-testid="agent-detail-editor"]')).toBeNull()
+    await act(async () => { (el.querySelector('[data-testid="agent-open-editor"]') as HTMLElement).click(); await Promise.resolve() })
+    expect(el.querySelector('[data-testid="agent-detail-editor"]')!.className).toContain('fixed inset-0')
   })
 
   it('the ⋯ menu carries re-check and the model catalog info', async () => {
@@ -374,25 +385,23 @@ describe('AgentLibrary', () => {
     expect(el.querySelector('[data-testid="agent-detail-catalog-info"]')!.textContent).toMatch(/catalog|claude/i)
   })
 
-  it('colour and tags sit in a Details disclosure inside the config card; the editor follows the card directly', async () => {
+  it('colour and tags sit in a Details disclosure of the sheet', async () => {
     const el = await mount()
-    const card = el.querySelector('[data-testid="agent-runtime-card"]')!
-    const details = card.querySelector('[data-testid="agent-details"]')!
+    const details = el.querySelector('[data-testid="agent-details"]')!
     expect(details.tagName).toBe('DETAILS')
     expect(details.querySelector('[data-testid="agent-detail-name"]')).toBeTruthy()
     expect(Array.from(details.querySelectorAll('button')).some((b) => /^#/.test(b.textContent ?? ''))).toBe(true)
-    expect(card.nextElementSibling!.getAttribute('data-testid')).toBe('agent-detail-editor')
     expect(el.querySelector('[data-testid="config-detail-header"]')!.textContent).toContain('builder')
   })
 
   it('the Personas | Tags switch lives in the AGENTS FOLDER card and swaps in the Tags view', async () => {
     const el = await mount()
-    const card = el.querySelector('[data-testid="config-file-card"]')!
-    const pill = card.querySelector('[data-testid="agent-view-switch"]')!
+    const card = () => el.querySelector('[data-testid="config-file-card"]')!
+    const pill = card().querySelector('[data-testid="agent-view-switch"]')!
     expect(pill.getAttribute('role')).toBe('group')
     expect(pill.className).toContain('rounded')
     expect(pill.className).toContain('bg-bg-hi')
-    const btn = (label: string) => Array.from(card.querySelectorAll('[data-testid="agent-view-switch"] button')).find((b) => b.textContent === label) as HTMLButtonElement
+    const btn = (label: string) => Array.from(card().querySelectorAll('[data-testid="agent-view-switch"] button')).find((b) => b.textContent === label) as HTMLButtonElement
     expect(btn('Personas').getAttribute('aria-pressed')).toBe('true')
     expect(btn('Personas').className).toContain('shadow-sm')
     expect(btn('Tags').getAttribute('aria-pressed')).toBe('false')
@@ -429,17 +438,19 @@ describe('AgentLibrary', () => {
   it('the body is edited in DocumentEditorPane (Document mode) and saved as the body, Revert discards it', async () => {
     const { api } = installWindowApiMock()
     const el = await mount()
+    expect(el.querySelector('[data-testid="document-editor-pane"]')).toBeNull()
+    await act(async () => { (el.querySelector('[data-testid="agent-open-editor"]') as HTMLElement).click(); await Promise.resolve() })
     const pane = el.querySelector('[data-testid="document-editor-pane"]')!
     expect(pane.getAttribute('data-mode')).toBe('document')
     const body = el.querySelector('[data-testid="document-editor-body"]') as HTMLTextAreaElement
     expect(body.value).toBe('You are the Builder agent.')
     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!
     await act(async () => { setter.call(body, 'Edited body.'); body.dispatchEvent(new Event('input', { bubbles: true })); await Promise.resolve() })
-    await act(async () => { (el.querySelector('[data-testid="editor-revert"]') as HTMLElement).click(); await Promise.resolve() })
+    await act(async () => { (el.querySelector('[data-testid="agent-revert"]') as HTMLElement).click(); await Promise.resolve() })
     expect((el.querySelector('[data-testid="document-editor-body"]') as HTMLTextAreaElement).value).toBe('You are the Builder agent.')
     const body2 = el.querySelector('[data-testid="document-editor-body"]') as HTMLTextAreaElement
     await act(async () => { setter.call(body2, 'Edited body.'); body2.dispatchEvent(new Event('input', { bubbles: true })); await Promise.resolve() })
-    await act(async () => { (el.querySelector('[data-testid="editor-save"]') as HTMLElement).click(); await Promise.resolve() })
+    await act(async () => { (el.querySelector('[data-testid="agent-save"]') as HTMLElement).click(); await Promise.resolve() })
     expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
     expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ name: 'builder', body: 'Edited body.', description: 'Watch git history and drive the next publish.' })
   })

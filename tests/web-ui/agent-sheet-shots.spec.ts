@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // over a stub window.api shaped like the character-sheet design's sample data (12 personas: 3 undecided,
 // 7 equipped, 1 bare, 1 unbound; an armory with built-ins, 3 MCP servers, 2 packs, risk marks) and writes
 // one PNG per frame x scheme at the design's page-area size (1592x1040):
-//   roster, sheet, armory-drag, mcp-powers, undecided, project-override  -> <frame>-light.png / -dark.png
+//   roster, sheet, sheet-list-expanded, armory-drag, mcp-powers, undecided, project-override  -> <frame>-light.png / -dark.png
 //
 // REFERENCE: session-manager-operations/design-mocks/agent-character-sheet/renders/ (light, 1592x1040):
 //   roster=1a-roster  sheet=1b-sheet-workbench  armory-drag=1e-armory-mid-drag  mcp-powers=1f-mcp-powers
@@ -39,15 +39,18 @@ interface Frame {
   setUp?: (page: Page) => Promise<void>
 }
 
-const selectRow = (name: string) => async (page: Page) => {
-  await page.getByTestId('agent-row-model').first().waitFor()
-  await page.getByText(name, { exact: true }).first().click()
+// Roster card -> the sheet; the list column starts as the collapsed 64 px avatar rail (frame 1c's rail).
+const openSheet = (name: string) => async (page: Page) => {
+  await page.locator(`[data-testid="agent-card"][data-agent-row="${name}"]`).click()
+  await page.getByTestId('agent-sheet').waitFor()
 }
 
 const FRAMES: Frame[] = [
   { name: 'roster', testid: 'agent-roster', reference: '1a-roster.png', setUp: async (page) => { await page.getByTestId('agent-card').first().waitFor() } },
-  // The sheet frame renders today's list + detail; the later sheet PRDs tighten it to the workbench.
-  { name: 'sheet', testid: 'agent-view-switch', reference: '1b-sheet-workbench.png', setUp: selectRow('architect') },
+  // 1b workbench (collapsed rail by default); gear / constraints contents are sibling PRDs. Rail = 1c's left edge.
+  { name: 'sheet', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: openSheet('architect') },
+  // The same sheet with the list column expanded to 1b's 316 px list.
+  { name: 'sheet-list-expanded', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-list-toggle').click(); await page.locator('[data-agent-row="builder"]').waitFor() } },
   { name: 'armory-drag', testid: 'agent-armory', reference: '1e-armory-mid-drag.png' },
   { name: 'mcp-powers', testid: 'agent-mcp-powers', reference: '1f-mcp-powers.png' },
   { name: 'undecided', testid: 'agent-undecided-choice', reference: '1g-undecided-first-run.png' },

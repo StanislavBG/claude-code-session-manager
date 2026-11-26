@@ -39,6 +39,8 @@ export interface UiSettingsPrefs {
   fileTreeShowHidden?: boolean
   projectsSplitPct?: number
   projectsFileTreeCollapsed?: boolean
+  /** AgentSheet.tsx — the Agents sheet's 316 px list column is expanded (absent/false = the 64 px avatar rail). */
+  agentsListExpanded?: boolean
 }
 
 export const UI_SETTINGS_PREFS_FILE = '~/.claude/session-manager/ui-settings-prefs.json'

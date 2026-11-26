@@ -35,7 +35,11 @@ an unknown declared capability parks the job (`capability_unknown`) instead of s
 - Scope (decided 2026-11-26, reversing 2026-11-23): gear binds Epic chat turns too, for Epics minted after the
   release (their pinned snapshot is stamped `gearBindsChat: true`; older snapshots keep the user's own MCP
   config). Why: the owner wants Q&A and troubleshooting with the same character the Epic's jobs run as, not a
-  different, ungeared one. Code: `gearChatArgs` in `src/main/chatRunner.cjs` (tools, strict MCP, packs; an
+  different, ungeared one. What chat gets, precisely: the persona's `tools:`, MCP servers (declared
+  `mcpServers:` plus those derived from `mcp__<server>__<tool>` tool entries), packs (declared `packs:` plus the
+  Epic's own `PromptSession.packs`), and the skill deny-list below. These merge in `buildAgentSnapshot`
+  (`src/main/lib/claude/agentSnapshot.cjs`); chat reads the snapshot, so it matches a job only because the
+  snapshot already holds the declared servers/packs. Code: `gearChatArgs` in `src/main/chatRunner.cjs` (tools, strict MCP, packs; an
   unknown server/pack is dropped with a `capability_unknown` warning, never a failed turn;
   `HEADLESS_DISALLOWED_TOOLS` is not applied to chat); stamp in `src/main/lib/claude/agentSnapshot.cjs`.
 - Skills: carried only inside packs. `skillDenyArgs` / `resolveSkillDeny` in `personaToolScope.cjs` add

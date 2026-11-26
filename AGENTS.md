@@ -95,7 +95,7 @@ Runs PRDs from ops-root `scheduler/epics/<epic-id>/prds/` as `claude -p` jobs. D
 
 ## Managed Agents laws (all local)
 
-- [Strict persona schema; runs pin an AgentSnapshot](session-manager-operations/architecture/managed-agents-alignment.md#personas); [jobs and new Epics' chat get only declared gear](session-manager-operations/architecture/managed-agents-alignment.md#capabilities).
+- [Strict persona schema; runs pin an AgentSnapshot](session-manager-operations/architecture/managed-agents-alignment.md#personas); [jobs+chat get only declared gear](session-manager-operations/architecture/managed-agents-alignment.md#capabilities).
 - [Jobs run sandboxed under a declared environment](session-manager-operations/architecture/managed-agents-alignment.md#environments), [never holding a credential](session-manager-operations/architecture/managed-agents-alignment.md#credentials).
 - [An Epic's event log has one writer](session-manager-operations/architecture/managed-agents-alignment.md#event-log); [status edges obey legality tables, read as one phase](session-manager-operations/architecture/managed-agents-alignment.md#legality).
 - [A human decision resumes the same session](session-manager-operations/architecture/managed-agents-alignment.md#confirm); [webhooks are loopback-only](session-manager-operations/architecture/managed-agents-alignment.md#webhooks).

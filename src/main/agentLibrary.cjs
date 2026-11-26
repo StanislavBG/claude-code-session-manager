@@ -25,6 +25,7 @@ const { splitFrontmatter } = require('./lib/prd/prdFrontmatter.cjs');
 const { resolveMergedPersona, PERSONA_NAME_RE } = require('./lib/persona-macro/personaMerge.cjs');
 const { isNonClaudeAgentCli, isAgentCliModel } = require('./lib/agent-cli/agentCliEvents.cjs');
 const { loadoutState, encodeLoadout } = require('./lib/persona-macro/personaLoadout.cjs');
+const { mcpServersFromTools } = require('./lib/claude/agentSnapshot.cjs');
 const configMgr = require('./config.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 
@@ -343,6 +344,12 @@ async function savePersona({
       if (resolvedPacks === undefined && fm.packs) resolvedPacks = parseCapabilityList(fm.packs);
       if (resolvedEnvironment === undefined && typeof fm.environment === 'string' && fm.environment.trim()) resolvedEnvironment = fm.environment.trim();
     } catch { /* no existing file (or unreadable) — nothing to carry over */ }
+  }
+  // One write: mcpServers = caller's/carried servers ∪ servers named by mcp__<server>__<tool> tools
+  // (a server with no tool of its own is a whole-server grant and is kept).
+  const derivedServers = mcpServersFromTools(tools);
+  if (derivedServers.length) {
+    resolvedMcpServers = [...new Set([...(Array.isArray(resolvedMcpServers) ? resolvedMcpServers : []), ...derivedServers])];
   }
   const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, agentCli: resolvedAgentCli, agentCliModel: resolvedAgentCliModel, mcpServers: resolvedMcpServers, packs: resolvedPacks, environment: resolvedEnvironment, body, preservedLines });
   assertValidPersonaText(name, text, preservedLines);

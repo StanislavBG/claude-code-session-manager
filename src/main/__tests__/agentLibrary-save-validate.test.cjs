@@ -78,3 +78,16 @@ test('a valid persona saves', async () => {
   expect(out).toContain('model: sonnet');
   expect(out).toContain('You are p.');
 });
+
+test('mcpServers is derived from mcp__ tools, unioned with the caller list (whole-server grants kept)', async () => {
+  const globalDir = await mkTmp();
+  await savePersona({ ...base, name: 'gear-a', model: 'sonnet', globalDir, tools: ['Read', 'mcp__blender__x', 'mcp__blender__y'], mcpServers: ['whole'] });
+  const text = await fsp.readFile(path.join(globalDir, 'gear-a.md'), 'utf8');
+  expect(text).toMatch(/^mcpServers: whole, blender$/m);
+});
+
+test('no mcp__ tools leaves the caller mcpServers untouched', async () => {
+  const globalDir = await mkTmp();
+  await savePersona({ ...base, name: 'gear-b', model: 'sonnet', globalDir, mcpServers: ['only'] });
+  expect(await fsp.readFile(path.join(globalDir, 'gear-b.md'), 'utf8')).toMatch(/^mcpServers: only$/m);
+});

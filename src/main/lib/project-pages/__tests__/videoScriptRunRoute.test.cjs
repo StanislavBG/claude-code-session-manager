@@ -218,6 +218,18 @@ describe(ROUTE, () => {
     expect(audit[0][1]).toMatchObject({ fromEpicId: 'ep-9', caller: { pipeline: 'x' } });
   });
 
+  test('ledger run carries caller and fromEpicId', async () => {
+    switchOn();
+    const caller = { pipeline: 'blog_publish', runId: 'r1' };
+    register({
+      startedByFromRequest: async ({ route, caller: c }) => ({ kind: 'script', route, caller: c, fromCwd: '/p', fromEpicId: 'ep-9' }),
+    });
+    const res = await call({ cwd, kind: 'Project demo', caller });
+    expect(res.status).toBe(200);
+    const run = videoScriptPress.findScriptRun(cwd, { entryId: 'vid-1' });
+    expect(run).toMatchObject({ caller, fromEpicId: 'ep-9' });
+  });
+
   test.each([[{ bogus: 1 }], [{ attempt: -1 }], ['str']])('invalid caller %j: 400, nothing launched', async (caller) => {
     switchOn();
     const res = await call({ cwd, kind: 'Project demo', caller });

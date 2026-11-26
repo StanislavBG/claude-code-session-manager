@@ -129,3 +129,17 @@ test('keeps at most 200 runs per project, oldest dropped', () => {
   expect(vsp.findScriptRun('/p/a', { entryId: 'e204' })).toMatchObject({ epicId: 'ep204' });
   expect(vsp.findScriptRun('/p/b', { entryId: 'b1' })).toMatchObject({ epicId: 'epb' });
 });
+
+test('ledger keeps a valid caller and fromEpicId; drops an invalid caller; legacy run unchanged', () => {
+  const base = { slug: 's', kind: 'k', at: '2026-11-24T01:00:00.000Z' };
+  const caller = { pipeline: 'blog_publish', runId: 'r1' };
+  vsp.recordScriptRun('/p/a', { ...base, entryId: 'c1', epicId: 'ep1', caller, fromEpicId: 'chat-1' });
+  expect(vsp.findScriptRun('/p/a', { entryId: 'c1' })).toEqual({ ...base, entryId: 'c1', epicId: 'ep1', caller, fromEpicId: 'chat-1' });
+
+  const kept = vsp.recordScriptRun('/p/a', { ...base, entryId: 'c2', epicId: 'ep2', caller: { bogus: 1 }, fromEpicId: '' });
+  expect(kept).toEqual({ ...base, entryId: 'c2', epicId: 'ep2' });
+  expect(vsp.findScriptRun('/p/a', { entryId: 'c2' })).toEqual({ ...base, entryId: 'c2', epicId: 'ep2' });
+
+  vsp.recordScriptRun('/p/a', { ...base, entryId: 'c3', epicId: 'ep3' });
+  expect(vsp.findScriptRun('/p/a', { entryId: 'c3' })).toEqual({ ...base, entryId: 'c3', epicId: 'ep3' });
+});

@@ -179,6 +179,12 @@ function validRun(run) {
   if (externalRef !== undefined && externalRef !== null && !boundedString(externalRef, 500)) return null;
   const out = { entryId, epicId, slug, kind, at };
   if (typeof externalRef === 'string') out.externalRef = externalRef;
+  if (run.caller !== undefined) {
+    const { CallerSchema } = require('../epic/scriptStartedBy.cjs');
+    const c = CallerSchema.safeParse(run.caller);
+    if (c.success) out.caller = c.data;
+  }
+  if (boundedString(run.fromEpicId, 200)) out.fromEpicId = run.fromEpicId;
   return out;
 }
 

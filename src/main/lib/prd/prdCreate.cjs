@@ -77,6 +77,7 @@ function normalizeRiskTools(value) {
   return { ok: true, value: seen };
 }
 const { sizingWarnings } = require('./prdSizing.cjs');
+const { sandboxWarnings } = require('./prdSandboxWarnings.cjs');
 const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
 const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
@@ -1093,7 +1094,7 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     if (opts.dryRun) {
       return {
         ok: true, dryRun: true, slug, input, gateCommands, filesList,
-        inheritedPlanId, duplicateAllowed, warnings: [...extraWarnings, ...sizingWarnings(input)],
+        inheritedPlanId, duplicateAllowed, warnings: [...extraWarnings, ...sizingWarnings(input), ...sandboxWarnings(input)],
       };
     }
 
@@ -1185,7 +1186,7 @@ async function createPrdInner(input, remote, ctl, opts = {}) {
     // Advisory only (PRD 1403 sizing warnings + gate-and-files-in-PRD-body
     // absent/none-gate warnings) — never blocks the write. See prdSizing.cjs
     // and prdGateFiles.cjs.
-    warnings: [...extraWarnings, ...sizingWarnings(input)],
+    warnings: [...extraWarnings, ...sizingWarnings(input), ...sandboxWarnings(input)],
   };
 }
 

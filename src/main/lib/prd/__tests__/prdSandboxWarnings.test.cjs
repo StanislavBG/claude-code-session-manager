@@ -1,0 +1,63 @@
+/** Run: timeout 120 npx vitest run src/main/lib/prd/__tests__/prdSandboxWarnings.test.cjs */
+'use strict';
+
+import { test, expect } from 'vitest';
+const fsp = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const config = require('../../../config.cjs');
+const { sandboxWarnings } = require('../prdSandboxWarnings.cjs');
+const { createPrdBatch } = require('../prdCreate.cjs');
+
+const base = (o) => ({ goal: 'g', implementationNotes: 'n', acceptanceCriteria: ['a'], files: ['.claude/skills/x.md'], ...o });
+
+test('warns, names path, mentions Write/Edit and anchor', () => {
+  const [w, ...rest] = sandboxWarnings(base({ implementationNotes: 'git mv a b' }));
+  expect(rest).toEqual([]);
+  expect(w).toContain('.claude/skills/x.md');
+  expect(w).toMatch(/refused by the job sandbox/);
+  expect(w).toMatch(/Write\/Edit/);
+  expect(w).toContain('PRD_AUTHORING.md#job-sandbox-limits');
+});
+
+test('nested .claude dir matches', () => {
+  expect(sandboxWarnings(base({ files: ['pkg/.claude/agents/'], goal: 'git rm it' }))).toHaveLength(1);
+});
+
+test.each(['rm -rf x', 'run `rm x`', 'git rm y', 'then; rm z'])('matches %s', (t) => {
+  expect(sandboxWarnings(base({ goal: t }))).toHaveLength(1);
+});
+
+test.each(['form', 'confirm', 'perform the rmdir', 'an rmx tool'])('no match for %s', (t) => {
+  expect(sandboxWarnings(base({ goal: t }))).toEqual([]);
+});
+
+test('acceptance criteria text counts; no warning without .claude path or verb', () => {
+  expect(sandboxWarnings(base({ acceptanceCriteria: ['git mv a b'] }))).toHaveLength(1);
+  expect(sandboxWarnings(base({ files: ['src/a.cjs'], goal: 'rm x' }))).toEqual([]);
+  expect(sandboxWarnings(base({}))).toEqual([]);
+});
+
+test('createPrdBatch result carries the warning', async () => {
+  const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-sandbox-warn-'));
+  const outDir = path.join(cwd, 'out');
+  await fsp.mkdir(outDir, { recursive: true });
+  config.addAllowedRoot(cwd);
+  let nn = 300;
+  const remote = {
+    async allocateParallelGroup() { return nn++; },
+    async readPrd() { return { ok: false }; },
+    async writePrd(slug, body) {
+      const p = path.join(outDir, `${slug}.md`);
+      await fsp.writeFile(p, body);
+      return { ok: true, path: p };
+    },
+    async listPrds() { return { prds: [], total: 0, limit: 0, offset: 0, hasMore: false }; },
+  };
+  const r = await createPrdBatch([
+    { title: 'T', slug: 'sbx', estimateMinutes: 10, goal: 'git rm the old skill', acceptanceCriteria: ['a'],
+      implementationNotes: 'n', files: ['.claude/skills/old.md'] },
+  ], remote, { cwd, sourcePromptId: 'epic-a' });
+  expect(r.ok).toBe(true);
+  expect(JSON.stringify(r)).toContain('refused by the job sandbox');
+});

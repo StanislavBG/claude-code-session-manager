@@ -16,7 +16,7 @@ const POLL_INTERVAL_MS = 5000
 /**
  * Module-level cached singleton, mirroring useKnownProjects.ts's shape: one
  * shared `window.api.schedule.sessionSlots()` poll regardless of how many
- * components consume it. Before this, Home.tsx's Hero + ActiveSessionsCard
+ * components consume it. Before this, the Home hero, the footer
  * and SessionManagerConfig.tsx each ran their own independent 5s interval —
  * three IPC calls a tick for the same machine-wide pool snapshot, all three
  * kept alive forever since dockview never unmounts a screen it has opened.

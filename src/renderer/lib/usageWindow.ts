@@ -39,12 +39,12 @@ export function usageTitle(label: string, w: UsageWindow | null | undefined): st
   if (pct == null) return `${label} — usage unavailable`
   const reset = formatReset(w?.resets_at ?? null)
   const tail = reset ? ` · resets in ${reset.rel}${reset.abs ? ` (${reset.abs})` : ''}` : ''
-  return `${label} · ${pct}% used${tail} — click to open Home`
+  return `${label} · ${pct}% used${tail} — click to open History`
 }
 
 /**
- * Human label for a billing `limits[]` window kind. Same vocabulary as Home's
- * UsageMeters ("Session"/"5-hour", "Weekly"/"all models") and the footer.
+ * Human label for a billing `limits[]` window kind. Same vocabulary as the footer
+ * usage pills ("Session"/"5-hour", "Weekly"/"all models").
  * Unknown/future kinds fall back to the raw kind; null/empty → null.
  */
 export function windowKindLabel(kind: string | null | undefined, scopeModelName?: string | null): string | null {

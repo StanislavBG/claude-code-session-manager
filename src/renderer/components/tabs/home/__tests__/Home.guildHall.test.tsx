@@ -58,6 +58,9 @@ describe('Home — Guild Hall', () => {
     expect(el.querySelector('[data-testid="world-canvas"]')).toBeTruthy()
     expect(el.querySelector('h1')?.textContent).toBe('Guild Hall')
     expect(el.querySelector('[data-testid="home-panel-grid"]')).toBeNull()
+    expect(el.textContent).not.toMatch(/New epic/i)
+    expect(el.textContent).not.toContain('Reference')
+    expect(Array.from(el.querySelectorAll('button')).some((b) => /new epic/i.test(b.textContent ?? ''))).toBe(false)
     for (const t of ['Projects', 'Queued', 'Active sessions', 'Recent sessions', 'All history']) {
       expect(el.textContent).not.toContain(t)
     }

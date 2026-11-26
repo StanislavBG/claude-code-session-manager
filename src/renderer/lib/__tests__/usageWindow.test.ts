@@ -49,7 +49,7 @@ describe('usageTitle', () => {
     expect(t).toContain('Weekly window (all models)')
     expect(t).toContain('34% used')
     expect(t).toContain('resets in 4d 0h')
-    expect(t).toContain('click to open Home')
+    expect(t).toContain('click to open History')
   })
 
   it('degrades to an explicit "unavailable" instead of a bare percent sign', () => {

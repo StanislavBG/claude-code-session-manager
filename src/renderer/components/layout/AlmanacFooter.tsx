@@ -6,13 +6,12 @@
  * lib/useAutoUpdater.ts; otherwise amber `v<cur> → v<latest>` / `Download v<latest>`
  * when the running build is behind npm `latest`, via the `check` field of lib/useAutoUpdater.ts).
  *
- * Both usage pills read the same windows Home's UsageMeters render
- * (`five_hour` = "Session", `seven_day` = "Weekly · all models") and share its
- * formatting via lib/usageWindow.ts, so the two surfaces can't drift.
+ * Both usage pills read the billing windows (`five_hour` = "Session",
+ * `seven_day` = "Weekly · all models") and share their formatting via
+ * lib/usageWindow.ts, so every surface showing them can't drift.
  *
  * Click handlers route through props rather than navigate-directly so the
- * App owns routing — either usage pill opens Home (where the full billing
- * meters live), branch opens nothing (informational), connected dot opens
+ * App owns routing — either usage pill opens History (analytics/cost), branch opens nothing (informational), connected dot opens
  * Settings.
  */
 
@@ -115,7 +114,7 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
       </button>
 
       <button
-        onClick={() => onNavigate?.('overview')}
+        onClick={() => onNavigate?.('history')}
         className="hover:text-fg transition-colors"
         title={usageTitle('Session (5h window)', fiveHour)}
         data-testid="footer-usage-session"
@@ -124,7 +123,7 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
       </button>
 
       <button
-        onClick={() => onNavigate?.('overview')}
+        onClick={() => onNavigate?.('history')}
         className="hover:text-fg transition-colors"
         title={usageTitle('Weekly window (all models)', sevenDay)}
         data-testid="footer-usage-weekly"

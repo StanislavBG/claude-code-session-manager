@@ -9,7 +9,7 @@ import { useBilling } from '../../../state/billing'
 /**
  * The bottom information bar must state BOTH billing windows the Home usage
  * meters show — session (5h) and weekly (7d) — and each must be a live route
- * into Home, where the full meters live. A weekly pill that renders but does
+ * into History, where the analytics/cost live. A weekly pill that renders but does
  * nothing on click is the regression this guards.
  */
 
@@ -74,13 +74,13 @@ describe('AlmanacFooter usage pills', () => {
     expect(pill('footer-usage-weekly')?.textContent).toContain('79%')
   })
 
-  it('routes both pills to Home', () => {
+  it('routes both pills to History', () => {
     const onNavigate = vi.fn()
     render(onNavigate)
     setUsage(10, 20)
     act(() => { pill('footer-usage-session')!.click() })
     act(() => { pill('footer-usage-weekly')!.click() })
-    expect(onNavigate.mock.calls.map((c) => c[0])).toEqual(['overview', 'overview'])
+    expect(onNavigate.mock.calls.map((c) => c[0])).toEqual(['history', 'history'])
   })
 
   it('renders an em-dash rather than disappearing when a window is unavailable', () => {

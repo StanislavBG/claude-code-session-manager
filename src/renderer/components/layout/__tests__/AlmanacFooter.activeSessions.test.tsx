@@ -9,7 +9,7 @@ import { __resetSessionSlotsForTests } from '../../../lib/useSessionSlots'
 
 /**
  * The footer's active-sessions dot row must mirror the machine-wide
- * claude -p slot pool exactly and route to Home's ActiveSessionsCard, so it
+ * claude -p slot pool exactly and route to the Guild Hall (overview), so it
  * can never drift from the Session pool card in SessionManagerConfig.tsx.
  */
 

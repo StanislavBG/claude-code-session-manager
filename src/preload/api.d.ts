@@ -1117,6 +1117,8 @@ export interface ScheduleJob {
   artifactPaths?: string[] | null;
   /** PRD frontmatter library voice (in-process only); handed to the job as SM_VOICE_ID. */
   voiceId?: string | null;
+  /** PRD frontmatter persona (queue rows carry it; absent = dev-lead). */
+  agentType?: string;
   slug: string;
   title: string;
   cwd: string | null;

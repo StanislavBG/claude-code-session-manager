@@ -18,6 +18,7 @@ import {
   ProjectOverrideBlock, overrideChipText, toDraft, type Draft, type OpenProject,
 } from './AgentDetail'
 import { GearPanel } from './GearPanel'
+import { LoadoutFirstRun } from './LoadoutFirstRun'
 import { ConstraintsPanel } from './ConstraintsPanel'
 import { loadoutOf, type LoadoutState } from './AgentRoster'
 
@@ -494,6 +495,7 @@ export function AgentSheet({
           </div>
 
           <div className="flex flex-col gap-4 min-w-0">
+            {state === 'undecided' && !isNew && saved && <LoadoutFirstRun obj={obj} savedTools={saved.tools} set={set} />}
             <GearPanel obj={obj} set={set} />
             <ConstraintsPanel obj={obj} set={set} />
             <AppliesToCard />

@@ -49,6 +49,8 @@ export interface Draft {
   packs?: string[]
   /** Declared sandbox environment profile (`environment:` frontmatter); absent = headless-default. */
   environment?: string
+  /** The loadout decision made in this draft (first-run choice). Absent = no decision made here; `tools` alone carries Equipped/Unbound. */
+  loadout?: 'bare' | 'equipped' | 'unbound'
 }
 
 export function toDraft(p: AgentPersona): Draft {

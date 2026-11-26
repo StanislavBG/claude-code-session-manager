@@ -183,10 +183,22 @@ async function findOpenProject(projectCwd, loadSessions) {
   return project;
 }
 
+/** Frontmatter keys a project overlay may carry (everything else in an overlay is preserved verbatim). */
+const OVERLAY_KEYS = new Set(['model', 'effort', 'tools', 'mcpServers', 'packs', 'environment']);
+
+/** Throws when an overlay's managed lines fail the persona schema's per-key rules (a placeholder model stands in for the global one). */
+function assertValidOverlayKeys(name, managedLines) {
+  const { validatePersonaFrontmatter } = require('./lib/persona-macro/personaFrontmatterSchema.cjs');
+  const fm = { ...splitFrontmatter(['---', ...managedLines, '---', ''].join('\n')).fm };
+  if (!('model' in fm) || fm.model === undefined) fm.model = 'sonnet';
+  const result = validatePersonaFrontmatter(fm);
+  if (!result.ok) throw new Error(`invalid project override for ${name}: ${result.errors.join('; ')}`);
+}
+
 /**
  * Project OVERRIDE write: a frontmatter-only overlay at
  * `<projectCwd>/.claude/agents/<name>.md` carrying ONLY the overridden `model` /
- * `effort` keys and no body (lib/persona-macro/personaMerge.cjs inherits everything else
+ * `effort` / `tools` / `mcpServers` / `packs` / `environment` keys and no body (lib/persona-macro/personaMerge.cjs inherits everything else
  * from the global persona). `projectCwd` must be an OPEN project's cwd (see
  * findOpenProject). Keys already in an existing frontmatter-only
  * overlay are preserved; an existing overlay that has a BODY is refused so a
@@ -202,7 +214,7 @@ async function findOpenProject(projectCwd, loadSessions) {
  * unknown or empty `projectCwd` throws in findOpenProject first, so nothing is
  * registered for it.
  */
-async function saveOverlay({ name, projectCwd, model, effort, loadSessions, validatePath, writeTextAtomic, addAllowedRoot }) {
+async function saveOverlay({ name, projectCwd, model, effort, tools, loadout, mcpServers, packs, environment, loadSessions, validatePath, writeTextAtomic, addAllowedRoot }) {
   const project = await findOpenProject(projectCwd, loadSessions);
   // Dormant tab = no pty-registered root; see JSDoc + projectBrief.cjs allowBriefWrites.
   addAllowedRoot(validatePath(project.cwd));
@@ -214,7 +226,7 @@ async function saveOverlay({ name, projectCwd, model, effort, loadSessions, vali
     if (existing.body.trim() !== '') {
       throw new Error(`${name} has a full-body override in ${project.name} — edit ${target} directly; it is not converted to a frontmatter-only override`);
     }
-    preserved = extractUnmanagedLines(rawExisting, new Set(['model', 'effort']));
+    preserved = extractUnmanagedLines(rawExisting, OVERLAY_KEYS);
   } catch (e) {
     if (e.code !== 'ENOENT') throw e;
   }
@@ -222,6 +234,14 @@ async function saveOverlay({ name, projectCwd, model, effort, loadSessions, vali
   for (const [k, v] of [['model', model], ['effort', effort]]) {
     if (v && v !== 'inherit') managedLines.push(`${k}: ${v}`);
   }
+  // Gear keys REPLACE the global value for this project (personaMerge.cjs). Unset = no line = inherit.
+  // `tools: []` alone is the override call's dummy value, so Bare/Unbound need an explicit `loadout`.
+  const toolsValue = loadout ? encodeLoadout(loadout, tools) : (Array.isArray(tools) && tools.length ? encodeLoadout('equipped', tools) : null);
+  if (toolsValue) managedLines.push(`tools: ${toolsValue}`);
+  if (Array.isArray(mcpServers) && mcpServers.length) managedLines.push(`mcpServers: ${mcpServers.join(', ')}`);
+  if (Array.isArray(packs) && packs.length) managedLines.push(`packs: ${packs.join(', ')}`);
+  if (typeof environment === 'string' && environment.trim()) managedLines.push(`environment: ${environment.trim()}`);
+  if (managedLines.length) assertValidOverlayKeys(name, managedLines);
   if (managedLines.length === 0 && preserved.length === 0) {
     await removeOverride({ name, projectCwd: project.cwd, loadSessions, validatePath });
     return { ok: true, path: target, removed: true };
@@ -287,6 +307,7 @@ async function savePersona({
   mcpServers,
   packs,
   environment,
+  loadout,
   body,
   projectCwd,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
@@ -299,7 +320,7 @@ async function savePersona({
     throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
   }
   if (projectCwd !== undefined) {
-    return saveOverlay({ name, projectCwd, model, effort, loadSessions, validatePath, writeTextAtomic, addAllowedRoot });
+    return saveOverlay({ name, projectCwd, model, effort, tools, loadout, mcpServers, packs, environment, loadSessions, validatePath, writeTextAtomic, addAllowedRoot });
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
   // A caller that omits seedVersion/title/projects/action/actionLabel (the

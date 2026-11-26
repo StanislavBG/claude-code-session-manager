@@ -190,3 +190,29 @@ test('scheduled-PRD model resolution returns the overlay model; global persona s
   const [g] = await listPersonas(deps);
   expect(g.model).toBe('sonnet');
 });
+
+test('gear keys are written, replaced, preserved-or-removed like model/effort; clearing all removes the file', async () => {
+  const { overlayFile, save } = setup();
+  await save({ model: 'opus', tools: ['Read', 'Grep'], mcpServers: ['a'], packs: ['p1'], environment: 'sandboxed' });
+  expect(fs.readFileSync(overlayFile, 'utf8')).toBe('---\nmodel: opus\ntools: Read, Grep\nmcpServers: a\npacks: p1\nenvironment: sandboxed\n---\n');
+  await save({ model: 'opus', packs: ['p2'] }); // unset keys are removed
+  expect(fs.readFileSync(overlayFile, 'utf8')).toBe('---\nmodel: opus\npacks: p2\n---\n');
+  await save({ loadout: 'bare' });
+  expect(fs.readFileSync(overlayFile, 'utf8')).toBe('---\ntools: []\n---\n');
+  const r = await save({});
+  expect(r.removed).toBe(true);
+  expect(fs.existsSync(overlayFile)).toBe(false);
+});
+
+test('a gear overlay merges over the global (replace) and an invalid gear value or a body overlay is refused', async () => {
+  const { overlayFile, globalFile, save } = setup();
+  fs.writeFileSync(globalFile, '---\nname: dev-lead\ndescription: d\nmodel: sonnet\ntools: Read, Bash\npacks: p1\n---\nG.\n');
+  await save({ tools: ['Grep'] });
+  const { resolveMergedPersona } = require('../lib/persona-macro/personaMerge.cjs');
+  const m = resolveMergedPersona(path.dirname(path.dirname(path.dirname(overlayFile))), 'dev-lead', { globalDir: path.dirname(globalFile), validatePath: (p) => p });
+  expect(m.fm.tools).toBe('Grep');
+  expect(m.fm.packs).toBe('p1');
+  await expect(save({ environment: 'Bad Env' })).rejects.toThrow(/invalid project override/);
+  fs.writeFileSync(overlayFile, '---\ntools: Read\n---\nBody.\n');
+  await expect(save({ tools: ['Grep'] })).rejects.toThrow(/full-body/);
+});

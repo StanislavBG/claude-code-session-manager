@@ -838,7 +838,36 @@ const setSessionSlotsSchema = z.object({
 // only after a production incident (see scheduleJobSchema.cjs's header).
 // Full field-level rules live in lib/persona-macro/agentPersonaSchema.cjs, mirroring
 // AgentPersonaSaveInput (src/preload/api.d.ts) field-for-field.
-const agentsSavePersona = AgentPersonaSaveSchema;
+// A project override (projectCwd set) may also carry the gear keys, validated with the persona
+// frontmatter rules (saveOverlay re-checks the serialized lines). AgentPersonaSaveSchema is
+// .strict(), so the gear keys are split off, validated here, and merged back.
+const AgentOverlayGearSchema = z.object({
+  loadout: z.enum(['undecided', 'bare', 'equipped', 'unbound']).optional(),
+  mcpServers: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
+  packs: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
+  environment: z.string().trim().regex(/^[a-z0-9][a-z0-9-]*$/, 'environment must be a lowercase, hyphenated profile name').optional(),
+}).strict();
+const GEAR_KEYS = ['loadout', 'mcpServers', 'packs', 'environment'];
+const agentsSavePersona = z.record(z.string(), z.unknown()).transform((raw, ctx) => {
+  /** @type {Record<string, unknown>} */
+  const gear = {};
+  const rest = { ...raw };
+  const hasCwd = rest.projectCwd !== undefined;
+  for (const k of GEAR_KEYS) {
+    if (k in rest) { gear[k] = rest[k]; delete rest[k]; }
+  }
+  if (!hasCwd && Object.keys(gear).length) {
+    ctx.addIssue({ code: 'custom', message: `${Object.keys(gear).join(', ')} are accepted only on a project override (projectCwd set)` });
+    return z.NEVER;
+  }
+  const base = AgentPersonaSaveSchema.safeParse(rest);
+  const g = AgentOverlayGearSchema.safeParse(gear);
+  if (!base.success || !g.success) {
+    for (const r of [base, g]) if (!r.success) for (const i of r.error.issues) ctx.addIssue({ code: 'custom', path: i.path, message: i.message });
+    return z.NEVER;
+  }
+  return { ...base.data, ...g.data };
+});
 // agents:remove-override — an OPEN project's override, keyed by its absolute cwd (never a folder name).
 const agentsRemoveOverride = z.object({ name: PersonaNameSchema, projectCwd: ProjectCwdSchema }).strict();
 // agents:delete-persona — a kebab-case name only; `.strict()` also bars deletePersona's injectable `globalDir`.

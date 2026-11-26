@@ -11,6 +11,10 @@
  * MERGE RULES
  *   - Frontmatter: overlay keys override the global's; a key absent from the
  *     overlay (or present with an empty value) falls back to the global.
+ *   - Gear keys (`tools`, `mcpServers`, `packs`, `environment`) REPLACE the
+ *     global value wholesale — never a union (a Bare `tools: []` overlay wins
+ *     over the global's tools); absent keys inherit. `loadout` on the result is
+ *     computed from the MERGED `tools`.
  *   - Body: an overlay with a non-empty body replaces the global body wholesale
  *     (the pre-merge behavior); a frontmatter-only overlay (`body.trim() === ''`)
  *     inherits the global body.
@@ -36,6 +40,7 @@ const fs = require('node:fs');
 const { splitFrontmatter } = require('../prd/prdFrontmatter.cjs');
 const { resolvePersonaPaths } = require('../epic/epicMint.cjs');
 const configMgr = require('../../config.cjs');
+const { loadoutState } = require('./personaLoadout.cjs');
 
 /** Filename-safe persona name: lowercase, hyphenated, matches the `.md` files on disk. */
 const PERSONA_NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -93,7 +98,7 @@ function serializeMerged(fm, body) {
  * @returns {null | {
  *   fm: Record<string,string>, body: string, text: string, path: string,
  *   overlayPath: string|null, globalPath: string|null,
- *   fromOverlay: boolean, bodySource: 'overlay'|'global',
+ *   loadout: 'undecided'|'bare'|'equipped'|'unbound', fromOverlay: boolean, bodySource: 'overlay'|'global',
  *   provenance: Record<string,'overlay'|'global'>, overlayIssue: string|null,
  * }}
  *   `path` is the file the BODY came from; `text` is that file's raw text when
@@ -128,11 +133,11 @@ function resolveMergedPersona(cwd, agentType, deps = {}) {
     if (!overlay && !global) return null;
     if (!overlay) {
       const provenance = Object.fromEntries(Object.keys(global.fm).map((k) => [k, 'global']));
-      return { ...base, fm: global.fm, body: global.body, text: global.text, path: global.path, fromOverlay: false, bodySource: 'global', provenance };
+      return { ...base, fm: global.fm, body: global.body, text: global.text, path: global.path, loadout: loadoutState(global.fm), fromOverlay: false, bodySource: 'global', provenance };
     }
     if (!global) {
       const provenance = Object.fromEntries(Object.keys(overlay.fm).map((k) => [k, 'overlay']));
-      return { ...base, fm: overlay.fm, body: overlay.body, text: overlay.text, path: overlay.path, fromOverlay: true, bodySource: 'overlay', provenance };
+      return { ...base, fm: overlay.fm, body: overlay.body, text: overlay.text, path: overlay.path, loadout: loadoutState(overlay.fm), fromOverlay: true, bodySource: 'overlay', provenance };
     }
 
     const fm = { ...global.fm };
@@ -154,6 +159,7 @@ function resolveMergedPersona(cwd, agentType, deps = {}) {
       body,
       text,
       path: overlayHasBody ? overlay.path : global.path,
+      loadout: loadoutState(fm),
       fromOverlay: true,
       bodySource,
       provenance,

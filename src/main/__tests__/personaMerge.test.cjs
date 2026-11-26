@@ -170,3 +170,20 @@ test('getPersonaBody / effectiveModelInfo / listPersonas report per-field proven
   expect(dev.overridingProjects).toEqual([path.basename(cwd)]);
   expect(dev.overrideDetails[0]).toMatchObject({ fields: ['model'], bodyOverridden: false, issue: null });
 });
+
+test('overlay gear keys REPLACE the global values (no union); absent keys inherit; loadout is computed on the merged result', () => {
+  const g = { fm: ['name: dev-lead', 'description: d', 'model: sonnet', 'tools: Read, Bash', 'mcpServers: a, b', 'packs: p1', 'environment: headless-default'], body: 'G.' };
+  const { cwd, deps } = setup({ global: g, overlay: { fm: ['tools: Grep', 'mcpServers: c', 'packs: p2', 'environment: sandboxed'], body: '' } });
+  const m = resolveMergedPersona(cwd, 'dev-lead', deps);
+  expect(m.fm).toMatchObject({ tools: 'Grep', mcpServers: 'c', packs: 'p2', environment: 'sandboxed' });
+  expect(m.provenance.tools).toBe('overlay');
+  expect(m.loadout).toBe('equipped');
+
+  const inherit = setup({ global: g, overlay: { fm: ['model: opus'], body: '' } });
+  const mi = resolveMergedPersona(inherit.cwd, 'dev-lead', inherit.deps);
+  expect(mi.fm).toMatchObject({ tools: 'Read, Bash', mcpServers: 'a, b', packs: 'p1', environment: 'headless-default' });
+  expect(mi.loadout).toBe('equipped');
+
+  const bare = setup({ global: g, overlay: { fm: ['tools: []'], body: '' } });
+  expect(resolveMergedPersona(bare.cwd, 'dev-lead', bare.deps).loadout).toBe('bare');
+});

@@ -108,7 +108,6 @@ function isEntry(e) {
   const r = /** @type {Record<string, unknown>} */ (e);
   return isAbsPath(r.cwd) && isAbsPath(r.fromCwd)
     && typeof r.externalRef === 'string' && r.externalRef.length > 0
-    && (r.repo === null || r.repo === undefined || typeof r.repo === 'string')
     && typeof r.createdAt === 'number';
 }
 

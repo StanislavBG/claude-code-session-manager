@@ -186,6 +186,20 @@ test('loaded entries with an invalid repo get repo null; valid repos are kept', 
   expect(s.findByCwd('/p/max').repo).toBe('y'.repeat(200));
 });
 
+test('loaded entries with a non-string repo are kept with repo null', () => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const e = (cwd, externalRef, repo) => ({ cwd, fromCwd: FROM, externalRef, repo, createdAt: 1 });
+  fs.writeFileSync(file, JSON.stringify({ version: 1, projects: [
+    e('/p/obj', 'ref-obj', { fullName: 'x' }),
+    e('/p/num', 'ref-num', 5),
+  ] }));
+  const s = createCreatedProjects({ filePath: file });
+  expect(s.findByRef(FROM, 'ref-obj').repo).toBeNull();
+  expect(s.findByRef(FROM, 'ref-num').repo).toBeNull();
+  expect(s.findByCwd('/p/obj').repo).toBeNull();
+  expect(s.findByCwd('/p/num').repo).toBeNull();
+});
+
 test('file is written with mode 0600', async () => {
   const s = createCreatedProjects({ filePath: file });
   await s.record({ cwd: '/p/a', fromCwd: FROM, externalRef: 'r' });

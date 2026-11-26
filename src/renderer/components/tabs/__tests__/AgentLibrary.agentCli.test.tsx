@@ -61,6 +61,11 @@ async function mount(p: AgentPersona) {
     root!.render(createElement(AgentLibrary))
     for (let i = 0; i < 8; i++) await Promise.resolve()
   })
+  // The roster is the landing; open the first persona's sheet like the old auto-selection did.
+  await act(async () => {
+    container!.querySelector<HTMLElement>('[data-testid="agent-card"]')?.click()
+    await Promise.resolve()
+  })
   return container
 }
 

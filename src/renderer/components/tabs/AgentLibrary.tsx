@@ -3,6 +3,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
 import { ConfigFileCard, ConfigListRow, ConfigListToolbar, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { TagLibrary } from './TagLibrary'
+import { AgentRoster } from './agents/AgentRoster'
 import { AgentDetail, BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject } from './agents/AgentDetail'
 import { toast } from '../../state/toast'
 import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
@@ -178,7 +179,7 @@ function AgentLibraryComponent() {
   const filtered = personas.filter(
     (p) => !needle || p.name.toLowerCase().includes(needle) || (p.description ?? '').toLowerCase().includes(needle),
   )
-  const saved = personas.find((p) => p.name === selectedName) ?? personas[0] ?? null
+  const saved = personas.find((p) => p.name === selectedName) ?? null
   const obj: Draft | null = draft ?? (saved ? toDraft(saved) : null)
   const dirty = !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(toDraft(saved))
   const isNew = creating
@@ -308,9 +309,34 @@ function AgentLibraryComponent() {
     }
   }
 
+  // No agent selected (and not authoring a new one) = the roster landing.
+  if (!selectedName && !creating) {
+    return (
+      <div className="flex flex-col h-full min-h-0">
+        <AgentRoster
+          personas={personas}
+          filter={filter}
+          onFilterChange={setFilter}
+          onOpen={(name) => pick(name)}
+          onNew={create}
+          view={view}
+          onView={setView}
+        />
+      </div>
+    )
+  }
+
   const list = (
     <>
       {folderCard}
+      <button
+        type="button"
+        data-testid="agent-back-to-roster"
+        onClick={() => { setDraft(null); setCreating(false); setConfirmDelete(false); setRowConfirmDelete(null); setSelectedName(null) }}
+        className="self-start text-[11px] text-fg-dim hover:text-fg"
+      >
+        ← All agents
+      </button>
       <ConfigListToolbar filter={filter} onFilterChange={setFilter} placeholder="Filter" primaryLabel="+ New" onPrimary={create} />
       <div role="listbox" aria-label="Agents" className="flex flex-col gap-0.5">
         {isNew && obj && (

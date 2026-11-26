@@ -68,6 +68,11 @@ async function mount(model: string | null, catalog: unknown, effort: string | nu
     root!.render(createElement(AgentLibrary))
     for (let i = 0; i < 6; i++) await Promise.resolve()
   })
+  // The roster is the landing; open the first persona's sheet like the old auto-selection did.
+  await act(async () => {
+    container!.querySelector<HTMLElement>('[data-testid="agent-card"]')?.click()
+    await Promise.resolve()
+  })
   return container
 }
 

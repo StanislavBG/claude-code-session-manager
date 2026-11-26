@@ -22,7 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // checked for legibility only. Output folder: ./shotsOutDir.ts (default test-results/agent-sheet/,
 // gitignored; SM_SHOTS_OUT=<path> overrides).
 //
-// A frame whose UI does not exist yet is skipped (test.skip with the missing testid named); the PRD that
+// The roster frame (1a) is built (AgentRoster, testid 'agent-roster'). A frame whose UI does not exist yet is skipped (test.skip with the missing testid named); the PRD that
 // builds that UI un-skips it by adding the testid.
 const root = path.resolve(__dirname, '../..')
 const SHOTS: ShotsSpec = { specName: 'agent-sheet' }
@@ -45,7 +45,7 @@ const selectRow = (name: string) => async (page: Page) => {
 }
 
 const FRAMES: Frame[] = [
-  { name: 'roster', testid: 'agent-roster', reference: '1a-roster.png' },
+  { name: 'roster', testid: 'agent-roster', reference: '1a-roster.png', setUp: async (page) => { await page.getByTestId('agent-card').first().waitFor() } },
   // The sheet frame renders today's list + detail; the later sheet PRDs tighten it to the workbench.
   { name: 'sheet', testid: 'agent-view-switch', reference: '1b-sheet-workbench.png', setUp: selectRow('architect') },
   { name: 'armory-drag', testid: 'agent-armory', reference: '1e-armory-mid-drag.png' },

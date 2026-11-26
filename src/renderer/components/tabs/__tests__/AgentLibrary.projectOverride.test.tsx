@@ -79,6 +79,11 @@ async function mount(details: Detail[], cwds: string[], opts: { activeIdx?: numb
     root!.render(createElement(AgentLibrary))
     await flush()
   })
+  // The roster is the landing; open the first persona's sheet like the old auto-selection did.
+  await act(async () => {
+    container!.querySelector<HTMLElement>('[data-testid="agent-card"]')?.click()
+    await Promise.resolve()
+  })
   // The picker sits behind the PROJECT OVERRIDES row's '+ Add override' link.
   if (opts.openPicker !== false) {
     const add = container.querySelector('[data-testid="agent-override-add"]') as HTMLElement | null

@@ -54,7 +54,7 @@ function silentLogger() {
   return { log: () => {}, warn: () => {} };
 }
 
-const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist', 'competitive-researcher', 'competitive-analyst'];
+const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist', 'competitive-researcher', 'competitive-analyst', 'plan-reviewer'];
 
 test('fresh seed writes every persona file', async () => {
   await seedAgentPersonas({ logger: silentLogger() });

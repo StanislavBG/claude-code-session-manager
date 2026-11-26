@@ -970,6 +970,20 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       },
     },
   ],
+  "plan-reviewer": [
+    {
+      commit: "seed-v1",
+      bodySha256: "267ccfbbe5767ac2673bdf412c35444677145f9ec7f71d2accfd550d1051e412",
+      fm: {
+        description: "Reviews a queued plan's PRD text BEFORE dispatch — runs a fixed checklist over every PRD, optionally runs each gate read-only at the plan's base commit, and returns checked JSON per PRD (ok / amend / block with concrete suggested edits) plus plan-level findings. Never edits PRDs or code and never queues work.",
+        tools: "Read, Grep, Glob, Bash",
+        model: "sonnet",
+        effort: "high",
+        title: "Engineering — Plan Reviewer",
+        executorOnly: "true",
+      },
+    },
+  ],
 });
 
 module.exports = { SHIPPED_PERSONA_SEEDS };

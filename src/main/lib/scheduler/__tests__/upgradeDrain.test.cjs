@@ -169,3 +169,35 @@ describe('restarting marker', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+describe('retireRestartRequestBestEffort', () => {
+  test('missing and removed files give ok:true', () => {
+    const dir = tmp();
+    try {
+      const file = path.join(dir, 'restart-request.json');
+      assert.deepEqual(ud.retireRestartRequestBestEffort(file), { ok: true });
+      fs.writeFileSync(file, '{}');
+      assert.deepEqual(ud.retireRestartRequestBestEffort(file), { ok: true });
+      assert.equal(fs.existsSync(file), false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+  test('a directory at the path gives ok:false without throwing', () => {
+    const dir = tmp();
+    try {
+      const file = path.join(dir, 'restart-request.json');
+      fs.mkdirSync(file);
+      const r = ud.retireRestartRequestBestEffort(file);
+      assert.equal(r.ok, false);
+      assert.ok(r.error);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+  test('another unlink error gives ok:false without throwing', () => {
+    const dir = tmp();
+    try {
+      const file = path.join(dir, 'x', 'restart-request.json');
+      fs.writeFileSync(path.join(dir, 'x'), 'a'); // parent is a file → ENOTDIR
+      const r = ud.retireRestartRequestBestEffort(file);
+      assert.equal(r.ok, false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});

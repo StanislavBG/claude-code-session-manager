@@ -395,7 +395,8 @@ async function rebootApp({ force = false } = {}) {
     logReboot('force reboot requested — immediate, not draining');
     // This reboot IS the restart any pending request asked for; never leave one
     // behind for the next boot to drain and restart a second time.
-    upgradeDrain.retireRestartRequest();
+    const retired = upgradeDrain.retireRestartRequestBestEffort();
+    if (!retired.ok) logReboot(`could not retire restart request (continuing): ${retired.error}`);
     return performReboot();
   }
   const request = upgradeDrain.requestRestart({ reason: 'user-reboot', requestedBy: 'user' });

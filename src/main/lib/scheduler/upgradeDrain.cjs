@@ -74,6 +74,16 @@ function retireRestartRequest(file = schedulerPaths.restartRequestPath()) {
   try { fs.unlinkSync(file); } catch (e) { if (e?.code !== 'ENOENT') throw e; }
 }
 
+/** Never throws: { ok: true } or { ok: false, error } (for the forced-reboot path). */
+function retireRestartRequestBestEffort(file = schedulerPaths.restartRequestPath()) {
+  try {
+    retireRestartRequest(file);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e?.code || e?.message || String(e) };
+  }
+}
+
 // ---------- pure state machine ----------
 
 /**
@@ -183,6 +193,7 @@ module.exports = {
   requestRestart,
   stampDrainCompleted,
   retireRestartRequest,
+  retireRestartRequestBestEffort,
   queueBusyCount,
   evaluateDrain,
   bootDrainAction,

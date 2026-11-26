@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v30 -->
+<!-- PRD_AUTHORING.md v31 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -146,6 +146,8 @@ The executor can't ask you anything: no `ScheduleWakeup`, Cron, Monitor, `AskUse
 Worktree reach: every PRD runs in an isolated git worktree holding tracked files plus linked dependencies: `node_modules` (the root and each nested npm package's) is a worktree-local folder whose entries link to the main checkout's, and non-uv `.venv`/`venv` is symlinked whole; pnpm projects (pnpm-lock.yaml) get a worktree-local `node_modules` installed offline from the store, and uv projects (uv.lock) get a worktree-local env built by an offline frozen `uv sync`, not a symlink. Why: a pnpm install through the symlink purged the main checkout's node_modules (Bilko-Game-Academy 2026-10-18). A step that needs gitignored runtime state (databases, downloads/, browser profiles, logs) or a live side effect must address the main checkout by absolute path (e.g. `$HOME/Projects/<repo>/...`), be artifact-only (a deliverable artifact + `artifactPaths`, no tracked edits), and `dependsOn` the PRD that lands its tracked edits. A project may declare `worktreeSetup` gate-syntax commands in a tracked `.session-manager.json` at the repo root; they run once per fresh job worktree and baseline scratch worktree, before the executor starts, with cwd = the worktree root (a project in a subfolder names it, e.g. `timeout 600 godot --headless --path game --import`). Setups run one at a time per project and are never skipped; they must write only inside the worktree (node_modules entries and non-uv venvs link into the main checkout). The outcome is the `[scheduler] worktree setup:` lines at the top of the run log plus `worktreeSetup` in the run's meta.json. Host crontab installs stay human-only (see §14).
 Why: burrow PRD 1516 halted because its relative `.venv` python against downloads/fb-tracker.db, scripts/install-cron.sh and `pipeline-cron.sh --now` resolved inside the worktree (no runtime state; install-cron would bake a temporary worktree path into crontab), while sibling 1494 succeeded the same day using an absolute main-checkout path and artifact-only output. `scheduler_create_prd` warns on relative gitignored paths.
 
+Live checks: A check against a running local service is an `http` criterion (loopback only, run by the scheduler outside the sandbox). `http` criteria are GET-only and send no credentials, so a bearer-authed route (Session Manager's own `/admin/*` routes) is never probed from a PRD gate, job step or criterion. The Epic's architect probes it read-only at PLAN SETTLED, publishes the record with `artifact_publish`, and a validator criterion cites the record's `storedPath` and `sha256`; see [Authenticated admin routes](../../../session-manager-operations/architecture/scheduler-operations.md#authenticated-admin-routes).
+
 Rule: gates never run `npm ci` or `npm install` — dependencies are already linked, so an install only slows the run.
 Why: `npm --prefix web/feedback-widget ci` through the old whole-folder link emptied the main checkout's web/feedback-widget/node_modules (session-manager, 2026-11-24).
 
@@ -247,6 +249,7 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§7 Self-contained:** no reference to "the conversation" or outside context; paths/identifiers inline; clean UTF-8, no NUL bytes (`grep -qP '\x00' file && echo BAD`).
 - [ ] **§7 Worktree reach:** no relative path to a gitignored file; live-run steps use absolute main-checkout paths in an artifact-only PRD. Why: the job worktree has no gitignored runtime state, so relative paths fail or bake a temporary path into host config (burrow 1516).
 - [ ] **§7 No installs:** no gate runs `npm ci` or `npm install`. Why: dependencies are linked; an install through a link emptied the main checkout's web/feedback-widget/node_modules (2026-11-24).
+- [ ] **No authed loopback probe:** no gate or criterion probes a bearer-authed loopback route (`/admin/*`); `http` criteria are GET-only with no credentials. Why: release checks 4539 and 4337 prescribed one and ended silent_no_op.
 - [ ] **§8 Scope:** targets ≤10 min, ceiling 15; e2e/publish sharded to one spec per PRD.
 - [ ] **§9 Failure surfacing:** errors exit 1 with a diagnostic line; no silent `|| true`.
 - [ ] **§10 Negative assertions:** every "should find nothing" check is inverted to exit 0 on the clean case.

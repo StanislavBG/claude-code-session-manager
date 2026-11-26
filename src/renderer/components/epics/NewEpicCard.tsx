@@ -227,6 +227,11 @@ export function NewEpicCard({
   const [justClaude, setJustClaude] = useState<boolean>(() => Boolean(
     editDraft && seed && seed.developLoop === false && seed.agentName === NO_AGENT && seed.tag === null
     && (!editDraft.agentCli || editDraft.agentCli === 'claude')))
+  // Latest values for effects that must not re-run when they change.
+  const agentsRef = useRef(agents)
+  agentsRef.current = agents
+  const justClaudeRef = useRef(justClaude)
+  justClaudeRef.current = justClaude
   // The Agent/Mission picked just before the switch went ON, restored when it goes OFF.
   const justClaudePrevRef = useRef<{ agentName: string; tag: EpicTag | null; touched: boolean } | null>(null)
   // Which CLI runs the session (third independent selection); 'claude' = Claude Code, the default.
@@ -334,12 +339,12 @@ export function NewEpicCard({
     readLastEpicAgent(effectiveCwd).then((value) => {
       if (cancelled) return
       lastAgentByCwd.current.set(effectiveCwd, value)
-      if (agentTouchedRef.current || editDraft || justClaude || !agents || agents.length === 0) return
-      setAgentName(pickDefaultEpicAgent(agents, value))
+      const list = agentsRef.current
+      if (agentTouchedRef.current || editDraft || justClaudeRef.current || !list || list.length === 0) return
+      setAgentName(pickDefaultEpicAgent(list, value))
     })
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveCwd, editDraft, agents])
+  }, [effectiveCwd, editDraft])
 
   // A pick is only good for the project it was listed in, and never once that
   // session is open as a tab (two writers on one transcript): drop it when either stops holding.

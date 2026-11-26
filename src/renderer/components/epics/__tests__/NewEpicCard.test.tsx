@@ -2271,6 +2271,45 @@ describe('NewEpicCard last-used Agent default', () => {
     expect(cfg().writeJson).toHaveBeenCalledWith(PREFS, expect.objectContaining({ lastEpicAgent: 'builder' }), 'ui-prefs')
   })
 
+  it('(g) a persona-list refresh does not re-read prefs.json', async () => {
+    lib(); prefsWith('dev-lead')
+    let fire: () => void = () => {}
+    const w = window as unknown as { api: { agents: { onChanged?: (cb: () => void) => () => void } } }
+    w.api.agents.onChanged = (cb) => { fire = cb; return () => {} }
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const reads = () => cfg().readJson.mock.calls.filter((c) => c[0] === PREFS).length
+    expect(reads()).toBe(1)
+    await act(async () => { fire() })
+    await act(async () => {})
+    expect(listPersonasSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(reads()).toBe(1)
+    expect(sel(el, 'dev-lead')).toBe('true')
+  })
+
+  it('(h) personas resolving after readJson still select the remembered agent', async () => {
+    prefsWith('dev-lead')
+    let resolve!: (v: AgentPersona[]) => void
+    listPersonasSpy.mockReturnValue(new Promise<AgentPersona[]>((r) => { resolve = r }))
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    await act(async () => { resolve([mk('architect'), mk('dev-lead'), mk('builder')]) })
+    expect(sel(el, 'dev-lead')).toBe('true')
+  })
+
+  it('(i) just Claude turned ON before readJson resolves keeps Agent None', async () => {
+    lib()
+    let resolve!: (v: unknown) => void
+    cfg().readJson.mockReturnValue(new Promise((r) => { resolve = r }))
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const sw = el.querySelector('[data-testid="new-epic-just-claude"]') as HTMLElement
+    act(() => sw.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await act(async () => { resolve({ exists: true, raw: '', data: { lastEpicAgent: 'dev-lead' }, parseError: null, mtimeMs: 0, error: null }) })
+    expect(sel(el, 'dev-lead')).not.toBe('true')
+    expect(sel(el, 'architect')).not.toBe('true')
+  })
+
   it('(f) Start under just Claude writes nothing', async () => {
     lib()
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)

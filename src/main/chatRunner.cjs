@@ -932,7 +932,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     let gearArgs = [];
     if (!isAgentCli && plan.persona && plan.persona.snapshot) {
       try {
-        const gear = gearChatArgs({ snapshot: plan.persona.snapshot });
+        const gear = gearChatArgs({ snapshot: plan.persona.snapshot, cwd });
         gearArgs = gear.args;
         // Persona-declared packs load with the Epic's (as for jobs); known ones only.
         const snapPacks = (Array.isArray(plan.persona.snapshot.packs) ? plan.persona.snapshot.packs.map(String) : [])
@@ -1696,10 +1696,10 @@ const undecidedLogged = new Set();
  * Unstamped (older) snapshots and Unbound personas add nothing; Undecided runs unscoped.
  * An unknown declared server/pack never crashes the turn: it is dropped and reported in `errors`.
  * Pure apart from reading the pack catalog / seeded MCP entry (injectable for tests).
- * @param {{ snapshot: any, deps?: { knownMcpServers?: Record<string, object>, listPacks?: () => { packs: any[] }, listUnpackedSkills?: () => string[], log?: (msg: string) => void } }} opts
+ * @param {{ snapshot: any, cwd?: string, deps?: { home?: string, knownMcpServers?: Record<string, object>, listPacks?: () => { packs: any[] }, listUnpackedSkills?: () => string[], log?: (msg: string) => void } }} opts
  * @returns {{ args: string[], errors: string[] }}
  */
-function gearChatArgs({ snapshot, deps = {} }) {
+function gearChatArgs({ snapshot, cwd, deps = {} }) {
   const none = { args: [], errors: [] };
   if (!snapshot || snapshot.gearBindsChat !== true) return none;
   const loadout = snapshot.loadout;
@@ -1713,10 +1713,13 @@ function gearChatArgs({ snapshot, deps = {} }) {
     return none;
   }
   let known = deps.knownMcpServers;
+  /** @type {Record<string, string>} */
+  let credentialed = {};
   if (!known) {
     try {
-      const seed = require('./seedSchedulerMcp.cjs');
-      known = { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
+      const r = require('./lib/claude/headlessMcpServers.cjs').resolveHeadlessMcpServers({ cwd, ...(deps.home ? { home: deps.home } : {}) });
+      known = r.known;
+      credentialed = r.credentialed;
     } catch { known = {}; }
   }
   let catalog = [];
@@ -1742,7 +1745,9 @@ function gearChatArgs({ snapshot, deps = {} }) {
     let cur = attempt;
     while (r && guard++ < 50) {
       bad.add(r.name);
-      errors.push(`Gear: "${r.name}" is not available; this turn runs without it.`);
+      errors.push(Object.prototype.hasOwnProperty.call(credentialed, r.name)
+        ? `Gear: "${r.name}" is not available (${credentialed[r.name]}); this turn runs without it.`
+        : `Gear: "${r.name}" is not available; this turn runs without it.`);
       curDeclared = curDeclared.filter((d) => d !== r.name);
       curPacks = curPacks.filter((p) => p !== r.name);
       curScope = curScope ? { tools: curScope.tools.filter((t) => !(t.startsWith('mcp__') && t.slice(5).split('__')[0] === r.name) && t !== r.name) } : curScope;

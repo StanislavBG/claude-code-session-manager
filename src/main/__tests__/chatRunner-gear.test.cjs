@@ -150,3 +150,20 @@ test('Undecided snapshot runs unscoped and logs once', async () => {
   expect(cr.gearChatArgs({ snapshot: snap, deps: { log: (m) => logs.push(m) } }).args).toEqual([]);
   expect(logs).toHaveLength(1);
 });
+
+test('user-scope server declared by the persona reaches --mcp-config; credentialed one is dropped with its reason', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gear-home-'));
+  try {
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: {
+      'user-srv': { command: 'node', args: ['x.js'] },
+      'secret-srv': { command: 'node', env: { API_TOKEN: 'abc' } },
+    } }));
+    const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'], mcpServers: ['user-srv', 'secret-srv'] };
+    const { args, errors } = cr.gearChatArgs({ snapshot: snap, cwd: home, deps: { home } });
+    const mcp = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    expect(Object.keys(mcp.mcpServers)).toEqual(['user-srv']);
+    expect(errors.some((e) => /secret-srv/.test(e) && /credential key API_TOKEN/.test(e))).toBe(true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

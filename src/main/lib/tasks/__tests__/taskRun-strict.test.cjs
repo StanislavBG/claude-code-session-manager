@@ -102,6 +102,41 @@ describe('Task route passes the persona declared set', () => {
   });
 });
 
+describe('Task route resolves user-scope servers', () => {
+  test('a user-scope server declared by the persona reaches buildTaskArgs and --mcp-config', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-taskhome-'));
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-taskcwd-'));
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'user-srv': { command: 'node', args: ['x.js'] } } }));
+    /** @type {any} */
+    let seen = null;
+    const routes = {};
+    registerAdminRoute({ registerRoute: (m, p, h) => { routes[`${m} ${p}`] = h; } }, {
+      mcpHome: home,
+      taskSwitch: { isTaskSwitchOn: () => true },
+      resolveProjectRoot: (c) => c,
+      resolveInfo: async () => ({ personaFound: true, resolvedModelId: 'sonnet', personaEffort: 'low', declaredMcpServers: ['user-srv'] }),
+      buildTaskArgs: (o) => { seen = o; const e = new Error('stop'); /** @type {any} */ (e).code = 'stop_here'; throw e; },
+      ledger: { appendTaskStart: async () => {}, appendTaskEnd: async () => {} },
+      usageHold: () => null,
+      appendAuditEvent: () => {},
+    });
+    try {
+      const { Readable } = require('node:stream');
+      const body = JSON.stringify({ cwd, agent: 'a', missionId: 'm1', prompt: 'hi' });
+      const req = Object.assign(Readable.from([Buffer.from(body)]), { headers: { 'content-type': 'application/json' }, method: 'POST' });
+      const out = { status: 0 };
+      const res = { on() {}, setHeader() {}, writeHead(s) { out.status = s; }, end() {}, get headersSent() { return out.status !== 0; } };
+      await routes['POST /admin/tasks'](req, res);
+      expect(Object.keys(seen.knownMcpServers)).toContain('user-srv');
+      const args = buildTaskArgs({ model: 'm', effort: 'e', projectCwd: cwd, declaredMcpServers: ['user-srv'], knownMcpServers: seen.knownMcpServers });
+      expect(inlineServers(args)).toContain('user-srv');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('seed personas declare the MCP servers their tools name', () => {
   const dir = path.resolve(__dirname, '../../../../seed/agents');
   for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.md'))) {

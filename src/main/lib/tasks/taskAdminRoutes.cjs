@@ -453,7 +453,7 @@ const USAGE_HOLD_HINT =
  * @param {{ taskSwitch?: any, resolveInfo?: Function, sessionSlots?: any, runTask?: Function,
  *   buildTaskArgs?: Function, buildTaskEnv?: Function, ledger?: any, costOfUsage?: Function,
  *   now?: () => number, randomUUID?: () => string, resolveProjectRoot?: Function,
- *   syncInteractiveReserve?: () => any, knownMcpServers?: () => Record<string, object>,
+ *   syncInteractiveReserve?: () => any, knownMcpServers?: (cwd?: string) => Record<string, object>, mcpHome?: string,
  *   usageHold?: () => any, appendAuditEvent?: (kind: string, fields: Record<string, any>) => void,
  *   switchRouteDeps?: Record<string, any> }} [deps]
  */
@@ -468,10 +468,10 @@ function registerAdminRoute(adminHttp, deps = {}) {
   const buildArgs = (/** @type {any} */ o) => (deps.buildTaskArgs || taskRun().buildTaskArgs)(o);
   const buildEnv = (/** @type {any} */ rt, /** @type {any} */ env) => (deps.buildTaskEnv || taskRun().buildTaskEnv)(rt, env);
   const ledger = () => deps.ledger || require('./taskLedger.cjs');
-  // The servers a declared `mcpServers:` name may resolve to — the scheduler's own set.
-  const knownMcpServers = deps.knownMcpServers || (() => {
-    const seed = require('../../seedSchedulerMcp.cjs');
-    return { [seed.SERVER_NAME]: seed.schedulerServerEntry() };
+  // The servers a declared `mcpServers:` name may resolve to — the same map a job gets.
+  const knownMcpServers = deps.knownMcpServers || ((/** @type {string} */ cwd) => {
+    const { resolveHeadlessMcpServers } = require('../claude/headlessMcpServers.cjs');
+    return resolveHeadlessMcpServers({ cwd, ...(deps.mcpHome ? { home: deps.mcpHome } : {}) }).known;
   });
   const costOfUsage = (/** @type {any} */ m, /** @type {any} */ b) => (deps.costOfUsage || require('../claude/modelPricing.cjs').costOfUsage)(m, b);
   const now = deps.now || Date.now;
@@ -635,7 +635,7 @@ function registerAdminRoute(adminHttp, deps = {}) {
     let args;
     try {
       const declaredMcpServers = Array.isArray(info.declaredMcpServers) ? info.declaredMcpServers : [];
-      args = buildArgs({ model, effort, runtime: argsRuntime, projectCwd: cwd, declaredMcpServers, knownMcpServers: knownMcpServers(), skillDeny: Array.isArray(info.skillDeny) ? info.skillDeny : [] });
+      args = buildArgs({ model, effort, runtime: argsRuntime, projectCwd: cwd, declaredMcpServers, knownMcpServers: knownMcpServers(cwd), skillDeny: Array.isArray(info.skillDeny) ? info.skillDeny : [] });
     } catch (e) {
       reply(400, { ok: false, error: (e && /** @type {any} */ (e).code) || 'invalid_request', details: e instanceof Error ? e.message : String(e) });
       return;

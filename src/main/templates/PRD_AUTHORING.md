@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v33 -->
+<!-- PRD_AUTHORING.md v34 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.

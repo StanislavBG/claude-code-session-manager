@@ -19,7 +19,9 @@ every run pins the exact agent definition it used as an immutable AgentSnapshot.
   persona (`agentModelResolve.cjs`) instead of running "no persona + default model".
 - Snapshot: `src/main/lib/claude/agentSnapshot.cjs` — content-addressed (sha256 of canonical JSON), written
   once under `agents/snapshots/` (writer `agents`). Pinned at Epic mint (`epicMint.cjs`) and per job dispatch;
-  a resume re-runs the pinned snapshot. Re-pinning is the audited "Update agent" action only.
+  a resume re-runs the pinned snapshot. Re-pinning is the audited "Update agent" action, plus one case: changing
+  a PRD's `agentType` re-pins its snapshot to the new persona, recorded as `agentSnapshotRepinned`
+  (`{from, to, reason: 'agentType_changed'}`) in the run meta.
 - Why: a persona edit mid-plan silently changed what a resumed or retried run was — the run's identity must be
   the definition it started with, not whatever the file says now.
 
@@ -30,6 +32,12 @@ an unknown declared capability parks the job (`capability_unknown`) instead of s
 
 - Code: `agentLibrary.cjs` (declaration), `src/main/lib/claude/personaToolScope.cjs` (enforced args), the
   scheduler's dispatch check, `src/main/lib/tasks/` Task spawn.
+- MCP resolution: `src/main/lib/claude/headlessMcpServers.cjs` resolves each declared server from the same
+  Claude config scopes the CLI reads, user (`~/.claude.json` `mcpServers`) < project (`<cwd>/.mcp.json`) < local
+  (`~/.claude.json` `projects[<cwd>].mcpServers`); the later scope wins by name. A server whose `env` or
+  `headers` carry a credential key is refused: the job parks `capability_credentialed`, an undefined one parks
+  `capability_unknown`. At queue time `src/main/lib/prd/prdMcpReachWarnings.cjs` adds an advisory authoring
+  warning (never blocks the write) for a PRD whose persona names a server the job could not load.
 - Why: inherited user-scope MCP servers made every job's tool surface (and memory cost) depend on the
   machine, not on the persona. Declared = reviewable; undeclared = absent.
 - Scope (decided 2026-11-26, reversing 2026-11-23): gear binds Epic chat turns too, for Epics minted after the

@@ -123,6 +123,11 @@ changes</strong> or a Save prompt (Ctrl S), and <strong>Delete</strong> removes 
 <strong>Equipped</strong> means exactly the tools listed. <strong>Unbound</strong> means every tool on
 this machine, MCP servers added later included, chosen on purpose.</p>
 
+<p>A scheduled job's agent gets the MCP servers its persona declares, as long as they are set up in
+Claude Code for that project or for you. A server that holds a secret in its settings is not handed
+to a job, and the scheduler warns you when you queue a plan whose agent names a server the job
+could not load. Changing a plan's agent re-pins the job to the new agent.</p>
+
 <p>The sheet has two panels. <strong>Gear</strong> holds the loadout: <strong>Built-in tools</strong>,
 <strong>MCP servers</strong> and <strong>Packs</strong>, plus the buttons <strong>Choose a
 loadout</strong>, <strong>Go bare</strong>, <strong>Go unbound</strong> and <strong>Open the

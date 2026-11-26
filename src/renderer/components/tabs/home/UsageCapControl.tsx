@@ -2,6 +2,7 @@ import { useScheduleState } from '../../../state/scheduleState'
 import { toast } from '../../../state/toast'
 import { formatRelative } from '../../../lib/formatTime'
 import { windowKindLabel } from '../../../lib/usageWindow'
+import { formatUsageHoldDetail } from '../scheduler/computeStatus'
 import { ClickToEditNumber } from '../scheduler/sched-primitives'
 
 /**
@@ -32,7 +33,7 @@ export function UsageCapControl() {
     const win = windowKindLabel(hold.window)
     const wait = hold.resetsAt ? Date.parse(hold.resetsAt) - Date.now() : null
     holdDetail = [
-      `${win ? `${win} ` : ''}at ${Math.round(hold.percent)}% ≥ ${hold.threshold}%`,
+      `${win ? `${win} ` : ''}at ${formatUsageHoldDetail(hold)}`,
       wait != null && !Number.isNaN(wait) && wait > 0 ? `resets in ${formatRelative(wait)}` : null,
     ].filter(Boolean).join(' · ')
   }

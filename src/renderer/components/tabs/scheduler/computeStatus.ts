@@ -14,6 +14,11 @@ function windowLabel(name: string): string {
   return WINDOW_LABELS[name] ?? name.replace(/_/g, ' ')
 }
 
+/** The one 'P% ≥ T%' hold text, shared by the Scheduler band and Home's cap control. */
+export function formatUsageHoldDetail(hold: { percent: number; threshold: number }): string {
+  return `${hold.percent.toFixed(0)}% ≥ ${hold.threshold}%`
+}
+
 interface StatusInfo {
   kind: StatusKind
   line1: string
@@ -120,7 +125,7 @@ export function computeStatus({
     }
     return {
       kind: 'auto-throttled',
-      line1: `Auto · throttled (util ${percent.toFixed(0)}% ≥ ${threshold}%)`,
+      line1: `Auto · throttled (util ${formatUsageHoldDetail(utilizationHold)})`,
       line2,
     }
   }

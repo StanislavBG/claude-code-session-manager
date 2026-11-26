@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { UsageCapControl } from '../UsageCapControl'
 import { useScheduleState } from '../../../../state/scheduleState'
+import { computeStatus, formatUsageHoldDetail } from '../../scheduler/computeStatus'
 import { toast } from '../../../../state/toast'
 import type { ScheduleStateSnapshot } from '../../../../../preload/api'
 
@@ -119,6 +120,19 @@ describe('UsageCapControl', () => {
     expect(held).toContain('Session · 5h')
     expect(held).toContain('93% ≥ 80%')
     expect(held).toContain('resets in')
+  })
+
+  it('renders the same hold text as the Scheduler band for the same snapshot', async () => {
+    setSnapshot({
+      utilization: 93,
+      utilizationHold: { window: 'five_hour', percent: 93, threshold: 80, resetsAt: new Date(Date.now() + 60 * 60_000).toISOString() },
+    })
+    await render()
+    const snap = { ...useScheduleState.getState().snapshot!, jobs: [{ status: 'pending', slug: 'a', title: 'A' }] } as unknown as ScheduleStateSnapshot
+    const band = computeStatus({ snap, now: Date.now(), avgDurationMs: 0, runningJobs: [] })
+    const detail = formatUsageHoldDetail(snap.utilizationHold!)
+    expect(q('home-usage-cap-held')?.textContent ?? '').toContain(detail)
+    expect(band.line1).toContain(detail)
   })
 
   it('renders nothing when the snapshot is null', async () => {

@@ -1360,10 +1360,12 @@ const PROJECT_ROOT_ERROR = 'projectRoot must be an existing folder in your home 
 /** True when p is an absolute path to an existing directory inside the home folder. */
 function isProjectRootOk(p) {
   if (typeof p !== 'string' || p.length === 0 || p.includes('\0') || !path.isAbsolute(p)) return false;
-  const rel = path.relative(os.homedir(), path.resolve(p));
-  if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return false;
   try {
-    return fs.statSync(p).isDirectory();
+    // Resolve symlinks on both sides so a link inside home that points outside is refused.
+    const real = fs.realpathSync(p);
+    const rel = path.relative(fs.realpathSync(os.homedir()), real);
+    if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return false;
+    return fs.statSync(real).isDirectory();
   } catch {
     return false;
   }

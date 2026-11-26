@@ -15372,6 +15372,9 @@ module.exports = {
   // Test-only seams (schedulerPlanRecordHarvest.test.cjs).
   __jobDeclaredArtifactPaths: jobDeclaredArtifactPaths,
   __harvestJobPlanRecords: harvestJobPlanRecords,
+  __driveUpgradeDrain: driveUpgradeDrain,
+  __clearStaleDrainAtBoot: clearStaleDrainAtBoot,
+  __setRestartHandlerForTests: setRestartHandler,
 };
 
 // Lazy path getters: resolved from SM_SCHEDULER_HOME at each read, never frozen

@@ -148,9 +148,14 @@ describe('seed personas that save through an MCP tool', () => {
 });
 
 describe('loadout states', () => {
-  it('Bare (tools: none) is floor-only', () => {
-    const scope = buildPersonaToolScope(['none']);
+  it('Bare ({ loadout: bare }) is floor-only, even with an empty list', () => {
+    const scope = buildPersonaToolScope([], { loadout: 'bare' });
     assert.deepEqual(scope.tools, [...HEADLESS_TOOL_FLOOR]);
+  });
+
+  it('Unbound and Undecided are unscoped', () => {
+    assert.equal(buildPersonaToolScope([], { loadout: 'unbound' }), null);
+    assert.equal(buildPersonaToolScope(['Read'], { loadout: 'undecided' }), null);
   });
 
   it('Unbound (tools: *) is unscoped', () => {

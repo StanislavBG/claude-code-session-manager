@@ -6465,7 +6465,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // Validator jobs (fresh and resume) return a schema-checked verdict:
   // --json-schema + StructuredOutput in scope (PRD 3613).
   const isValidator = job.agentType === 'validator';
-  const personaToolScope = buildPersonaToolScope(personaResolution.tools, { disallowed: HEADLESS_DISALLOWED_TOOLS, structuredOutput: isValidator });
+  const personaToolScope = buildPersonaToolScope(personaResolution.tools, { loadout: personaResolution.loadout, disallowed: HEADLESS_DISALLOWED_TOOLS, structuredOutput: isValidator });
   // Epic context packs (PRD 3154): the job's Epic's selected packs load as
   // --plugin-dir per pack, and their laws are appended AFTER the (already
   // capped) persona body — the persona cap never applies to laws. Fresh and

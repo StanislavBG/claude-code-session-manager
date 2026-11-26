@@ -93,6 +93,6 @@ describe('resolvePrdPersonaForSpawn refusal', () => {
       agentType: 'validator',
       deps: { getPersonaBody: async () => ({ path: '/x/validator.md', text: '---\nname: validator\nmodel: opus\ntools: Read, Grep\n---\nValidate.' }) },
     });
-    expect(r).toEqual({ model: 'opus', systemPrompt: 'Validate.', personaPath: '/x/validator.md', tools: ['Read', 'Grep'], refusal: null });
+    expect(r).toEqual({ model: 'opus', systemPrompt: 'Validate.', personaPath: '/x/validator.md', tools: ['Read', 'Grep'], loadout: 'equipped', refusal: null });
   });
 });

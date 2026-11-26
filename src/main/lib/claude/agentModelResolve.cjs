@@ -257,7 +257,7 @@ const DEFAULT_PRD_AGENT_TYPE = 'dev-lead';
  * read) and this module's frontmatter-stripped-body cap.
  *
  * @param {{ cwd: string, agentType: string|null, deps?: object }} opts
- * @returns {Promise<{ model: string|null, systemPrompt: string|null, personaPath: string|null, tools: string[]|null, refusal: null|{ code: 'persona_missing'|'persona_invalid', detail: string } }>}
+ * @returns {Promise<{ model: string|null, systemPrompt: string|null, personaPath: string|null, tools: string[]|null, loadout?: 'undecided'|'bare'|'equipped'|'unbound', refusal: null|{ code: 'persona_missing'|'persona_invalid', detail: string } }>}
  */
 async function resolvePrdPersonaForSpawn({ cwd, agentType, deps = {} } = {}) {
   const name = agentType || DEFAULT_PRD_AGENT_TYPE;
@@ -295,7 +295,8 @@ async function resolvePrdPersonaForSpawn({ cwd, agentType, deps = {} } = {}) {
     const systemPrompt = buildPersonaBodyText(body, persona.path, { uncapped });
     const parseTools = deps.parseTools || require('../../agentLibrary.cjs').parseTools;
     const list = parseTools(typeof fm.tools === 'string' ? fm.tools : '');
-    return { model, systemPrompt, personaPath: persona.path, tools: list.length ? list : null, refusal: null };
+    const { loadoutState } = require('../persona-macro/personaLoadout.cjs');
+    return { model, systemPrompt, personaPath: persona.path, tools: list.length ? list : null, loadout: loadoutState(fm), refusal: null };
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     return refuse('persona_invalid', `agentType '${name}' persona ${persona.path || '(unknown path)'} could not be parsed: ${msg}`, persona.path || null);

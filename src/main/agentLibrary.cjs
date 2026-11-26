@@ -31,7 +31,7 @@ const sessionsStore = require('./sessionsStore.cjs');
 /** Parses the frontmatter `tools` field ("Read, Grep, Glob, Bash") into a list. */
 function parseTools(raw) {
   if (!raw) return [];
-  return raw.split(',').map((t) => t.trim()).filter(Boolean);
+  return raw.split(',').map((t) => t.trim()).filter((t) => t && t !== '[]');
 }
 
 /**
@@ -129,7 +129,7 @@ function extractUnmanagedLines(raw, managed) {
 function serializePersona({ name, description, tools, loadout, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, agentCli, agentCliModel, mcpServers, packs, environment, body, preservedLines }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
-  // `loadout` (bare/unbound/equipped/undecided) wins; absent, `tools` is the decision (['none'] = bare, ['*'] = unbound).
+  // `loadout` (bare/unbound/equipped/undecided) wins; absent, `tools` is the decision (['*'] = unbound).
   const toolsValue = loadout ? encodeLoadout(loadout, tools) : (tools && tools.length ? tools.join(', ') : null);
   if (toolsValue) lines.push(`tools: ${toolsValue}`);
   if (model && model !== 'inherit') lines.push(`model: ${model}`);

@@ -425,10 +425,14 @@ test('agentCli/agentCliModel: round-trip, carry-over on undefined, claude remove
 
 test('listPersonas entries carry the loadout state', async () => {
   const globalDir = await mkTmp('sm-agent-library-loadout-');
-  for (const [name, tools] of [['l-undecided', []], ['l-bare', ['none']], ['l-equipped', ['Read']], ['l-unbound', ['*']]]) {
+  for (const [name, tools] of [['l-undecided', []], ['l-equipped', ['Read']], ['l-unbound', ['*']]]) {
     await savePersona({ ...base, name, description: 'd', body: 'B.', globalDir, tools });
   }
+  // Bare via `tools: []` (savePersona has no loadout field) and via an empty `tools:` line (native loader: zero tools).
+  await fsp.writeFile(path.join(globalDir, 'l-bare.md'), '---\nname: l-bare\ndescription: d\ntools: []\nmodel: opus\n---\nB.\n');
+  // (native loader: zero tools).
+  await fsp.writeFile(path.join(globalDir, 'l-bare-empty.md'), '---\nname: l-bare-empty\ndescription: d\ntools:\nmodel: opus\n---\nB.\n');
   const list = await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: identityValidatePath });
   const by = Object.fromEntries(list.map((p) => [p.name, p.loadout]));
-  expect(by).toMatchObject({ 'l-undecided': 'undecided', 'l-bare': 'bare', 'l-equipped': 'equipped', 'l-unbound': 'unbound' });
+  expect(by).toMatchObject({ 'l-bare-empty': 'bare', 'l-undecided': 'undecided', 'l-bare': 'bare', 'l-equipped': 'equipped', 'l-unbound': 'unbound' });
 });

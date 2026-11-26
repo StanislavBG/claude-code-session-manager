@@ -24,7 +24,7 @@
 
 const { z } = require('zod');
 const { MANAGED_PERSONA_KEYS } = require('../../agentLibrary.cjs');
-const { BARE_TOOL, UNBOUND_TOOL } = require('./personaLoadout.cjs');
+const { UNBOUND_TOOL } = require('./personaLoadout.cjs');
 
 // Parsed frontmatter values are strings; structured callers may pass
 // numbers (seedVersion), booleans (executorOnly) or string lists (tools/tags).
@@ -62,13 +62,13 @@ shape.environment = z
 // reads it at dispatch, so a dispatch-time validation must admit it.
 shape.defaultEstimateMinutes = FmValue.optional();
 
-// Loadout encodings (personaLoadout.cjs): `none` = Bare, `*` = Unbound; both
-// stand alone — mixed with other tools the decision is ambiguous.
+// Loadout encodings (personaLoadout.cjs): `[]` / an empty line = Bare, `*` = Unbound;
+// `*` stands alone — mixed with other tools the decision is ambiguous.
 shape.tools = FmValue.optional().refine((v) => {
   const names = (Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : []).map((t) => String(t).trim()).filter(Boolean);
   if (names.length < 2) return true;
-  return !names.some((t) => t.toLowerCase() === BARE_TOOL || t === UNBOUND_TOOL);
-}, 'tools: "none" (Bare) and "*" (Unbound) must stand alone, not be mixed with other tools');
+  return !names.some((t) => t === UNBOUND_TOOL);
+}, 'tools: "*" (Unbound) must stand alone, not be mixed with other tools');
 
 const PersonaFrontmatterSchema = z.object(shape).strict();
 

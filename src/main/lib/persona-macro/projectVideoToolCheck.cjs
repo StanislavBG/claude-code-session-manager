@@ -75,7 +75,7 @@ async function checkProjectVideoToolRunnable({ cwd, agentName, job } = /** @type
     return { ok: false, error: `${PERSONA_PREFIX} persona '${agentName}' could not be read.` };
   }
 
-  const scope = buildPersonaToolScope(persona.tools);
+  const scope = buildPersonaToolScope(persona.tools, { loadout: persona.loadout });
   if (!scope) return { ok: true };
 
   const names = mcpToolNamesFromScope(scope);

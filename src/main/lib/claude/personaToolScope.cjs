@@ -31,21 +31,25 @@ const HEADLESS_SCOPE_AGENT_NAME = 'sm-headless-scoped';
 
 /**
  * @param {readonly string[]|null|undefined} tools persona `tools:` list
- * @param {{ disallowed?: readonly string[], structuredOutput?: boolean }} [opts]
+ * @param {{ loadout?: 'undecided'|'bare'|'equipped'|'unbound', disallowed?: readonly string[], structuredOutput?: boolean }} [opts]
  *   structuredOutput: also grant the CLI's StructuredOutput tool (a --json-schema
  *   run). Probe 2026-11-22 (CLI 2.1.325): a scoped run without it ends
  *   'success' with structured_output null — the schema is silently skipped.
  * @returns {{ tools: string[] }|null} null = persona declares no restriction
  */
-function buildPersonaToolScope(tools, { disallowed = [], structuredOutput = false } = {}) {
-  if (!Array.isArray(tools) || tools.length === 0) return null;
-  const names = tools
+function buildPersonaToolScope(tools, { loadout, disallowed = [], structuredOutput = false } = {}) {
+  // `loadout` (personaLoadout.cjs) wins when given: Bare = floor only even for
+  // an empty list; Unbound/Undecided = unscoped.
+  if (loadout === 'unbound' || loadout === 'undecided') return null;
+  const bare = loadout === 'bare';
+  const list = Array.isArray(tools) ? tools : [];
+  if (!bare && list.length === 0) return null;
+  const names = list
     .filter((t) => typeof t === 'string')
     .map((t) => t.trim())
     .filter(Boolean);
-  if (names.length === 0 || names.includes('*')) return null;
-  // Bare (`tools: none`, personaLoadout.cjs): no granted tools, only the floor.
-  const bare = names.length === 1 && names[0].toLowerCase() === 'none';
+  if (names.includes('*')) return null;
+  if (!bare && names.length === 0) return null;
   const blocked = new Set(disallowed);
   const out = [];
   const extra = structuredOutput === true ? ['StructuredOutput'] : [];

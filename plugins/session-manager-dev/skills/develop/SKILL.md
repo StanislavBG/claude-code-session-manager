@@ -124,8 +124,8 @@ three failure modes have different fixes:
    `manual.json`. Why: a release never finds a gap it can only report.
 6. **Pick a shape.** Most asks are an independent set. Chain 3–5 PRDs only for truly
    sequential work: each link `dependsOn` the previous one; its notes name what that link
-   delivers and say to read the landed code first. Never chain past 5; redo the completeness
-   pass. Each goal's first sentence names its type, in chain order: `primitive` (new helper
+   delivers and say to read the landed code first. Never chain past 5; re-split the plan.
+   Each goal's first sentence names its type, in chain order: `primitive` (new helper
    and its test), `wire` (adopt it at named call sites), `behavior` (one function's logic and
    its test), `migration` (mechanical change), `doc`, `validate`. A gap you leave out of the
    first plan is queued in the same turn as a later wave that `dependsOn` the PRDs it builds

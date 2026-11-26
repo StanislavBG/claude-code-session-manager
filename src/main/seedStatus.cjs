@@ -47,7 +47,7 @@ const FIXES = {
   'dev-plugin': 'Open Plugins → Library and click Install next to "session-manager-dev".',
   'scheduler-mcp': () =>
     `Run in a terminal: claude mcp add ${seedSchedulerMcp.SERVER_NAME} --scope user -- node ${seedSchedulerMcp.serverScriptPath()}`,
-  'agent-personas': `Copy ${seedAgentPersonas.PERSONAS.map((n) => `src/seed/agents/${n}.md`).join(', ')} into ~/.claude/agents/ (skip any that already exist there).`,
+  'agent-personas': `Copy ${seedAgentPersonas.PERSONAS.map((n) => `src/seed/agents/${n}.md`).join(', ')} into ~/.claude/agents/, copying only the ones that are missing. Installed copies you never edited update on their own at app start; a copy you edited is kept, and a newer bundled version is offered in the Agent Library.`,
 };
 
 /** { 'dev-plugin': {status, fix}, 'scheduler-mcp': {status, fix}, 'agent-personas': {status, fix} } */

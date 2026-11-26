@@ -117,6 +117,12 @@ test('agent-personas: every PERSONAS name seeded, attempts 1 → done', () => {
   expect(getSeedStatus()['agent-personas'].status).toBe('done');
 });
 
+test('agent-personas: fix text mentions the Agent Library, not the old skip wording', () => {
+  const { fix } = getSeedStatus()['agent-personas'];
+  expect(fix).toContain('Agent Library');
+  expect(fix).not.toContain('skip any that already exist there');
+});
+
 test('agent-personas: only architect seeded, attempts 0 → pending', () => {
   personasMarker(['architect'], 0);
   expect(getSeedStatus()['agent-personas'].status).toBe('pending');

@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client'
 import { AgentLibrary } from '../../src/renderer/components/tabs/AgentLibrary'
 import { useSessions, type SessionTab } from '../../src/renderer/state/sessions'
 import { useLayout } from '../../src/renderer/state/layout'
+import type { AgentPersona } from '../../src/preload/api'
 
 const HOME = '/home/user'
 const CWD = `${HOME}/Projects/Self`
@@ -28,7 +29,7 @@ const SPEC: Array<[string, string, string | null, Loadout, string[], string, str
   ['page-history', 'sonnet', null, 'undecided', [], '#4a7f8c', 'Steward of the History page.'],
   ['kiln', 'opus', 'high', 'undecided', [], '#9a5b2e', 'Kiln idea sessions started by the Kiln runner.'],
 ]
-const personas = SPEC.map(([name, model, effort, loadout, tools, color, description], i) => ({
+const personas: AgentPersona[] = SPEC.map(([name, model, effort, loadout, tools, color, description], i): AgentPersona => ({
   name, description, model, tools, effort, loadout, agentCli: null, agentCliModel: null, color,
   tags: [], projects: [], action: null, actionLabel: null, title: null, seedVersion: null, executorOnly: false,
   path: `${HOME}/.claude/agents/${name}.md`, body: `You are ${name}. ${description}`,
@@ -46,13 +47,15 @@ const armory = {
   mcpServers: [
     { ...item('session-manager-scheduler'), status: 'checked', scope: 'user', tools: ['project_home_write', 'project_page_write', 'scheduler_create_prd'].map((t) => item(`mcp__session-manager-scheduler__${t}`)) },
     { ...item('blender'), status: 'checked', scope: 'user', tools: ['execute_blender_code', 'get_objects_summary', 'render_thumbnail_to_path'].map((t) => item(`mcp__blender__${t}`, t === 'execute_blender_code' ? ['risky'] : [])) },
+    { ...item('bilko-host'), status: 'not-checked', scope: 'user', tools: [] },
     { ...item('playwright'), status: 'failing', scope: 'user', tools: [] },
   ],
   packs: [
     { ...item('session-manager-dev'), skills: ['develop', 'builder', 'send-feedback'], source: 'plugin' },
     { ...item('apple-design'), skills: ['hig', 'sf-symbols'], source: 'plugin' },
   ],
-  unpackedSkills: [],
+  unpackedSkills: ['pdf', 'docx'],
+  environments: [],
   errors: [],
 }
 

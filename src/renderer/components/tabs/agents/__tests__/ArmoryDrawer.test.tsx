@@ -9,8 +9,8 @@ import { BLANK_DRAFT, type Draft } from '../AgentDetail'
 const item = (id: string, badges: Array<'risky' | 'banned' | 'floor'> = []) => ({ id, label: id, badges })
 const ARMORY = {
   builtins: [item('Read', ['floor']), item('Bash', ['risky']), item('Edit')],
-  bundledSkills: [],
-  mcpServers: [{ ...item('blender'), status: 'checked', scope: 'user', tools: [item('mcp__blender__a')] }],
+  bundledSkills: [item('code-review')],
+  mcpServers: [{ ...item('blender'), status: 'checked', scope: 'user', tools: [item('mcp__blender__a')] }, { ...item('bilko-host'), status: 'not-checked', scope: 'user', tools: [] }],
   packs: [{ ...item('dev'), skills: ['develop'], source: 'plugin' }],
   unpackedSkills: ['pdf', 'docx'],
   errors: [],
@@ -96,5 +96,29 @@ describe('ArmoryDrawer', () => {
     expect(box.textContent).toContain('only inside packs')
     expect(box.querySelector('button')).toBeNull()
     expect(box.getAttribute('draggable')).toBeNull()
+  })
+
+  it('with the drawer open, dropping on the MCP row equips the server', async () => {
+    await mount({ tools: ['Edit'] })
+    await fire(item$('blender'), 'dragstart')
+    expect(q('[data-testid="armory-item"][data-item="blender"]').getAttribute('data-moving')).toBe('true')
+    expect(q('[data-testid="agent-mcp-row"]').getAttribute('data-drop-target')).toBe('ready')
+    await fire(q('[data-testid="agent-mcp-row"]'), 'dragenter')
+    expect(q('[data-testid="agent-release-hint"]')).toBeTruthy()
+    await fire(q('[data-testid="agent-mcp-row"]'), 'drop')
+    expect(latest.mcpServers).toContain('blender')
+    expect(q('[data-testid="agent-armory"]').className).toContain('w-[340px]')
+  })
+
+  it('kind tabs filter; bundled skills, grips and Check now render', async () => {
+    await mount({ tools: ['Edit'] })
+    expect(q('[data-testid="armory-bundled"]').textContent).toContain('code-review')
+    expect(document.querySelectorAll('[data-testid="armory-grip"]').length).toBeGreaterThan(0)
+    expect(item$('bilko-host').querySelector('[data-testid="armory-check-now"]')).toBeTruthy()
+    expect(item$('blender').querySelector('[data-testid="armory-check-now"]')).toBeNull()
+    await act(async () => { (q('[data-testid="armory-tab"][data-tab="mcp"]')).click() })
+    expect(item$('blender')).toBeTruthy()
+    expect(item$('Bash')).toBeNull()
+    expect(item$('dev')).toBeNull()
   })
 })

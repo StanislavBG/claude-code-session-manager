@@ -58,8 +58,13 @@ const FRAMES: Frame[] = [
   { name: 'sheet', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: openSheet('architect') },
   // The same sheet with the list column expanded to 1b's 316 px list.
   { name: 'sheet-list-expanded', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-list-toggle').click(); await page.locator('[data-agent-row="builder"]').waitFor() } },
-  // 1e: sheet + the Armory drawer open (Open Armory in the Gear header). The mid-drag ghost is a native HTML5 drag image and is not shot.
-  { name: 'armory-drag', testid: 'agent-roster', reference: '1e-armory-mid-drag.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-open-armory').click(); await page.getByTestId('agent-armory').waitFor() } },
+  // 1e: sheet + the Armory drawer open (Open Armory in the Gear header). Mid-drag: dragstart on an MCP item + dragenter on the MCP row (synthetic events — a native drag image cannot be shot), so the 'Moving…' ghost and the 'Release to equip' target show.
+  { name: 'armory-drag', testid: 'agent-roster', reference: '1e-armory-mid-drag.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-open-armory').click(); await page.getByTestId('agent-armory').waitFor()
+    const drawer = await page.getByTestId('agent-armory').boundingBox(); const row = await page.getByTestId('agent-mcp-row').boundingBox()
+    if (!drawer || !row || row.x + row.width > drawer.x) throw new Error('the armory drawer must not cover the Gear drop rows')
+    await page.locator('[data-testid="armory-item"][data-item="session-manager-scheduler"]').dispatchEvent('dragstart')
+    await page.getByTestId('agent-mcp-row').dispatchEvent('dragenter')
+    await page.getByTestId('agent-release-hint').waitFor() } },
   // 1f: blender-artist's sheet with the blender server's Powers panel open.
   { name: 'mcp-powers', testid: 'agent-roster', reference: '1f-mcp-powers.png', setUp: async (page) => { await openSheet('blender-artist')(page); await page.locator('[data-testid="agent-mcp-item"][data-server="blender"] [data-testid="agent-mcp-powers-open"]').click(); await page.getByTestId('agent-mcp-powers').waitFor() } },
   // 1g: an Undecided agent's sheet shows the first-run choice in the gear area.

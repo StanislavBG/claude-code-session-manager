@@ -48,6 +48,7 @@ function Row({ testid, title, sub, children, drop }: { testid: string; title: st
     <div
       data-testid={testid}
       data-drop-target={target ? (over ? 'over' : 'ready') : undefined}
+      onDragEnter={target ? (e) => { e.preventDefault(); setOver(true) } : undefined}
       onDragOver={target ? (e) => { e.preventDefault(); setOver(true) } : undefined}
       onDragLeave={target ? () => setOver(false) : undefined}
       onDrop={drop ? (e) => { e.preventDefault(); setOver(false); drop.onDrop() } : undefined}

@@ -6096,11 +6096,19 @@ function ensureTimeoutShimOnce() {
  * @returns {Promise<{ refusal: null|{ code: string, detail: string }, systemPrompt?: string|null, model?: string, tools?: string[]|null, mcpServers?: string[], packs?: string[], personaPath?: string|null, agentSnapshotId?: string|null, pinned?: boolean }>}
  */
 async function resolveJobAgentSnapshot(job, cwd, packs) {
+  let repinFrom = null;
   if (typeof job.agentSnapshotId === 'string' && job.agentSnapshotId) {
     const snap = await agentSnapshot.readAgentSnapshot(cwd, job.agentSnapshotId);
     if (!snap) {
       return { refusal: { code: 'agent_snapshot_missing', detail: `pinned agent snapshot ${job.agentSnapshotId} is missing or does not match its id` } };
     }
+    // An explicit persona change (the PRD's agentType moved) is an audited re-pin.
+    if (snap.name && snap.name !== (job.agentType || 'dev-lead')) {
+      repinFrom = job.agentSnapshotId;
+    }
+  }
+  if (typeof job.agentSnapshotId === 'string' && job.agentSnapshotId && !repinFrom) {
+    const snap = await agentSnapshot.readAgentSnapshot(cwd, job.agentSnapshotId);
     return {
       refusal: null,
       systemPrompt: snap.body || null,
@@ -6137,6 +6145,7 @@ async function resolveJobAgentSnapshot(job, cwd, packs) {
     id = (await agentSnapshot.writeAgentSnapshot(cwd, snap)).id;
     job.agentSnapshotId = id;
   } catch (err) {
+    if (repinFrom) job.agentSnapshotId = null;
     console.error(`[scheduler] agent snapshot write failed for ${job.slug} (spawning unpinned): ${err?.message ?? err}`);
   }
   return {
@@ -6150,6 +6159,7 @@ async function resolveJobAgentSnapshot(job, cwd, packs) {
     personaPath: null,
     agentSnapshotId: id,
     pinned: false,
+    ...(repinFrom && id ? { repinned: { from: repinFrom, to: id, reason: 'agentType_changed' } } : {}),
   };
 }
 
@@ -6648,7 +6658,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   const jobSystemPrompt = packArgs.laws
     ? (personaResolution.systemPrompt ? `${personaResolution.systemPrompt}\n\n${packArgs.laws}` : packArgs.laws)
     : personaResolution.systemPrompt;
-  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} agentSnapshot=${personaResolution.agentSnapshotId || '(unpinned)'}${personaResolution.pinned ? ' (pinned)' : ''} persona=${personaResolution.personaPath || '(from snapshot)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}${effortResolution.source === 'prd' ? ' (prd)' : ''}` : ''} ${personaToolScope ? `tools=${personaToolScope.tools.length} scoped` : 'tools=unscoped'}\n`);
+  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} agentSnapshot=${personaResolution.agentSnapshotId || '(unpinned)'}${personaResolution.pinned ? ' (pinned)' : ''}${personaResolution.repinned ? ` (re-pinned from ${personaResolution.repinned.from.slice(0, 8)}: agentType changed)` : ''} persona=${personaResolution.personaPath || '(from snapshot)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}${effortResolution.source === 'prd' ? ' (prd)' : ''}` : ''} ${personaToolScope ? `tools=${personaToolScope.tools.length} scoped` : 'tools=unscoped'}\n`);
 
   // Authoritative guarantee that buildClaudeSpawnArgs (a pure sync helper,
   // called below via withChildAndLog) sees a resolved --permission-prompts
@@ -7131,6 +7141,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           ...SCHEDULER_META_IDENTITY, ...setupMeta,
           originSessionId, contextDigestApplied,
           agentSnapshotId: personaResolution.agentSnapshotId || null,
+          ...(personaResolution.repinned ? { agentSnapshotRepinned: personaResolution.repinned } : {}),
           ...(isPlanReviewer ? { agentType: 'plan-reviewer', model: spawnModel } : {}),
         });
         removeSandboxTmp();

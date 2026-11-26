@@ -149,3 +149,32 @@ test('a tampered pinned snapshot is refused agent_snapshot_missing and never spa
     fs.rmSync(mainCwd, { recursive: true, force: true });
   }
 });
+
+test('a pinned snapshot whose persona differs from the job agentType is re-pinned audibly', async () => {
+  const { mainCwd, slug } = setupProject();
+  try {
+    writePersona(mainCwd, 'pin-persona', { model: 'opus', tools: 'Read', body: 'FIRST persona body.' });
+    writePersona(mainCwd, 'other-persona', { model: 'haiku', tools: 'Read, WebSearch', body: 'OTHER persona body.' });
+    const job = { slug, cwd: mainCwd, agentType: 'pin-persona' };
+    const first = await dispatch(job, mainCwd);
+    const oldId = job.agentSnapshotId;
+    expect(first.meta.agentSnapshotRepinned).toBeUndefined();
+
+    const same = { ...job };
+    const unchanged = await dispatch(same, mainCwd);
+    expect(same.agentSnapshotId).toBe(oldId);
+    expect(unchanged.meta.agentSnapshotRepinned).toBeUndefined();
+
+    const changed = { ...job, agentType: 'other-persona' };
+    const second = await dispatch(changed, mainCwd);
+    expect(argAfter(second.argv, '--append-system-prompt')).toBe('OTHER persona body.');
+    expect(argAfter(second.argv, '--model')).toBe('haiku');
+    expect(argAfter(second.argv, '--agents')).toContain('WebSearch');
+    expect(changed.agentSnapshotId).toMatch(/^[0-9a-f]{64}$/);
+    expect(changed.agentSnapshotId).not.toBe(oldId);
+    expect(second.meta.agentSnapshotId).toBe(changed.agentSnapshotId);
+    expect(second.meta.agentSnapshotRepinned).toEqual({ from: oldId, to: changed.agentSnapshotId, reason: 'agentType_changed' });
+  } finally {
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+  }
+});

@@ -12,7 +12,8 @@
  * remote. watchOutput()/unwatchOutput() run a refcounted per-cwd watcher that
  * pushes get()'s result as `project-pages:changed` on library (and legacy or
  * matrix.json) changes. renameEntry() rewrites one entry's meta.json title and
- * deleteEntry() removes one entry folder (writer 'project-home'). mdNetwork() maps the project's markdown link network on demand
+ * deleteEntry() removes one entry folder (writer 'project-home'). mdNetwork()
+ * maps the project's markdown link network on demand
  * (lib/mdNetworkScan.cjs) for the Tools pane. matrix() reads the saved
  * Competitor matrix (lib/project-pages/competitiveMatrix.cjs readMatrix).
  * mdReview() reads the newest Review MD network record plus each review
@@ -161,13 +162,18 @@ function isLibraryPath(rel) {
 //
 // project-pages:get is a one-shot pull; this adds a per-cwd chokidar watcher
 // on the project-pages dir that recomputes get() and pushes it to the
-// renderer when home.html is added/changed/removed. Map<realCwd, { watcher,
-// refCount }> — refcounted so several mounted components watching the same
-// cwd share one chokidar instance.
+// renderer whenever a path isLibraryPath accepts is added, changed or removed:
+// knowledge/<id>/ and videos/<id>/ index.html or meta.json, the two legacy
+// files home.html and demo-video/index.html, and matrix/matrix.json.
+// Map<realCwd, { watcher, refCount }> — refcounted so several mounted
+// components watching the same cwd share one chokidar instance.
 const outputWatchers = new Map();
 
 /**
- * Watch `cwd`'s home.html. Resolves `{ ok: true }` once watching is live (or
+ * Watch `cwd`'s project-pages dir: recomputes get() and pushes it whenever a
+ * path isLibraryPath accepts is added, changed or removed (knowledge/<id>/ and
+ * videos/<id>/ index.html or meta.json, the legacy home.html and
+ * demo-video/index.html, and matrix/matrix.json). Resolves `{ ok: true }` once watching is live (or
  * already watching), or `{ ok: false, reason: 'ephemeral' | 'invalid-cwd' }`
  * when there is nothing safe to watch — not an error, just "no live updates
  * for this cwd". Waits for chokidar's 'ready' so a write landing right after

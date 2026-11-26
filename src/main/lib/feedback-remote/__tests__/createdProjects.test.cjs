@@ -153,6 +153,19 @@ test('a failed setRepo write does not leave the repo in memory', async () => {
   expect(s.findByCwd('/p/a').repo).toBeNull();
 });
 
+test('after a failed write, a retry with the same ref succeeds (no stale conflict)', async () => {
+  const s = createCreatedProjects({ filePath: file });
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  fs.writeFileSync(path.dirname(file), 'x');
+  await expect(s.record({ cwd: '/p/a', fromCwd: FROM, externalRef: 'r' })).rejects.toThrow();
+  expect(s.findByRef(FROM, 'r')).toBeNull();
+  fs.rmSync(path.dirname(file));
+  const rec = await s.record({ cwd: '/p/a2', fromCwd: FROM, externalRef: 'r' });
+  expect(rec.cwd).toBe('/p/a2');
+  expect(s.findByRef(FROM, 'r')).toEqual(rec);
+});
+
 test('loaded entries with an invalid repo get repo null; valid repos are kept', () => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const e = (cwd, repo) => ({ cwd, fromCwd: FROM, externalRef: cwd, repo, createdAt: 1 });

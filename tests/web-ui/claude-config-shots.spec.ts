@@ -334,8 +334,17 @@ async function searchPanelShot(page: Page, face: Face, query: string, written: s
     return !!hit && el.contains(hit)
   })).toBe(true)
   expect(await rail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
-  const firstTitle = panel.locator('[role="option"] span[title]:not([title^="burrow-long"])').first()
-  expect(await firstTitle.evaluate((el) => el.scrollWidth <= el.clientWidth), 'first result title clipped').toBe(true)
+  const titles = panel.locator('[role="option"] span[title]')
+  const fullTitles = await titles.evaluateAll((els) => els.map((e) => e.getAttribute('title') ?? ''))
+  const shortIdx = fullTitles.findIndex((t) => t.length > 0 && t.length <= 20)
+  expect(shortIdx, 'no short (<= 20 chars) result title in the search panel').toBeGreaterThanOrEqual(0)
+  expect(await titles.nth(shortIdx).evaluate((el) => el.scrollWidth <= el.clientWidth), 'short result title clipped').toBe(true)
+  // Only the Project face searches memories, so only its query ('burrow') can surface the long-title stub row.
+  if (face === 'project') {
+    const longTitle = panel.locator('[role="option"] span[title^="burrow-long-title-overflow-check"]')
+    await expect(longTitle, 'long-title stub row missing from results').toHaveCount(1)
+    expect(await longTitle.evaluate((el) => el.scrollWidth > el.clientWidth), 'long title not truncated').toBe(true)
+  }
   expect(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth), 'search panel overflows').toBe(true)
   const labels = await rail.getByTestId('config-rail-tab-label').evaluateAll((els) => els.map((e) => [e.textContent, e.scrollWidth, e.clientWidth]))
   for (const [text, sw, cw] of labels) expect(sw as number, `label ${text}`).toBeLessThanOrEqual(cw as number)

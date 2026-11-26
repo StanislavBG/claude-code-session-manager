@@ -38,7 +38,7 @@ const AGENTS_DIR = `${HOME}/.claude/agents`
 
 const PERSONAS: AgentPersona[] = [
   {
-    name: 'builder', description: 'd', tools: [], model: null, effort: null, color: null,
+    name: 'builder', loadout: 'unbound', description: 'd', tools: [], model: null, effort: null, color: null,
     tags: [], projects: [], action: null, actionLabel: null,
     path: `${AGENTS_DIR}/builder.md`, body: 'b', overridingProjects: [],
   },

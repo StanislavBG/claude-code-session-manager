@@ -34,6 +34,7 @@ vi.mock('../editor/DocumentEditorPane', () => ({
 const PERSONAS: AgentPersona[] = [
   {
     name: 'builder',
+    loadout: 'unbound',
     description: 'Watch git history and drive the next publish.',
     tools: ['Read', 'Grep', 'Glob', 'Bash'],
     model: null,
@@ -46,6 +47,7 @@ const PERSONAS: AgentPersona[] = [
   },
   {
     name: 'debugger',
+    loadout: 'unbound',
     description: 'Diagnose a failing test.',
     tools: [],
     model: null,
@@ -63,6 +65,7 @@ const PERSONAS: AgentPersona[] = [
 // silently overwritten on first click).
 const PINNED_MODEL_PERSONA: AgentPersona = {
   name: 'pinned-model-agent',
+  loadout: 'unbound',
   description: 'Pinned to a concrete model id outside the standard list.',
   tools: [],
   model: 'claude-opus-5',
@@ -293,7 +296,7 @@ describe('AgentLibrary', () => {
     const row = el.querySelector('[data-agent-row="builder"]')!
     expect(row.querySelector('[data-testid="agent-row-model"]')!.textContent).toBe('opus')
     expect(el.querySelector('[data-agent-row="debugger"] [data-testid="agent-row-model"]')!.textContent).toBe('inherit')
-    expect(row.textContent).toContain('Undecided — choose a loadout')
+    expect(row.textContent).toContain('Unbound — every tool')
     expect(row.textContent).not.toContain('Watch git history')
     expect(row.querySelector('[data-testid="agent-row-loadout"]')).toBeTruthy()
   })

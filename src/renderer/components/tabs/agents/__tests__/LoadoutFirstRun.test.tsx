@@ -3,24 +3,29 @@ import { createElement, useState } from 'react'
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { LoadoutFirstRun } from '../LoadoutFirstRun'
+import { LoadoutFirstRun, showsFirstRun } from '../LoadoutFirstRun'
 import { BLANK_DRAFT, type Draft } from '../AgentDetail'
 
 let container: HTMLDivElement
 let root: Root
 let latest: Draft
 const armory = vi.fn()
+const listPersonas = vi.fn()
 
 async function mount() {
-  ;(window as unknown as { api: unknown }).api = { agents: { armory } }
+  ;(window as unknown as { api: unknown }).api = { agents: { armory, listPersonas } }
+  listPersonas.mockResolvedValue([{ name: 'dev-lead', tools: ['Edit', 'mcp__sm__x'] }])
   armory.mockResolvedValue({ builtins: [{ id: 'Edit', label: 'Edit', badges: [] }], bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], errors: [] })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
   const Host = () => {
-    const [d, setD] = useState<Draft>({ ...BLANK_DRAFT, tools: [] })
+    const [d, setD] = useState<Draft>({ ...BLANK_DRAFT, name: 'builder', tools: [] })
+    const [picking, setPicking] = useState(false)
+    const [dismissed, setDismissed] = useState(false)
     latest = d
-    return createElement(LoadoutFirstRun, { obj: d, savedTools: [], set: (p: Partial<Draft>) => setD((x) => ({ ...x, ...p })) })
+    if (!showsFirstRun(true, d, [], picking, dismissed)) return null
+    return createElement(LoadoutFirstRun, { obj: d, set: (p: Partial<Draft>) => setD((x) => ({ ...x, ...p })), picking, setPicking, onDismiss: () => setDismissed(true) })
   }
   await act(async () => { root.render(createElement(Host)); await Promise.resolve() })
 }
@@ -34,6 +39,17 @@ describe('LoadoutFirstRun', () => {
     expect(q('[data-testid="agent-choose-bare"]')).toBeTruthy()
     expect(q('[data-testid="agent-choose-pick"]')).toBeTruthy()
     expect(q('[data-testid="agent-choose-unbound"]')).toBeTruthy()
+  })
+
+  it('lists where the agent runs and seeds the draft from another persona', async () => {
+    await mount()
+    expect(q('[data-testid="agent-runs-today"]')!.textContent).toMatch(/Epic chat.*Scheduler jobs.*Tasks/)
+    expect(q('[data-choice="pick"]')!.textContent).toContain('RECOMMENDED')
+    const sel = q('[data-testid="agent-start-from"]') as HTMLSelectElement
+    await act(async () => { sel.dispatchEvent(new FocusEvent('focusin', { bubbles: true })); await Promise.resolve() })
+    await act(async () => { sel.value = 'dev-lead'; sel.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(latest.tools).toEqual(['Edit', 'mcp__sm__x'])
+    expect(latest.loadout).toBe('equipped')
   })
 
   it('Bare sets the bare encoding and the view disappears', async () => {

@@ -18,7 +18,7 @@ import {
   toDraft, overlayOf, overlayEdit, overlayDiff, type OverlayKeys, type Draft, type OpenProject,
 } from './AgentDetail'
 import { GearPanel } from './GearPanel'
-import { LoadoutFirstRun } from './LoadoutFirstRun'
+import { LoadoutFirstRun, showsFirstRun } from './LoadoutFirstRun'
 import { ConstraintsPanel } from './ConstraintsPanel'
 import { loadoutOf, type LoadoutState } from './AgentRoster'
 
@@ -202,6 +202,8 @@ export function AgentSheet({
   const { checking: cliChecking, recheck: recheckClis } = useAgentCliDetect()
   const [projectMode, setProjectMode] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [choiceDismissed, setChoiceDismissed] = useState(false)
   const path = !isNew && saved ? saved.path : `${home ?? '~'}/.claude/agents/${obj.name}.md`
   const canRevertOrSave = dirty || isNew
   const inProject = !isNew && !!saved && (projectMode || selected !== null)
@@ -494,7 +496,9 @@ export function AgentSheet({
               </div>
             </section>
 
-            <GearPanel obj={view} set={editing} />
+            {showsFirstRun(state === 'undecided' && !isNew && !!saved && !inProject, obj, saved?.tools ?? [], picking, choiceDismissed)
+              ? <LoadoutFirstRun obj={obj} set={set} picking={picking} setPicking={setPicking} onDismiss={() => setChoiceDismissed(true)} />
+              : <GearPanel obj={view} set={editing} />}
 
             <section data-testid="agent-personality" data-busy={busy ? 'true' : undefined} className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
               <div className="flex items-center gap-2">
@@ -517,7 +521,6 @@ export function AgentSheet({
           </div>
 
           <div className="flex flex-col gap-4 min-w-0">
-            {state === 'undecided' && !isNew && saved && <LoadoutFirstRun obj={obj} savedTools={saved.tools} set={set} />}
             {inProject && selected && (
               <section data-testid="agent-changed-card" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Changed in {selected.name} <span className="font-normal">{diffs.length}</span></div>

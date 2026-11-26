@@ -40,10 +40,11 @@ interface Frame {
 }
 
 // Roster card -> the sheet; the list column starts as the collapsed 64 px avatar rail (frame 1c's rail).
-const openSheet = (name: string) => async (page: Page) => {
+const openSheet = (name: string, opts: { gear?: boolean } = {}) => async (page: Page) => {
   await page.locator(`[data-testid="agent-card"][data-agent-row="${name}"]`).click()
   await page.getByTestId('agent-sheet').waitFor()
   // GearPanel renders from the armory: wait for its floor chips + companions slot (frame 1b's gear area).
+  if (opts.gear === false) return // Undecided: the first-run choice replaces the Gear panel
   await page.getByTestId('agent-floor-row').waitFor()
   await page.getByTestId('agent-companions-slot').waitFor()
   // 1b layout: Gear sits in the centre column (before Personality); Constraints + Applies-to in the right column.
@@ -77,7 +78,13 @@ const FRAMES: Frame[] = [
     if (nb.x + nb.width > count.x + 1) throw new Error('powers header text overlaps the count')
   } },
   // 1g: an Undecided agent's sheet shows the first-run choice in the gear area.
-  { name: 'undecided', testid: 'agent-roster', reference: '1g-undecided-first-run.png', setUp: async (page) => { await openSheet('page-history')(page); await page.getByTestId('agent-undecided-choice').waitFor() } },
+  { name: 'undecided', testid: 'agent-roster', reference: '1g-undecided-first-run.png', setUp: async (page) => { await openSheet('page-history', { gear: false })(page); await page.getByTestId('agent-undecided-choice').waitFor()
+    if (await page.getByTestId('agent-gear-slot').count()) throw new Error('the Gear panel must not render under the first-run choice')
+    const cards = page.locator('[data-testid="agent-undecided-choice"] [data-choice]')
+    if (await cards.count() !== 3) throw new Error('first-run choice needs three cards')
+    const box = await cards.first().boundingBox(); const sec = await page.getByTestId('agent-undecided-choice').boundingBox()
+    if (!box || !sec || box.width < sec.width * 0.8) throw new Error('first-run cards must be full width')
+    await page.getByTestId('agent-runs-today').waitFor() } },
   // 1h: builder's sheet in project mode — Global | In project ▾ picks Self, whose overlay overrides the model.
   { name: 'project-override', testid: 'agent-roster', reference: '1h-project-override.png', setUp: async (page) => {
     await openSheet('builder')(page)

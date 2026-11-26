@@ -93,3 +93,34 @@ test('agentsSavePersona admits gear keys on global and override saves and valida
   expect(parses(s, { ...base, projectCwd: '/work/alpha', environment: 'Bad Env' })).toBe(false);
   expect(parses(s, { ...base, projectCwd: '/work/alpha', bogus: 1 })).toBe(false);
 });
+
+test('agentsTakeBundledPersona accepts a bare name; rejects extra key and traversal name', () => {
+  const s = schemas.agentsTakeBundledPersona;
+  expect(parses(s, { name: 'dev-lead' })).toBe(true);
+  expect(parses(s, { name: 'dev-lead', extra: 1 })).toBe(false);
+  expect(parses(s, { name: '../x' })).toBe(false);
+});
+
+test('agentsDismissPersonaUpgrade accepts name + integer version >= 1; rejects extra key, traversal, 0 and 1.5', () => {
+  const s = schemas.agentsDismissPersonaUpgrade;
+  expect(parses(s, { name: 'dev-lead', bundledVersion: 2 })).toBe(true);
+  expect(parses(s, { name: 'dev-lead', bundledVersion: 2, extra: 1 })).toBe(false);
+  expect(parses(s, { name: '../x', bundledVersion: 2 })).toBe(false);
+  expect(parses(s, { name: 'dev-lead', bundledVersion: 0 })).toBe(false);
+  expect(parses(s, { name: 'dev-lead', bundledVersion: 1.5 })).toBe(false);
+});
+
+test('agentsIpc persona upgrade channels call personaUpgrade then broadcast agents:changed', async () => {
+  const pu = require('../lib/persona-macro/personaUpgrade.cjs');
+  const take = vi.spyOn(pu, 'takeBundledPersona').mockResolvedValue({ seedVersion: 2 });
+  const dismiss = vi.spyOn(pu, 'dismissPersonaUpgrade').mockResolvedValue(undefined);
+  const handlers = new Map();
+  const sent = [];
+  const win = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (c) => sent.push(c) } };
+  registerAgentsHandlers({ ipcMain: { handle: (c, fn) => handlers.set(c, fn) }, getWindow: () => win });
+  await handlers.get('agents:take-bundled-persona')({}, { name: 'dev-lead' });
+  await handlers.get('agents:dismiss-persona-upgrade')({}, { name: 'dev-lead', bundledVersion: 3 });
+  expect(take).toHaveBeenCalledWith('dev-lead');
+  expect(dismiss).toHaveBeenCalledWith('dev-lead', 3);
+  expect(sent).toEqual(['agents:changed', 'agents:changed']);
+});

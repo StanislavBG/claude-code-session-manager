@@ -878,6 +878,8 @@ const agentsSavePersona = z.record(z.string(), z.unknown()).transform((raw, ctx)
   return { ...base.data, ...g.data };
 });
 // agents:remove-override — an OPEN project's override, keyed by its absolute cwd (never a folder name).
+const agentsTakeBundledPersona = z.object({ name: PersonaNameSchema }).strict();
+const agentsDismissPersonaUpgrade = z.object({ name: PersonaNameSchema, bundledVersion: z.number().int().min(1) }).strict();
 const agentsRemoveOverride = z.object({ name: PersonaNameSchema, projectCwd: ProjectCwdSchema }).strict();
 // agents:delete-persona — a kebab-case name only; `.strict()` also bars deletePersona's injectable `globalDir`.
 const agentsDeletePersona = z.object({ name: PersonaNameSchema }).strict();
@@ -2042,6 +2044,8 @@ module.exports = {
     exchangesList,
     agentsSavePersona,
     agentsRemoveOverride,
+    agentsTakeBundledPersona,
+    agentsDismissPersonaUpgrade,
     agentsDeletePersona,
     claudeConfigRead,
     claudeConfigPatch,

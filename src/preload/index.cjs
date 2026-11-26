@@ -142,6 +142,8 @@ contextBridge.exposeInMainWorld('api', {
     savePersona: (payload) => ipcRenderer.invoke('agents:save-persona', payload),
     deletePersona: (payload) => ipcRenderer.invoke('agents:delete-persona', payload),
     removeOverride: (payload) => ipcRenderer.invoke('agents:remove-override', payload),
+    takeBundledPersona: (payload) => ipcRenderer.invoke('agents:take-bundled-persona', payload),
+    dismissPersonaUpgrade: (payload) => ipcRenderer.invoke('agents:dismiss-persona-upgrade', payload),
     getPersonaBody: (payload) => ipcRenderer.invoke('agents:get-persona-body', payload),
     resolveModelInfo: (payload) => ipcRenderer.invoke('agents:resolve-model-info', payload),
     resolveEpicModel: (payload) => ipcRenderer.invoke('agents:resolve-epic-model', payload),

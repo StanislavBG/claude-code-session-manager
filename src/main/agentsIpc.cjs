@@ -8,6 +8,7 @@
 
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
+const personaUpgrade = require('./lib/persona-macro/personaUpgrade.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const agentEffortResolve = require('./lib/claude/agentEffortResolve.cjs');
 const { resolveEffectiveModelInfo } = require('./lib/claude/effectiveModelInfo.cjs');
@@ -48,6 +49,16 @@ function registerAgentsHandlers({ ipcMain, getWindow }) {
   }));
   ipcMain.handle('agents:remove-override', validated(schemas.agentsRemoveOverride, async (payload) => {
     const result = await agentLibrary.removeOverride(payload);
+    broadcastAgentsChanged();
+    return result;
+  }));
+  ipcMain.handle('agents:take-bundled-persona', validated(schemas.agentsTakeBundledPersona, async ({ name }) => {
+    const result = await personaUpgrade.takeBundledPersona(name);
+    broadcastAgentsChanged();
+    return result;
+  }));
+  ipcMain.handle('agents:dismiss-persona-upgrade', validated(schemas.agentsDismissPersonaUpgrade, async ({ name, bundledVersion }) => {
+    const result = await personaUpgrade.dismissPersonaUpgrade(name, bundledVersion);
     broadcastAgentsChanged();
     return result;
   }));

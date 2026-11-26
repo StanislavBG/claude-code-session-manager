@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useToast } from '../../../state/toast'
 import type { Armory, ArmoryItem, ArmoryMcpItem, ArmoryPackItem } from '../../../../preload/api'
 import { TOOLS, type Draft } from './AgentDetail'
+import { ArmoryDrawer, type ArmoryKind } from './ArmoryDrawer'
 
 /**
  * The Gear card of the agent sheet (frame 1b): Built-in tools (equipped solid / available dashed,
@@ -37,9 +38,21 @@ function Badges({ badges }: { badges: ArmoryItem['badges'] }) {
   )
 }
 
-function Row({ testid, title, sub, children }: { testid: string; title: string; sub: string; children: ReactNode }) {
+interface DropProps { kind: ArmoryKind; dragging: { kind: ArmoryKind; id: string } | null; onDrop: () => void }
+
+function Row({ testid, title, sub, children, drop }: { testid: string; title: string; sub: string; children: ReactNode; drop?: DropProps }) {
+  const [over, setOver] = useState(false)
+  const target = !!drop && drop.dragging?.kind === drop.kind
   return (
-    <div data-testid={testid} className="grid grid-cols-[132px_1fr] gap-3 py-3 border-t border-line first:border-t-0">
+    <div
+      data-testid={testid}
+      data-drop-target={target ? (over ? 'over' : 'ready') : undefined}
+      onDragOver={target ? (e) => { e.preventDefault(); setOver(true) } : undefined}
+      onDragLeave={target ? () => setOver(false) : undefined}
+      onDrop={drop ? (e) => { e.preventDefault(); setOver(false); drop.onDrop() } : undefined}
+      className={`relative grid grid-cols-[132px_1fr] gap-3 py-3 border-t border-line first:border-t-0 ${target ? `rounded-[12px] border border-dashed border-honey/60 ${over ? 'bg-honey/15' : 'bg-honey/5'}` : ''}`}
+    >
+      {target && over && <span data-testid="agent-release-hint" className="absolute right-2 top-1 text-[11px] font-semibold text-honey-dark">Release to equip</span>}
       <div><div className="text-[13px] font-semibold text-fg">{title}</div><SubLabel>{sub}</SubLabel></div>
       <div className="min-w-0">{children}</div>
     </div>
@@ -54,6 +67,8 @@ const STATUS: Record<ArmoryMcpItem['status'], { dot: string; text: string }> = {
 
 export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft>) => void }) {
   const [armory, setArmory] = useState<Armory | null>(null)
+  const [open, setOpen] = useState(false)
+  const [dragging, setDragging] = useState<{ kind: ArmoryKind; id: string } | null>(null)
 
   useEffect(() => {
     let live = true
@@ -104,15 +119,56 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
   const availablePacks = (armory?.packs ?? []).filter((p) => !packs.includes(p.id))
   const armoryPack = (id: string): ArmoryPackItem | undefined => armory?.packs.find((p) => p.id === id)
 
+  // ---- Armory drawer: explicit equip / unequip per kind (drag, button and Enter all land here)
+  const equipItem = (kind: ArmoryKind, id: string) => {
+    if (kind === 'builtin') { if (!unbound && !obj.tools.includes(id)) set({ tools: [...obj.tools, id] }) }
+    else if (kind === 'mcp') { const s = armoryServer(id); if (s && !servers.includes(id)) equipServer(s) }
+    else if (!packs.includes(id)) set({ packs: [...packs, id] })
+  }
+  const unequipItem = (kind: ArmoryKind, id: string) => {
+    if (kind === 'builtin') { if (unbound || obj.tools.includes(id)) toggleTool(id) }
+    else if (kind === 'mcp') removeServer(id)
+    else set({ packs: packs.filter((x) => x !== id) })
+  }
+  const dropOn = (kind: ArmoryKind) => () => {
+    const d = dragging
+    setDragging(null)
+    if (d && d.kind === kind) equipItem(d.kind, d.id)
+  }
+  const dropProps = (kind: ArmoryKind): DropProps => ({ kind, dragging, onDrop: dropOn(kind) })
+
+  // Escape cancels a drag in flight; otherwise it closes the drawer.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (dragging) setDragging(null)
+      else setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, dragging])
+
   const slot = 'rounded-[12px] border border-dashed border-rule px-3 py-2 text-[12px] text-fg-faint flex items-center'
 
   return (
     <section data-testid="agent-gear-slot" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line flex flex-col">
       <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint mb-1">
-        Gear <span className="font-serif italic normal-case tracking-normal font-normal text-fg-dim">inventory</span>
+        <span className="flex items-center gap-2">
+          <span className="flex-1">Gear <span className="font-serif italic normal-case tracking-normal font-normal text-fg-dim">inventory</span></span>
+          <button
+            type="button"
+            data-testid="agent-open-armory"
+            aria-expanded={open}
+            onClick={() => { setOpen((o) => !o); setDragging(null) }}
+            className="h-7 px-2.5 rounded-[10px] border border-line bg-bg text-[12px] font-medium normal-case tracking-normal text-fg hover:border-rule"
+          >
+            {open ? 'Armory open' : 'Open Armory'}
+          </button>
+        </span>
       </div>
 
-      <Row testid="agent-tools-row" title="Built-in tools" sub="class abilities">
+      <Row testid="agent-tools-row" title="Built-in tools" sub="class abilities" drop={dropProps('builtin')}>
         <div className="flex flex-wrap gap-1.5">
           {builtins.map((b) => {
             const on = unbound || obj.tools.includes(b.id)
@@ -154,7 +210,7 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
         </div>
       </Row>
 
-      <Row testid="agent-mcp-row" title="MCP servers" sub="magic items">
+      <Row testid="agent-mcp-row" title="MCP servers" sub="magic items" drop={dropProps('mcp')}>
         <div className="flex flex-col gap-2">
           {servers.map((id) => {
             const a = armoryServer(id)
@@ -198,7 +254,7 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
         </div>
       </Row>
 
-      <Row testid="agent-packs-row" title="Packs" sub="spellbooks">
+      <Row testid="agent-packs-row" title="Packs" sub="spellbooks" drop={dropProps('pack')}>
         <div className="flex flex-col gap-2">
           {packs.map((id) => {
             const p = armoryPack(id)
@@ -237,6 +293,17 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
       <Row testid="agent-companions-row" title="Companions" sub="party">
         <div data-testid="agent-companions-slot" className={slot}>Other agents it can call — designed later, not part of this build</div>
       </Row>
+      {open && (
+        <ArmoryDrawer
+          armory={armory}
+          equipped={{ allBuiltins: unbound, builtins: obj.tools, servers, packs }}
+          onEquip={equipItem}
+          onUnequip={unequipItem}
+          onDragStart={(kind, id) => setDragging({ kind, id })}
+          onDragEnd={() => setDragging(null)}
+          onClose={() => { setOpen(false); setDragging(null) }}
+        />
+      )}
     </section>
   )
 }

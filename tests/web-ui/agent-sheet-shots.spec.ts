@@ -54,7 +54,8 @@ const FRAMES: Frame[] = [
   { name: 'sheet', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: openSheet('architect') },
   // The same sheet with the list column expanded to 1b's 316 px list.
   { name: 'sheet-list-expanded', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-list-toggle').click(); await page.locator('[data-agent-row="builder"]').waitFor() } },
-  { name: 'armory-drag', testid: 'agent-armory', reference: '1e-armory-mid-drag.png' },
+  // 1e: sheet + the Armory drawer open (Open Armory in the Gear header). The mid-drag ghost is a native HTML5 drag image and is not shot.
+  { name: 'armory-drag', testid: 'agent-roster', reference: '1e-armory-mid-drag.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-open-armory').click(); await page.getByTestId('agent-armory').waitFor() } },
   { name: 'mcp-powers', testid: 'agent-mcp-powers', reference: '1f-mcp-powers.png' },
   { name: 'undecided', testid: 'agent-undecided-choice', reference: '1g-undecided-first-run.png' },
   { name: 'project-override', testid: 'agent-project-override', reference: '1h-project-override.png' },

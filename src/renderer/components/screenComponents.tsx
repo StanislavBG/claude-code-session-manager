@@ -52,7 +52,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'history':       { title: 'Spend, tokens and time',    intro: 'Estimated spend, tokens, prompts and active time across every project — by project, model and day. Export any range to CSV.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
-  'memory':        { title: 'Claude config',             intro: 'This project\'s own Claude Code files — its memory folder, CLAUDE.md and CLAUDE.local.md, .claude/settings.json and settings.local.json, .mcp.json and .claude/skills/. Each tab edits the real file the claude CLI reads when a session starts here; ~/.claude is edited from Home.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
   'app-settings':  { title: 'App Settings',              intro: 'Session Manager\'s own preferences — voice, appearance, telemetry, web remote, updates and the storage map.' },
 }
@@ -100,6 +99,8 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
     // reach here from a persisted dockview layout (openPanel rewrites them).
     case 'claude-config':
       return <LazyScreen><HomeClaudeConfig /></LazyScreen>
+    // Project's Claude config draws its own chrome, like Home's
+    case 'memory':        return <LazyScreen><ProjectClaudeConfig /></LazyScreen>
     // One case per alias (no fall-through) — scripts/page-surface.cjs reads each case's own JSX.
     case 'system-prompt': return <LazyScreen><HomeClaudeConfig initialTab={NAV_KEY_ALIASES[active]} /></LazyScreen>
     case 'settings':      return <LazyScreen><HomeClaudeConfig initialTab={NAV_KEY_ALIASES[active]} /></LazyScreen>
@@ -112,7 +113,6 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
     switch (active) {
       case 'history':       return <LazyScreen><History /></LazyScreen>
       case 'scheduler':     return <LazyScreen><Scheduler navigate={ctx.onNavigate} /></LazyScreen>
-      case 'memory':        return <LazyScreen><ProjectClaudeConfig /></LazyScreen>
       case 'app-settings':  return <LazyScreen><AppSettings /></LazyScreen>
       default: return null
     }

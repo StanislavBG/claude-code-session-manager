@@ -45,6 +45,8 @@ function registerAppAdminRoutes(adminHttp, deps = {}) {
   require('./lib/feedback-remote/crossProjectFeedback.cjs').registerAdminRoute(adminHttp);
   // POST /admin/projects/create — a paired service's new local (+ private GitHub) project; broadcasts `projects:created`.
   require('./lib/feedback-remote/projectCreate.cjs').registerAdminRoute(adminHttp);
+  // POST /admin/services/pair-local[/confirm] — same-machine service pairing with no window step.
+  require('./lib/feedback-remote/servicePairLocalRoutes.cjs').registerAdminRoute(adminHttp);
   // Its return leg: the receiving session answers INTO the Epic that asked
   // (lib/feedback-remote/crossProjectReply.cjs).
   require('./lib/feedback-remote/crossProjectReply.cjs').registerAdminRoute(adminHttp);

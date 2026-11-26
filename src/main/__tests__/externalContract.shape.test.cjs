@@ -81,6 +81,7 @@ test('every listed admin route is registered by its module', async () => {
   require('../lib/feedback-remote/macroAdminRoutes.cjs').registerAdminRoute(fake, { startExternalNewSession: async () => ({}) });
   require('../lib/feedback-remote/crossProjectFeedback.cjs').registerAdminRoute(fake);
   require('../lib/feedback-remote/projectCreate.cjs').registerAdminRoute(fake, { notify: () => {} });
+  require('../lib/feedback-remote/servicePairLocalRoutes.cjs').registerAdminRoute(fake);
   require('../lib/persona-macro/agentAdminRoutes.cjs').registerAdminRoute(fake, { listPersonas: async () => [] });
   require('../lib/feedback-remote/needsYouAdminRoutes.cjs').registerAdminRoute(fake);
   require('../lib/tasks/taskAdminRoutes.cjs').registerAdminRoute(fake);

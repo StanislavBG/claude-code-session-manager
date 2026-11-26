@@ -7,7 +7,7 @@
  * merge `held` into heldSlugs. No fs: the caller passes queue rows and the
  * stored review records ({ [bareValidateSlug]: record }).
  *
- * Record fields read (all optional): `released: true` (or `status: 'released'`),
+ * Record fields read (all optional): `release` (non-null object, as planReviewStore.recordPlanRelease writes it = released),
  * `firstReviewAt` / `reviews[0].at` (hold start when a review exists).
  */
 
@@ -74,7 +74,7 @@ function qualifiesForReview(members) {
 }
 
 function isReleased(record) {
-  return !!record && (record.released === true || record.status === 'released');
+  return !!record && record.release != null && typeof record.release === 'object';
 }
 
 function holdStartMs(validateRow, record) {

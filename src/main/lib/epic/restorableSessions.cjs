@@ -975,5 +975,6 @@ module.exports = {
   listRestorableSessions,
   listRecentRestorableSessions,
   checkRestorableSessionSync,
+  showId,
   __resetCacheForTests,
 };

@@ -21,6 +21,7 @@ const {
   listRestorableSessions,
   listRecentRestorableSessions,
   checkRestorableSessionSync,
+  showId,
   __resetCacheForTests,
 } = require('../restorableSessions.cjs');
 
@@ -332,7 +333,7 @@ test('an interactive session older than the 400-read window is not listed and tr
   expect(r).toMatchObject({ scanned: 400, truncated: true });
 });
 
-test('checkRestorableSessionSync refuses a non-UUID id before touching the filesystem', () => {
+function expectSneakyIdRefused() {
   writeSession(uuid(1));
   // `../<this dir>/<uuid>` resolves to a real, restorable transcript — only the format check stops it.
   const sneaky = `../${encodeCwd(cwd)}/${uuid(1)}`;
@@ -344,9 +345,44 @@ test('checkRestorableSessionSync refuses a non-UUID id before touching the files
   expect(statSync).not.toHaveBeenCalled();
   expect(openSync).not.toHaveBeenCalled();
   const res = check(sneaky);
-  expect(res.message).toContain(sneaky);
+  // The id is echoed as the product renders it (showId caps long ids), so the
+  // assertion holds however long TMPDIR makes the encoded cwd.
+  expect(res.message).toContain(showId(sneaky));
   expect(res.message).toContain(projectDir());
   expect(check(uuid(1))).toEqual({ ok: true, transcriptPath: transcript(uuid(1)) });
+  return sneaky;
+}
+
+test('checkRestorableSessionSync refuses a non-UUID id before touching the filesystem', () => {
+  expectSneakyIdRefused();
+  // A short id is echoed whole, inside the full message.
+  expect(check('..').message).toBe(
+    `Refused session id ".." for ${projectDir()}: not a Claude session UUID, so no path was built from it.`,
+  );
+});
+
+test('the sneaky-id refusal holds under a TMPDIR over 120 characters long', () => {
+  const savedTmp = process.env.TMPDIR;
+  const savedRoot = root;
+  const longTmp = path.join(root, 'tmpdir-'.padEnd(130 - root.length, 'x'));
+  fs.mkdirSync(longTmp, { recursive: true });
+  expect(longTmp.length).toBeGreaterThan(120);
+  try {
+    process.env.TMPDIR = longTmp;
+    expect(os.tmpdir()).toBe(longTmp);
+    __resetCacheForTests();
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-rs-'));
+    home = path.join(root, 'home');
+    cwd = path.join(root, 'project');
+    mkProject(cwd);
+    const sneaky = expectSneakyIdRefused();
+    expect(sneaky.length).toBeGreaterThan(80); // long enough that showId truncates it
+    expect(check(sneaky).message).not.toContain(sneaky);
+  } finally {
+    if (savedTmp === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmp;
+    root = savedRoot; // afterEach removes savedRoot, which holds longTmp and the inner root
+  }
 });
 
 test('the claimed-id memo re-reads only an Epic file that was rewritten', () => {

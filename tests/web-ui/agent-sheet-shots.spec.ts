@@ -43,11 +43,14 @@ interface Frame {
 const openSheet = (name: string) => async (page: Page) => {
   await page.locator(`[data-testid="agent-card"][data-agent-row="${name}"]`).click()
   await page.getByTestId('agent-sheet').waitFor()
+  // GearPanel renders from the armory: wait for its floor chips + companions slot (frame 1b's gear area).
+  await page.getByTestId('agent-floor-row').waitFor()
+  await page.getByTestId('agent-companions-slot').waitFor()
 }
 
 const FRAMES: Frame[] = [
   { name: 'roster', testid: 'agent-roster', reference: '1a-roster.png', setUp: async (page) => { await page.getByTestId('agent-card').first().waitFor() } },
-  // 1b workbench (collapsed rail by default); gear / constraints contents are sibling PRDs. Rail = 1c's left edge.
+  // 1b workbench (collapsed rail by default); gear = GearPanel (built); constraints is a sibling PRD. Rail = 1c's left edge.
   { name: 'sheet', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: openSheet('architect') },
   // The same sheet with the list column expanded to 1b's 316 px list.
   { name: 'sheet-list-expanded', testid: 'agent-roster', reference: '1b-sheet-workbench.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-list-toggle').click(); await page.locator('[data-agent-row="builder"]').waitFor() } },

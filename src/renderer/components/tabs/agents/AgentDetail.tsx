@@ -44,6 +44,9 @@ export interface Draft {
   agentCli: AgentCliChoice
   /** Model for a non-Claude agentCli; '' = the CLI's own default. */
   agentCliModel: string
+  /** Gear: declared MCP servers / context packs. Absent until the gear panel edits them (servers otherwise derive from the mcp__ tools). */
+  mcpServers?: string[]
+  packs?: string[]
 }
 
 export function toDraft(p: AgentPersona): Draft {
@@ -58,7 +61,13 @@ export function toDraft(p: AgentPersona): Draft {
     body: p.body,
     agentCli: p.agentCli ?? 'claude',
     agentCliModel: p.agentCliModel ?? '',
+    ...gearOf(p),
   }
+}
+
+function gearOf(p: AgentPersona): Pick<Draft, 'mcpServers' | 'packs'> {
+  const g = p as AgentPersona & Pick<Draft, 'mcpServers' | 'packs'>
+  return { ...(g.mcpServers ? { mcpServers: g.mcpServers } : {}), ...(g.packs ? { packs: g.packs } : {}) }
 }
 
 export const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '', agentCli: 'claude', agentCliModel: '' }

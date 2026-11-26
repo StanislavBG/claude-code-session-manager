@@ -14,9 +14,10 @@ import { toast } from '../../../state/toast'
 import { Z } from '../../../lib/zLayers'
 import type { AgentPersona } from '../../../../preload/api'
 import {
-  COLORS, COLOR_SWATCH, TOOLS, MoreMenu, RowLabel, ModelSelect, EffortSelect, RunsOnSelect,
+  COLORS, COLOR_SWATCH, MoreMenu, RowLabel, ModelSelect, EffortSelect, RunsOnSelect,
   ProjectOverrideBlock, overrideChipText, toDraft, type Draft, type OpenProject,
 } from './AgentDetail'
+import { GearPanel } from './GearPanel'
 import { loadoutOf, type LoadoutState } from './AgentRoster'
 
 /**
@@ -24,8 +25,7 @@ import { loadoutOf, type LoadoutState } from './AgentRoster'
  * 64 px avatar rail by default, the 316 px list when expanded — deviation 1), and the sheet itself:
  * header (avatar, name, loadout badge + counts, `edited`, class line + tags, Global | In project,
  * Duplicate, ⋯), DESCRIPTION, STATS, PERSONALITY & GROUNDING preview (Open editor = the shared
- * DocumentEditorPane, full screen), a right column with the Gear / Constraints slots (their contents
- * are sibling PRDs) and THIS LOADOUT APPLIES TO, and the bottom save bar. Save / revert / delete /
+ * DocumentEditorPane, full screen), a right column with the Gear (GearPanel) / Constraints (sibling PRD) slots and THIS LOADOUT APPLIES TO, and the bottom save bar. Save / revert / delete /
  * duplicate go through the same AgentLibrary handlers and IPC calls as before.
  */
 
@@ -143,57 +143,6 @@ export function AgentWorkbench({ expanded, onToggle, list, personas, selectedNam
 }
 
 // ---- the sheet ----------------------------------------------------------------------------------
-
-/** Right-column placeholder for the Gear card — the gear PRD replaces this body (it keeps today's tool chips meanwhile). */
-export function GearSlot({ obj, set }: { obj: Draft; set: (patch: Partial<Draft>) => void }) {
-  const allTools = obj.tools.length === 0
-  const toggleTool = (t: string) => {
-    if (allTools) { set({ tools: TOOLS.filter((x) => x !== t) }); return }
-    set({ tools: obj.tools.includes(t) ? obj.tools.filter((x) => x !== t) : [...obj.tools, t] })
-  }
-  return (
-    <section data-testid="agent-gear-slot" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line flex flex-col gap-2">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">
-        Gear <span className="font-serif italic normal-case tracking-normal font-normal text-fg-dim">what it can reach</span>
-      </div>
-      <div className="flex items-start gap-3" data-testid="agent-tools-row">
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap gap-1.5">
-            {TOOLS.map((t) => {
-              const on = allTools || obj.tools.includes(t)
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  aria-pressed={on}
-                  data-tool={t}
-                  onClick={() => toggleTool(t)}
-                  className={`px-2 py-0.5 rounded-md text-[12px] font-mono border ${
-                    on ? 'bg-honey/20 text-honey-dark border-honey/40' : 'bg-transparent text-fg-faint border-dashed border-rule'
-                  }`}
-                >
-                  {t}
-                </button>
-              )
-            })}
-          </div>
-          <div data-testid="agent-tools-note" className="text-[11px] text-fg-faint mt-1 leading-snug">
-            {allTools ? (
-              'All tools — no tools: line, so every tool (MCP included) is granted. Click one to restrict.'
-            ) : (
-              <>
-                {obj.tools.length} of {TOOLS.length} granted. Anything not filled is refused at call time.{' '}
-                <button type="button" data-testid="agent-tools-all" onClick={() => set({ tools: [] })} className="underline text-fg-dim hover:text-fg">
-                  Grant all tools
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
 
 /** Right-column placeholder for the Constraints card — the constraints PRD fills it. */
 export function ConstraintsSlot() {
@@ -554,7 +503,7 @@ export function AgentSheet({
           </div>
 
           <div className="flex flex-col gap-4 min-w-0">
-            <GearSlot obj={obj} set={set} />
+            <GearPanel obj={obj} set={set} />
             <ConstraintsSlot />
             <AppliesToCard />
           </div>

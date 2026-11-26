@@ -3,7 +3,7 @@ import { test, expect, beforeEach, afterEach } from 'vitest';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { listPacks, getPack, bundledPacksDir, PACK_LAWS_CHAR_CAP } = require('../packCatalog.cjs');
+const { listPacks, listUnpackedSkills, getPack, bundledPacksDir, PACK_LAWS_CHAR_CAP } = require('../packCatalog.cjs');
 
 let root;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'packcat-')); });
@@ -53,6 +53,8 @@ test('a valid pack is listed with every field', () => {
     pluginName: 'sm-pack-ios-swiftui',
     laws: '- Use @Observable.',
     requires: { platform: 'darwin' },
+    source: 'shipped',
+    skills: [],
   }]);
   expect(path.isAbsolute(r.packs[0].dir)).toBe(true);
 });
@@ -173,4 +175,70 @@ test('listPacks never throws, even when packsDir is a file', () => {
   fs.writeFileSync(f, 'x');
   expect(() => listPacks({ packsDir: f })).not.toThrow();
   expect(listPacks({ packsDir: f }).packs).toEqual([]);
+});
+
+function writePlugin(home, name, { skills = [], desc, install = true } = {}) {
+  const d = path.join(home, 'cache', name);
+  fs.mkdirSync(path.join(d, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(d, '.claude-plugin', 'plugin.json'), JSON.stringify({ name, description: desc }));
+  for (const s of skills) {
+    fs.mkdirSync(path.join(d, 'skills', s), { recursive: true });
+    fs.writeFileSync(path.join(d, 'skills', s, 'SKILL.md'), '# s');
+  }
+  fs.mkdirSync(path.join(d, 'skills', 'no-skill-md'), { recursive: true });
+  return d;
+}
+function writeInstalled(home, body) {
+  fs.mkdirSync(path.join(home, '.claude', 'plugins'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), typeof body === 'string' ? body : JSON.stringify(body));
+}
+
+test('an installed plugin is listed with its skills', () => {
+  const home = path.join(root, 'home');
+  const d = writePlugin(home, 'dev-kit', { skills: ['develop', 'builder'], desc: 'Dev things' });
+  writeInstalled(home, { version: 2, plugins: { 'dev-kit@mk': [{ installPath: d }] } });
+  writePack('shipped-one');
+  const r = listPacks({ packsDir: root, home });
+  const p = r.packs.find((x) => x.id === 'dev-kit');
+  expect(p).toMatchObject({ id: 'dev-kit', label: 'dev-kit', description: 'Dev things', dir: d, source: 'plugin', laws: '', requires: {}, skills: ['dev-kit:builder', 'dev-kit:develop'] });
+  expect(r.packs.find((x) => x.id === 'shipped-one').source).toBe('shipped');
+});
+
+test('malformed or missing installed_plugins.json never throws', () => {
+  const home = path.join(root, 'home');
+  expect(listPacks({ packsDir: path.join(root, 'none'), home })).toEqual({ packs: [], errors: [] });
+  writeInstalled(home, '{nope');
+  const r = listPacks({ packsDir: path.join(root, 'none'), home });
+  expect(r.packs).toEqual([]);
+  expect(r.errors[0].error).toMatch(/not valid JSON/);
+  writeInstalled(home, { plugins: [] });
+  expect(listPacks({ packsDir: path.join(root, 'none'), home }).errors).toHaveLength(1);
+});
+
+test('a plugin with a missing installPath yields an error entry', () => {
+  const home = path.join(root, 'home');
+  writeInstalled(home, { plugins: { 'a@m': [{}], 'b@m': [{ installPath: path.join(home, 'gone') }] } });
+  const r = listPacks({ packsDir: path.join(root, 'none'), home });
+  expect(r.packs).toEqual([]);
+  expect(r.errors).toHaveLength(2);
+});
+
+test('a shipped/plugin id collision keeps the shipped pack and errors the plugin', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'packhome-'));
+  const d = writePlugin(home, 'alpha');
+  writeInstalled(home, { plugins: { 'alpha@m': [{ installPath: d }] } });
+  writePack('alpha');
+  const r = listPacks({ packsDir: root, home });
+  expect(r.packs.map((p) => p.source)).toEqual(['shipped']);
+  expect(r.errors).toEqual([{ dir: d, error: expect.stringContaining('collides') }]);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('listUnpackedSkills lists ~/.claude/skills folders with a SKILL.md', () => {
+  const home = path.join(root, 'home');
+  fs.mkdirSync(path.join(home, '.claude', 'skills', 'mine'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'skills', 'mine', 'SKILL.md'), '#');
+  fs.mkdirSync(path.join(home, '.claude', 'skills', 'empty'), { recursive: true });
+  expect(listUnpackedSkills({ home })).toEqual(['mine']);
+  expect(listUnpackedSkills({ home: path.join(root, 'nohome') })).toEqual([]);
 });

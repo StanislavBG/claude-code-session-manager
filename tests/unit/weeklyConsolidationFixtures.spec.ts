@@ -29,6 +29,19 @@ function bashCommands(lines: any[]): string[] {
   return out
 }
 
+function assertBlockShape(blk: any, where: string) {
+  const msg = `bad block at ${where}: ${JSON.stringify(blk)?.slice(0, 120)}`
+  expect(['text', 'tool_use', 'tool_result'], msg).toContain(blk?.type)
+  if (blk.type === 'text') {
+    expect(typeof blk.text === 'string' && blk.text.length > 0, msg).toBe(true)
+  } else if (blk.type === 'tool_use') {
+    expect(blk.name, msg).toBe('Bash')
+    expect(typeof blk.input?.command === 'string' && blk.input.command.length > 0, msg).toBe(true)
+  } else {
+    expect(typeof blk.tool_use_id, msg).toBe('string')
+  }
+}
+
 describe('weekly-consolidation fixtures', () => {
   const a = load('set-a')
   const b = load('set-b')
@@ -47,6 +60,7 @@ describe('weekly-consolidation fixtures', () => {
         expect(l.sessionId).toBe(f.base)
         expect(l.timestamp >= '2026-11-16' && l.timestamp < '2026-11-23').toBe(true)
         expect(Array.isArray(l.message.content)).toBe(true)
+        for (const blk of l.message.content) assertBlockShape(blk, `${f.name}:${l.timestamp}`)
       }
     }
   })

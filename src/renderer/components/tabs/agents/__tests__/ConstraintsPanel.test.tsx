@@ -14,7 +14,7 @@ let container: HTMLDivElement
 let root: Root
 let latest: Draft
 
-async function mount(initial: Partial<Draft> = {}) {
+async function mount(initial: Partial<Draft> = {}, collapsed = false) {
   ;(window as unknown as { api: unknown }).api = {
     agents: { armory: vi.fn().mockResolvedValue(ARMORY) },
     toolRisk: { read: vi.fn().mockResolvedValue({ ok: true, path: null, exists: true, interactive: false, marks: { 'mcp__x__post': 'public', 'mcp__x__rm': 'irreversible' } }) },
@@ -26,7 +26,7 @@ async function mount(initial: Partial<Draft> = {}) {
   const Host = () => {
     const [d, setD] = useState<Draft>({ ...BLANK_DRAFT, ...initial })
     latest = d
-    return createElement(ConstraintsPanel, { obj: d, set: (p: Partial<Draft>) => setD((x) => ({ ...x, ...p })) })
+    return createElement(ConstraintsPanel, { obj: d, collapsed, set: (p: Partial<Draft>) => setD((x) => ({ ...x, ...p })) })
   }
   await act(async () => { root.render(createElement(Host)); await Promise.resolve() })
   await act(async () => { await Promise.resolve() })
@@ -35,6 +35,15 @@ const q = (sel: string) => container.querySelector(sel) as HTMLElement
 afterEach(() => { act(() => root.unmount()); container.remove() })
 
 describe('ConstraintsPanel', () => {
+  it('collapses to one summary line while the Armory is open, Show expands it', async () => {
+    await mount({}, true)
+    expect(q('[data-testid="agent-constraints-slot"]').getAttribute('data-collapsed')).toBe('true')
+    expect(q('[data-testid="constraints-summary"]').textContent).toBe('headless-default · 2 risk marks · 1 banned in jobs')
+    expect(q('[data-environment]')).toBeNull()
+    await act(async () => { q('[data-testid="constraints-show"]').click() })
+    expect(q('[data-environment]')).toBeTruthy()
+  })
+
   it('renders environments from the armory with radio dots and the 1b header', async () => {
     await mount()
     expect(container.querySelectorAll('[data-environment]').length).toBe(2)

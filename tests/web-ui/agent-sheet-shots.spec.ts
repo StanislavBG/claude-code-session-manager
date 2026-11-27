@@ -63,6 +63,8 @@ const FRAMES: Frame[] = [
   { name: 'armory-drag', testid: 'agent-roster', reference: '1e-armory-mid-drag.png', setUp: async (page) => { await openSheet('architect')(page); await page.getByTestId('agent-open-armory').click(); await page.getByTestId('agent-armory').waitFor()
     const drawer = await page.getByTestId('agent-armory').boundingBox(); const row = await page.getByTestId('agent-mcp-row').boundingBox()
     if (!drawer || !row || row.x + row.width > drawer.x) throw new Error('the armory drawer must not cover the Gear drop rows')
+    if ((await page.getByTestId('agent-constraints-slot').getAttribute('data-collapsed')) !== 'true') throw new Error('Constraints must collapse to one line while the Armory is open')
+    if (await page.getByTestId('constraints-environment').count()) throw new Error('collapsed Constraints must not render the environment cards')
     await page.locator('[data-testid="armory-item"][data-item="session-manager-scheduler"]').dispatchEvent('dragstart')
     await page.getByTestId('agent-mcp-row').dispatchEvent('dragenter')
     await page.getByTestId('agent-release-hint').waitFor()
@@ -108,6 +110,8 @@ const FRAMES: Frame[] = [
     if (!/PROJECT OVERLAY.*\/Self\/\.claude\/agents\/builder\.md/.test((await page.getByTestId('agent-header-path').textContent()) ?? '')) throw new Error('header path must be the overlay path')
     if (await page.getByTestId('agent-details').count()) throw new Error('no empty DETAILS card in project mode')
     await page.getByTestId('agent-other-projects').waitFor()
+    // The changed card must not claim 'Same as global' while a gear key differs.
+    if (await page.getByTestId('agent-changed-card').getByText('Same as global.').count() && await page.locator('[data-testid^="agent-overridden-"]').count() === 0 && await page.getByTestId('agent-overridden-mcpServers').count()) throw new Error('changed card contradicts the gear diff')
   } },
   // Persona upgrade: the roster card's marker, then the sheet's notice + the list row badge with the diff open.
   { name: 'persona-upgrade-roster', testid: 'agent-roster', reference: '(none: no design mock)', setUp: async (page) => { await expect(page.getByTestId('agent-roster-upgrade-architect')).toBeVisible() } },

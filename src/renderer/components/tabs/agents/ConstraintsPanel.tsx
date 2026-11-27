@@ -29,7 +29,9 @@ function Section({ testid, title, children }: { testid: string; title: string; c
   )
 }
 
-export function ConstraintsPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft>) => void }) {
+export function ConstraintsPanel({ obj, set, collapsed = false }: { obj: Draft; set: (patch: Partial<Draft>) => void; collapsed?: boolean }) {
+  const [shown, setShown] = useState(false)
+  useEffect(() => { setShown(false) }, [collapsed])
   const [armory, setArmory] = useState<Armory | null>(null)
   const [marks, setMarks] = useState<Record<string, ToolRiskMark>>({})
   const [perms, setPerms] = useState<Perms | null>(null)
@@ -55,6 +57,16 @@ export function ConstraintsPanel({ obj, set }: { obj: Draft; set: (patch: Partia
       ].filter((i) => i.badges.includes('banned'))
     : []
   const markEntries = Object.entries(marks).filter(([, m]) => m !== 'read')
+
+  if (collapsed && !shown) {
+    return (
+      <section data-testid="agent-constraints-slot" data-collapsed="true" className="px-[18px] py-3 rounded-[14px] bg-bg-hi border border-line flex items-center gap-2 text-[12px]">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Constraints</span>
+        <span data-testid="constraints-summary" className="flex-1 min-w-0 truncate text-fg-dim"><span className="font-mono text-fg">{current}</span> · {markEntries.length} risk marks · {banned.length} banned in jobs</span>
+        <button type="button" data-testid="constraints-show" onClick={() => setShown(true)} className="font-medium text-accent hover:underline">Show ›</button>
+      </section>
+    )
+  }
 
   return (
     <section data-testid="agent-constraints-slot" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line flex flex-col gap-3">

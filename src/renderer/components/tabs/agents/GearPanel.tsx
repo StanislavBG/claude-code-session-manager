@@ -68,7 +68,9 @@ const STATUS: Record<ArmoryMcpItem['status'], { dot: string; text: string }> = {
   'not-checked': { dot: 'bg-fg-faint', text: 'not checked' },
 }
 
-export function GearPanel({ obj, set, baseline, onRestore, projectName }: {
+export function GearPanel({ obj, set, baseline, onRestore, projectName, onOpenChange }: {
+  /** Reports the Armory drawer's open state (the Constraints card collapses while it is open). */
+  onOpenChange?: (open: boolean) => void
   obj: Draft
   set: (patch: Partial<Draft>) => void
   /** Project mode only: the global draft to mark added/removed items against. */
@@ -79,6 +81,7 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName }: {
 }) {
   const [armory, setArmory] = useState<Armory | null>(null)
   const [open, setOpen] = useState(false)
+  useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
   const [powersOf, setPowersOf] = useState<string | null>(null)
   const [dragging, setDragging] = useState<{ kind: ArmoryKind; id: string } | null>(null)
 

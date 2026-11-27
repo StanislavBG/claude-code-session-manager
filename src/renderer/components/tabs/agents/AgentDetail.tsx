@@ -145,7 +145,7 @@ export function overlayEdit(overlay: OverlayKeys, patch: Partial<Draft>): Overla
 }
 
 /** Per overridden key: what differs from the global draft, as display lines. */
-export function overlayDiff(global: Draft, overlay: OverlayKeys): Array<{ label: string; keys: Array<keyof OverlayKeys>; lines: string[] }> {
+export function overlayDiff(global: Draft, overlay: OverlayKeys, project = 'project'): Array<{ label: string; keys: Array<keyof OverlayKeys>; lines: string[] }> {
   const out: Array<{ label: string; keys: Array<keyof OverlayKeys>; lines: string[] }> = []
   for (const k of ['model', 'effort', 'environment'] as const) {
     const o = overlay[k]
@@ -155,6 +155,11 @@ export function overlayDiff(global: Draft, overlay: OverlayKeys): Array<{ label:
     const o = overlay[k]
     if (o === undefined) continue
     const g = global[k] ?? []
+    // An explicit empty overlay replaces a global that is unset or non-empty: that is a change, not "same".
+    if (o.length === 0 && (global[k] === undefined || g.length > 0)) {
+      out.push({ label: k, keys: [k], lines: [`${k}: none in ${project}`, ...g.map((x) => `− ${x}`)] })
+      continue
+    }
     const lines = [...o.filter((x) => !g.includes(x)).map((x) => `+ ${x}`), ...g.filter((x) => !o.includes(x)).map((x) => `− ${x}`)]
     out.push({ label: k, keys: [k], lines: lines.length ? lines : ['same as global'] })
   }

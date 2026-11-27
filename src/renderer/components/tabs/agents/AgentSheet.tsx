@@ -253,7 +253,8 @@ export function AgentSheet({
   const globalDraft = saved ? toDraft(saved) : obj
   const projectView: Draft = { ...globalDraft, ...overlay }
   const view = inProject && selected ? projectView : obj
-  const diffs = inProject && selected ? overlayDiff(globalDraft, overlay) : []
+  const [armoryOpen, setArmoryOpen] = useState(false)
+  const diffs = inProject && selected ? overlayDiff(globalDraft, overlay, selected.name) : []
   const otherOverrides = inProject && selected ? (saved?.overrideDetails ?? []).filter((d) => d.cwd !== selected.cwd && projects.some((p) => p.cwd === d.cwd)) : []
   const globalOthers = inProject && selected ? projects.filter((p) => p.cwd !== selected.cwd && !otherOverrides.some((d) => d.cwd === p.cwd)).length : 0
   const edit = (patch: Partial<Draft>) => { if (selected && !fullBody && !busy) onSaveOverride(overlayEdit(overlay, patch)) }
@@ -537,7 +538,7 @@ export function AgentSheet({
 
             {showsFirstRun(state === 'undecided' && !isNew && !!saved && !inProject, obj, saved?.tools ?? [], picking, choiceDismissed)
               ? <LoadoutFirstRun obj={obj} set={set} picking={picking} setPicking={setPicking} onDismiss={() => setChoiceDismissed(true)} />
-              : <GearPanel obj={view} set={editing} {...(inProject && selected ? { baseline: globalDraft, onRestore: reset, projectName: selected.name } : {})} />}
+              : <GearPanel obj={view} set={editing} onOpenChange={setArmoryOpen} {...(inProject && selected ? { baseline: globalDraft, onRestore: reset, projectName: selected.name } : {})} />}
 
             <section data-testid="agent-personality" data-busy={busy ? 'true' : undefined} className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
               <div className="flex items-center gap-2">
@@ -576,7 +577,7 @@ export function AgentSheet({
                 ))}
               </section>
             )}
-            <ConstraintsPanel obj={view} set={editing} />
+            <ConstraintsPanel obj={view} set={editing} collapsed={armoryOpen} />
             {inProject && selected && (
               <section data-testid="agent-other-projects" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Other open projects</div>

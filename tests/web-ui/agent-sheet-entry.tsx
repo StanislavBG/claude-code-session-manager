@@ -60,9 +60,9 @@ const armory = {
   ],
   unpackedSkills: ['pdf', 'docx'],
   environments: [
-    { name: 'headless-default', summary: 'Sandboxed run: project folder writable, network limited to the model API.' },
-    { name: 'validator-readonly', summary: 'Read-only filesystem; judges a finished plan without changing it.' },
-    { name: 'open-web', summary: 'Sandbox with open outbound network, for research and publishing runs.' },
+    { name: 'headless-default', summary: 'OS sandbox · network: npm registry only · no web' },
+    { name: 'validator-readonly', summary: 'OS sandbox · no network' },
+    { name: 'open-web', summary: 'Open network · WebFetch + WebSearch on' },
   ],
   errors: [],
 }

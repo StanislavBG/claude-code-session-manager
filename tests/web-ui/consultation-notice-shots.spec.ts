@@ -24,13 +24,18 @@ import { AlmanacFooter } from '../../src/renderer/components/layout/AlmanacFoote
 
 const scene = new URLSearchParams(location.search).get('scene') || 'shown'
 window.__writes = []
+window.__reads = 0
 const noop = () => () => {}
 
 const api = {
   config: {
-    readJson: async () => scene === 'stored'
-      ? { exists: true, data: { consultationNoticeDismissedVersion: '0.0.0' } }
-      : { exists: false },
+    readJson: async () => {
+      const result = scene === 'stored'
+        ? { exists: true, data: { consultationNoticeDismissedVersion: '0.0.0' } }
+        : { exists: false }
+      window.__reads++
+      return result
+    },
     writeJson: async (p, data) => { window.__writes.push({ path: p, data }) },
     onChanged: noop, watch: () => {}, unwatch: () => {},
   },
@@ -138,7 +143,8 @@ test('Consultation notice: sits above the footer, shows its text, dismisses; lig
       // Stored dismissal: no strip at all.
       {
         const { ctx, page } = await open(browser, css, bundle, 'stored', scheme, errors)
-        await page.waitForTimeout(250)
+        await expect.poll(() => page.evaluate(() => (window as any).__reads)).toBeGreaterThan(0)
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
         await expect(page.getByTestId('consultation-notice')).toHaveCount(0)
         await expect(page.getByTestId('footer-version')).toBeVisible()
         await ctx.close()

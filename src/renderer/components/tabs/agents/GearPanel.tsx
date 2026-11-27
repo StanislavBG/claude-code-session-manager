@@ -3,7 +3,7 @@ import { useToast } from '../../../state/toast'
 import type { Armory, ArmoryItem, ArmoryMcpItem, ArmoryPackItem } from '../../../../preload/api'
 import { TOOLS, type Draft } from './AgentDetail'
 import { McpPowers } from './McpPowers'
-import { ArmoryDrawer, type ArmoryKind } from './ArmoryDrawer'
+import { ArmoryDrawer, type ArmoryKind, type KindTab } from './ArmoryDrawer'
 
 /**
  * The Gear card of the agent sheet (frame 1b): Built-in tools (equipped solid / available dashed,
@@ -179,7 +179,8 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName }: {
     return () => document.removeEventListener('keydown', onKey)
   }, [open, dragging])
 
-  const openArmory = (_kind: ArmoryKind) => { setOpen(true); setDragging(null) }
+  const [armoryTab, setArmoryTab] = useState<KindTab>('all')
+  const openArmory = (kind?: ArmoryKind) => { setArmoryTab(kind ?? 'all'); setOpen(true); setDragging(null) }
 
   const slot = 'rounded-[12px] border border-dashed border-rule px-3 py-2 text-[12px] text-fg-faint flex items-center'
 
@@ -202,7 +203,7 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName }: {
 
       <div data-testid="agent-gear-hint" className="text-[11.5px] text-fg-faint mb-1">
         Drag items here from the Armory, or{' '}
-        <button type="button" data-testid="agent-gear-hint-open" onClick={() => openArmory('builtin')} className="underline text-fg-dim hover:text-fg">Open Armory</button>
+        <button type="button" data-testid="agent-gear-hint-open" onClick={() => openArmory()} className="underline text-fg-dim hover:text-fg">Open Armory</button>
       </div>
 
       <Row testid="agent-tools-row" title="Built-in tools" sub="class abilities" drop={dropProps('builtin')}>
@@ -341,6 +342,7 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName }: {
       </Row>
       {open && (
         <ArmoryDrawer
+          initialTab={armoryTab}
           armory={armory}
           equipped={{ allBuiltins: unbound, builtins: obj.tools, servers, packs }}
           onEquip={equipItem}

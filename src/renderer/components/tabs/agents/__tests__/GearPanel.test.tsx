@@ -79,6 +79,20 @@ describe('GearPanel', () => {
     expect(q('[data-testid="agent-armory"]')).toBeTruthy()
   })
 
+  it('slots seed the armory tab; the hint resets it to All', async () => {
+    armory.mockResolvedValue(ARMORY)
+    await mount({ tools: ['Edit'] })
+    const sel = () => q('[data-testid="armory-tab"][aria-selected="true"]').getAttribute('data-tab')
+    await act(async () => { q('[data-testid="agent-mcp-slot"]').click() })
+    expect(sel()).toBe('mcp')
+    await act(async () => { q('[data-testid="armory-close"]').click() })
+    await act(async () => { q('[data-testid="agent-pack-slot"]').click() })
+    expect(sel()).toBe('pack')
+    await act(async () => { q('[data-testid="armory-close"]').click() })
+    await act(async () => { q('[data-testid="agent-gear-hint-open"]').click() })
+    expect(sel()).toBe('all')
+  })
+
   it('removing an MCP server keeps tools and mcpServers in step', async () => {
     armory.mockResolvedValue(ARMORY)
     await mount({ tools: ['Edit', 'mcp__blender__a', 'mcp__blender__b'], mcpServers: ['blender'] })

@@ -10,7 +10,7 @@ import { useLayout } from '../../../state/layout'
  */
 
 export type ArmoryKind = 'builtin' | 'mcp' | 'pack'
-type KindTab = 'all' | ArmoryKind
+export type KindTab = 'all' | ArmoryKind
 const KIND_TABS: Array<{ id: KindTab; label: string }> = [
   { id: 'all', label: 'All' }, { id: 'builtin', label: 'Built-in' }, { id: 'mcp', label: 'MCP' }, { id: 'pack', label: 'Packs' },
 ]
@@ -24,6 +24,8 @@ export interface ArmoryEquipped {
 }
 
 interface Props {
+  /** Tab to show each time the drawer opens (default All). */
+  initialTab?: KindTab
   armory: Armory | null
   equipped: ArmoryEquipped
   onEquip: (kind: ArmoryKind, id: string) => void
@@ -55,9 +57,10 @@ function Group({ title, sub, children }: { title: string; sub?: string; children
   )
 }
 
-export function ArmoryDrawer({ armory, equipped, onEquip, onUnequip, onDragStart, onDragEnd, onClose }: Props) {
+export function ArmoryDrawer({ initialTab = 'all', armory, equipped, onEquip, onUnequip, onDragStart, onDragEnd, onClose }: Props) {
   const [q, setQ] = useState('')
-  const [tab, setTab] = useState<KindTab>('all')
+  const [tab, setTab] = useState<KindTab>(initialTab)
+  useEffect(() => { setTab(initialTab) }, [initialTab])
   const [moving, setMoving] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   useEffect(() => { searchRef.current?.focus() }, [])

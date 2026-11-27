@@ -163,3 +163,9 @@ test('stream: python traceback Errno 30 on .claude/agents -> claude-dir-write', 
   const tb = 'Traceback (most recent call last):\n  File "x.py", line 1, in <module>\n    open(p, "w")\nOSError: [Errno 30] Read-only file system: \'.claude/agents/x.md\'\n';
   expect(sandboxLimitFromStreamJson(stream(tb)).kind).toBe('claude-dir-write');
 });
+
+test('claude-dir-write: benign line naming .claude then sandbox is not a limit', () => {
+  expect(detectSandboxEnvironmentLimit('reading .claude/agents for the sandbox profile')).toBeNull();
+  expect(detectSandboxEnvironmentLimit('sandbox profile lists .claude and more')).toBeNull();
+  expect(detectSandboxEnvironmentLimit('sandbox: write to .claude/skills denied')?.kind).toBe('claude-dir-write');
+});

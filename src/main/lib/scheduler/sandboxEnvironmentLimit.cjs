@@ -10,7 +10,7 @@
  */
 
 const PATTERNS = [
-  ['claude-dir-write', /sandbox[^\n]{0,80}\.claude|\.claude[^\n]{0,80}sandbox|(?:Operation not permitted|Permission denied|Errno 30|Read-only file system|read-only filesystem)[^\n]{0,160}\.claude\/|\.claude\/[^\n]{0,160}(?:Operation not permitted|Permission denied|Errno 30|Read-only file system|read-only filesystem)/i],
+  ['claude-dir-write', /(?=[^\n]*(?:denied|EPERM|EACCES|read-only|not permitted|blocked?|blocks))(?:sandbox[^\n]{0,80}\.claude\/|\.claude\/[^\n]{0,80}sandbox)|(?:Operation not permitted|Permission denied|Errno 30|Read-only file system|read-only filesystem)[^\n]{0,160}\.claude\/|\.claude\/[^\n]{0,160}(?:Operation not permitted|Permission denied|Errno 30|Read-only file system|read-only filesystem)/i],
   ['unix-socket', /(?:Operation not permitted)[^\n]{0,80}AF_UNIX|AF_UNIX[^\n]{0,80}Operation not permitted/i],
   ['readonly-tmp', /(?:Errno 30|Read-only file system)[^\n]{0,80}\/tmp|\/tmp[^\n]{0,80}(?:Errno 30|Read-only file system)/i],
 ];

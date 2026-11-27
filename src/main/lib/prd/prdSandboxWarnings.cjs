@@ -14,11 +14,11 @@ function isClaudePath(p) {
   return typeof p === 'string' && p.split('/').some((seg) => seg === '.claude');
 }
 
-/** `.claude` immediately followed by `agents` or `commands`: every write there is refused (Bash, Edit, Write). */
+/** `.claude` followed by agents, commands, skills, hooks or settings*.json: every write there is refused (Bash, Edit, Write). */
 function isProtectedClaudePath(p) {
   if (typeof p !== 'string') return false;
   const segs = p.split('/');
-  return segs.some((seg, i) => seg === '.claude' && (segs[i + 1] === 'agents' || segs[i + 1] === 'commands'));
+  return segs.some((seg, i) => seg === '.claude' && (['agents', 'commands', 'skills', 'hooks'].includes(segs[i + 1]) || /^settings[^/]*\.json$/.test(segs[i + 1] ?? '')));
 }
 
 /**
@@ -31,7 +31,7 @@ function sandboxWarnings(input) {
   const protectedPaths = files.filter(isProtectedClaudePath);
   if (protectedPaths.length > 0) {
     return [
-      `files lists ${protectedPaths.map((p) => `\`${p}\``).join(', ')} under .claude/agents or .claude/commands — every write there (Bash, Edit and Write) is refused by the job sandbox, so the job will fail. Remove the path from files; the architect edits these inline. See PRD_AUTHORING.md#job-sandbox-limits.`,
+      `files lists ${protectedPaths.map((p) => `\`${p}\``).join(', ')} under .claude/agents, .claude/commands, .claude/skills, .claude/hooks or .claude/settings*.json — the job sandbox cannot write there (Bash, Edit and Write are all refused), so the job will fail. Remove the path from files; the architect must edit these inline. See PRD_AUTHORING.md#job-sandbox-limits.`,
     ];
   }
   const bad = files.filter(isClaudePath);
@@ -42,7 +42,7 @@ function sandboxWarnings(input) {
     .join('\n');
   if (!VERB_RE.test(text)) return [];
   return [
-    `files lists ${bad.map((p) => `\`${p}\``).join(', ')} under .claude/ and the PRD mentions git mv / git rm / rm — Bash writes there are refused by the job sandbox, so the job will park. Use the Write/Edit tools for .claude/ changes instead. See PRD_AUTHORING.md#job-sandbox-limits.`,
+    `files lists ${bad.map((p) => `\`${p}\``).join(', ')} under .claude/ and the PRD mentions git mv / git rm / rm — Bash writes there are refused by the job sandbox, so the job will park. Remove the verb or the path; the architect edits protected .claude/ paths inline. See PRD_AUTHORING.md#job-sandbox-limits.`,
   ];
 }
 

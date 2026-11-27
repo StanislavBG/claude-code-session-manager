@@ -14,14 +14,15 @@ afterAll(() => { if (!hadConfigCached) delete require.cache[CONFIG_PATH]; });
 const { sandboxWarnings } = require('../prdSandboxWarnings.cjs');
 const { createPrdBatch } = require('../prdCreate.cjs');
 
-const base = (o) => ({ goal: 'g', implementationNotes: 'n', acceptanceCriteria: ['a'], files: ['.claude/skills/x.md'], ...o });
+const base = (o) => ({ goal: 'g', implementationNotes: 'n', acceptanceCriteria: ['a'], files: ['.claude/notes/x.md'], ...o });
 
-test('warns, names path, mentions Write/Edit and anchor', () => {
+test('warns, names path, architect and anchor', () => {
   const [w, ...rest] = sandboxWarnings(base({ implementationNotes: 'git mv a b' }));
   expect(rest).toEqual([]);
-  expect(w).toContain('.claude/skills/x.md');
+  expect(w).toContain('.claude/notes/x.md');
   expect(w).toMatch(/refused by the job sandbox/);
-  expect(w).toMatch(/Write\/Edit/);
+  expect(w).toMatch(/architect edits/);
+  expect(w).not.toMatch(/Write\/Edit tools/);
   expect(w).toContain('PRD_AUTHORING.md#job-sandbox-limits');
 });
 
@@ -62,7 +63,7 @@ test('createPrdBatch result carries the warning', async () => {
     };
     const r = await createPrdBatch([
       { title: 'T', slug: 'sbx', estimateMinutes: 10, goal: 'git rm the old skill', acceptanceCriteria: ['a'],
-        implementationNotes: 'n', files: ['.claude/skills/old.md'] },
+        implementationNotes: 'n', files: ['.claude/notes/old.md'] },
     ], remote, { cwd, sourcePromptId: 'epic-a' });
     expect(r.ok).toBe(true);
     expect(JSON.stringify(r)).toContain('refused by the job sandbox');
@@ -72,16 +73,16 @@ test('createPrdBatch result carries the warning', async () => {
 });
 
 test('agents/commands paths warn with no verb, never recommend Write/Edit', () => {
-  for (const f of ['.claude/agents/page-overview.md', '.claude/commands/x.md', 'sub/.claude/commands/x.md']) {
+  for (const f of ['.claude/agents/page-overview.md', '.claude/commands/x.md', 'sub/.claude/commands/x.md', '.claude/skills/s/SKILL.md', '.claude/hooks/h.sh', '.claude/settings.json', '.claude/settings.local.json']) {
     const r = sandboxWarnings(base({ files: [f] }));
     expect(r).toHaveLength(1);
     expect(r[0]).toContain(f);
-    expect(r[0]).toMatch(/refused by the job sandbox/);
+    expect(r[0]).toMatch(/sandbox cannot write/);
     expect(r[0]).toMatch(/architect/);
     expect(r[0]).toContain('PRD_AUTHORING.md#job-sandbox-limits');
     expect(r[0]).not.toMatch(/Use the Write\/Edit/);
   }
 });
-test('.claude/settings.json with no verb -> []', () => {
-  expect(sandboxWarnings(base({ files: ['.claude/settings.json'] }))).toEqual([]);
+test('other .claude paths with no verb -> []', () => {
+  expect(sandboxWarnings(base({ files: ['.claude/launch.json'] }))).toEqual([]);
 });

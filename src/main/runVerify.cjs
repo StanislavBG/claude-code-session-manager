@@ -99,14 +99,15 @@ function extractContent(item) {
  *
  * O(N) where N = log line count.
  *
- * @returns {{ events: object[], resultEvent: object|null, error: string|null }}
+ * @returns {{ events: object[], resultEvent: object|null, error: string|null, transcriptCommitLanded?: boolean, transcriptCommitShas: string[], transcriptCommitOutputShas: string[] }}
+ *   transcriptCommitOutputShas: SHAs git printed in the tool_result of a Bash `git commit` call (a claim, not proof).
  */
 function parseLog(logPath) {
   let text;
   try {
     text = fs.readFileSync(logPath, 'utf8');
   } catch (e) {
-    return { events: [], resultEvent: null, error: e.message, transcriptCommitShas: [] };
+    return { events: [], resultEvent: null, error: e.message, transcriptCommitShas: [], transcriptCommitOutputShas: [] };
   }
 
   const events = [];
@@ -192,7 +193,54 @@ function parseLog(logPath) {
     }
   }
 
-  return { events, resultEvent, error: null, transcriptCommitLanded, transcriptCommitShas: [...transcriptCommitShaSet] };
+  return {
+    events,
+    resultEvent,
+    error: null,
+    transcriptCommitLanded,
+    transcriptCommitShas: [...transcriptCommitShaSet],
+    transcriptCommitOutputShas: collectCommitOutputShas(events),
+  };
+}
+
+const GIT_COMMIT_CMD_RE = /\bgit\s+(?:-C\s+\S+\s+)?commit\b/;
+const COMMIT_SUMMARY_RE = /^\[[^\]\s]+(?: \(root-commit\))? ([0-9a-f]{7,40})\]/i;
+const SHA_SUBJECT_RE = /^([0-9a-f]{7,40}) (.+)$/i;
+
+/**
+ * SHAs git printed in the tool_result of a Bash call running `git commit`.
+ * A CLAIM only — the scheduler must check it against the run's own HEAD range.
+ * @param {any[]} events
+ * @returns {string[]}
+ */
+function collectCommitOutputShas(events) {
+  /** @type {Map<string, string>} */
+  const commitCmds = new Map();
+  for (const ev of events) {
+    if (ev.kind === 'tool_use' && ev.toolName === 'Bash' && ev.toolUseId
+        && typeof ev.command === 'string' && GIT_COMMIT_CMD_RE.test(ev.command)) {
+      commitCmds.set(ev.toolUseId, ev.command);
+    }
+  }
+  /** @type {Set<string>} */
+  const shas = new Set();
+  if (commitCmds.size === 0) return [];
+  for (const ev of events) {
+    if (ev.kind !== 'tool_result') continue;
+    const cmd = commitCmds.get(ev.toolUseId);
+    if (cmd === undefined || typeof ev.content !== 'string') continue;
+    for (const raw of ev.content.split('\n')) {
+      const ln = raw.trim();
+      const m1 = COMMIT_SUMMARY_RE.exec(ln);
+      if (m1) { shas.add(m1[1].toLowerCase()); continue; }
+      const m2 = SHA_SUBJECT_RE.exec(ln);
+      if (m2) {
+        const subject = m2[2].trim();
+        if (subject.length >= 8 && cmd.includes(subject)) shas.add(m2[1].toLowerCase());
+      }
+    }
+  }
+  return [...shas];
 }
 
 // Stable, narrow substrings of the harness's auto-background tool_result text

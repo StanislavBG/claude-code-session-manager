@@ -37,11 +37,23 @@ describe('ensureWebCss', () => {
   })
   it('does not build when the CSS is fresh, and returns its text', () => {
     write('dist-web/app.css', 'fresh-css', 2000)
-    write('src/renderer/__tests__/t.ts', 'x', 9000)
-    write('node_modules/p/i.ts', 'x', 9000)
     let builds = 0
     expect(ensureWebCss(root, { build: () => { builds++ } })).toBe('fresh-css')
     expect(builds).toBe(0)
+  })
+  it('ignores newer files under src/renderer/node_modules and __tests__', () => {
+    write('dist-web/app.css', 'fresh-css', 2000)
+    write('src/renderer/node_modules/p/i.ts', 'x', 9000)
+    write('src/renderer/__tests__/t.ts', 'x', 9000)
+    let builds = 0
+    expect(ensureWebCss(root, { build: () => { builds++ } })).toBe('fresh-css')
+    expect(builds).toBe(0)
+  })
+  it('throws naming the cap when the walk exceeds it', () => {
+    write('dist-web/app.css', 'c', 2000)
+    write('src/renderer/b.ts', 'x', 1000)
+    write('src/renderer/c.css', 'x', 1000)
+    expect(() => ensureWebCss(root, { build: () => {}, maxFiles: 2 })).toThrow(/2-file cap/)
   })
   it('treats a newer config file as stale', () => {
     write('dist-web/app.css', 'c', 2000)

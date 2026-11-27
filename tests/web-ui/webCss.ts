@@ -9,11 +9,11 @@ import path from 'node:path'
 const MAX_FILES = 20000
 const SRC_EXT = /\.(ts|tsx|css)$/
 
-function newestSourceMtime(root: string): number {
+function newestSourceMtime(root: string, maxFiles: number): number {
   let newest = 0
   let seen = 0
   const bump = (file: string) => {
-    if (++seen > MAX_FILES) throw new Error(`webCss: source walk exceeded the ${MAX_FILES}-file cap`)
+    if (++seen > maxFiles) throw new Error(`webCss: source walk exceeded the ${maxFiles}-file cap`)
     newest = Math.max(newest, fs.statSync(file).mtimeMs)
   }
   const walk = (dir: string) => {
@@ -34,10 +34,10 @@ function newestSourceMtime(root: string): number {
   return newest
 }
 
-export function ensureWebCss(root: string, deps: { build?: () => void } = {}): string {
+export function ensureWebCss(root: string, deps: { build?: () => void; maxFiles?: number } = {}): string {
   const build = deps.build ?? (() => { execSync('npx vite build --config vite.web.config.ts', { cwd: root, stdio: 'inherit' }) })
   const cssPath = path.join(root, 'dist-web/app.css')
-  const stale = !fs.existsSync(cssPath) || fs.statSync(cssPath).mtimeMs < newestSourceMtime(root)
+  const stale = !fs.existsSync(cssPath) || fs.statSync(cssPath).mtimeMs < newestSourceMtime(root, deps.maxFiles ?? MAX_FILES)
   if (stale) build()
   return fs.readFileSync(cssPath, 'utf8')
 }

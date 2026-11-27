@@ -8319,21 +8319,29 @@ async function applyPlanReviewHolds(state, deps = {}) {
     const recordRelease = deps.recordRelease || ((a) => planReviewStore.recordPlanRelease(a));
     const notify = deps.notify || ((cwd, epicId, text, extra) => appendResponseEventIfKnown(cwd, epicId, text, extra));
     const gitHead = deps.gitHead || (async (cwd) => { try { return String(await execGitAt(cwd, ['rev-parse', 'HEAD'])).trim() || null; } catch { return null; } });
-    const readPrdTexts = deps.readPrdTexts || ((cwd, epicId, slugs) => prdPaths.readEpicPrdTexts(cwd, epicId, slugs));
+    const readPrdFiles = deps.readPrdFiles || ((cwd, epicId, slugs) => prdPaths.readEpicPrdFiles(cwd, epicId, slugs));
+    const readPrdTexts = deps.readPrdTexts || (async (cwd, epicId, slugs) => {
+      const files = await readPrdFiles(cwd, epicId, slugs);
+      return new Map([...files].map(([k, v]) => [k, v.text]));
+    });
     const audit = deps.audit || ((k, d) => { try { appendAuditEvent(k, d); } catch { /* audit never breaks dispatch */ } });
     const readEpicGoal = deps.readEpicGoal || ((cwd, epicId) => {
       try {
         const sessions = readActiveIndex(cwd).sessions;
         const sess = sessions && Object.prototype.hasOwnProperty.call(sessions, epicId) ? sessions[epicId] : null;
-        const t = sess && typeof sess.goalText === 'string' ? sess.goalText.trim() : '';
-        return t;
+        if (!sess) return '';
+        const title = typeof sess.title === 'string' && sess.title.trim() ? sess.title.trim()
+          : (typeof sess.goalText === 'string' ? sess.goalText.trim().split(/\n\s*\n/)[0].trim() : '');
+        const objective = typeof sess.openingPrompt === 'string' ? sess.openingPrompt.trim().slice(0, 2000) : '';
+        return [title, objective].filter(Boolean).join('\n\n');
       } catch { return ''; }
     });
     const resolvePrdPath = deps.resolvePrdPath || (async (m, cwd, epicId) => {
       try {
-        const dir = await prdPaths.findPrdDirForJob({ ...m, cwd: m.cwd || cwd, epicId: m.epicId || epicId });
-        if (dir) return path.join(dir, `${m.slug}.md`);
-      } catch { /* fall through to the canonical live path */ }
+        const files = await readPrdFiles(m.cwd || cwd, m.epicId || epicId, [m.slug]);
+        const hit = files.get(m.slug);
+        if (hit && hit.path) return path.resolve(hit.path);
+      } catch { /* fall through */ }
       return opsPath(cwd, 'scheduler', 'epics', epicId, 'prds', `${m.slug}.md`);
     });
     const heldReasons = new Map();
@@ -8344,7 +8352,7 @@ async function applyPlanReviewHolds(state, deps = {}) {
       const epicId = v.sourcePromptId || v.epicId;
       if (!epicId || !v.cwd) continue;
       const rec = readReview(v.cwd, epicId, v.slug);
-      if (rec) reviews[bareSlug(v.slug)] = { ...rec, released: !!rec.release || rec.released === true };
+      if (rec) reviews[bareSlug(v.slug)] = rec;
     }
     const { held: holds, needsReview, expired } = planReviewHold.computePlanReviewHolds(rows, reviews, { now, holdMs });
     const expiredSet = new Set(expired);

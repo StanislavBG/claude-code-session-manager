@@ -3,6 +3,9 @@
 // Run: timeout 300 npx vitest run src/main/__tests__/scheduler-plan-review-hold.test.cjs
 
 import { describe, it, expect, vi } from 'vitest';
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const sched = require('../scheduler.cjs');
 const { pickNextBatch } = require('../lib/scheduler/schedulerBatch.cjs');
 const { evaluateEpicSettle } = require('../lib/epic/epicSettle.cjs');
@@ -95,5 +98,37 @@ describe('known wait', () => {
   it('starveRootFor counts it as a known wait', () => {
     const rows = heldRows().filter((r) => r.agentType !== 'validator');
     expect(sched.starveRootFor(rows, '1-a').knownWait).toBe(true);
+  });
+});
+
+describe('default readers against a temp project', () => {
+  it('goal carries title + objective and an archived member gets its real prds-archived path', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-plan-review-'));
+    try {
+      const ops = path.join(root, 'session-manager-operations');
+      fs.mkdirSync(path.join(ops, 'prompt-sessions'), { recursive: true });
+      fs.writeFileSync(path.join(ops, 'prompt-sessions', 'active-index.json'), JSON.stringify({
+        sessions: { [EPIC]: { id: EPIC, title: 'Widget epic', openingPrompt: 'OBJECTIVE-MARKER make it fast', goalText: 'Widget epic' } },
+      }));
+      const e = path.join(ops, 'scheduler', 'epics', EPIC);
+      fs.mkdirSync(path.join(e, 'prds'), { recursive: true });
+      fs.mkdirSync(path.join(e, 'prds-archived'), { recursive: true });
+      const prd = (t) => `---\ntitle: ${t}\n---\n# Goal\nx\n`;
+      fs.writeFileSync(path.join(e, 'prds', '1-a.md'), prd('A'));
+      fs.writeFileSync(path.join(e, 'prds-archived', '2-b.md'), prd('B'));
+      fs.writeFileSync(path.join(e, 'prds', '3-c.md'), prd('C'));
+      const r = (slug, extra = {}) => ({ slug, status: 'pending', cwd: root, sourcePromptId: EPIC, dependsOn: [], ...extra });
+      const state = { jobs: [r('1-a'), r('2-b'), r('3-c'),
+        r('90-validate', { agentType: 'validator', planReview: 'required', dependsOn: ['a', 'b', 'c'], createdAt: '2026-01-01T00:00:00Z' })] };
+      const d = deps({ readEpicGoal: undefined, readPrdTexts: undefined, resolvePrdPath: undefined, readReview: () => null });
+      delete d.readEpicGoal; delete d.readPrdTexts; delete d.resolvePrdPath;
+      await sched.applyPlanReviewHolds(state, d);
+      expect(d.createPrd).toHaveBeenCalledTimes(1);
+      const notes = d.createPrd.mock.calls[0][0].implementationNotes;
+      expect(notes).toContain('OBJECTIVE-MARKER');
+      expect(notes).toContain('Widget epic');
+      expect(notes).toContain(path.join(e, 'prds-archived', '2-b.md'));
+      expect(notes).toContain(path.join(e, 'prds', '1-a.md'));
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });

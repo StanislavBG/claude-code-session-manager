@@ -322,6 +322,14 @@ async function resolveBareSlugFile(slug, cwd) {
  * regular `.md` files are read. Never rejects. Returns Map<inputSlug, text>.
  */
 async function readEpicPrdTexts(cwd, epicId, slugs) {
+  const files = await readEpicPrdFiles(cwd, epicId, slugs);
+  const out = new Map();
+  for (const [k, v] of files) out.set(k, v.text);
+  return out;
+}
+
+/** Same lookup as readEpicPrdTexts, but Map<inputSlug, { text, path }> so path and text cannot disagree. */
+async function readEpicPrdFiles(cwd, epicId, slugs) {
   const out = new Map();
   try {
     if (typeof cwd !== 'string' || !cwd || !Array.isArray(slugs) || slugs.length === 0) return out;
@@ -360,7 +368,7 @@ async function readEpicPrdTexts(cwd, epicId, slugs) {
         }
       }
       if (!file) continue;
-      try { out.set(slug, await fsp.readFile(file, 'utf8')); } catch { /* unreadable — no entry */ }
+      try { out.set(slug, { text: await fsp.readFile(file, 'utf8'), path: file }); } catch { /* unreadable — no entry */ }
     }
   } catch { /* never rejects */ }
   return out;
@@ -622,6 +630,7 @@ module.exports = {
   safeSlugPath,
   resolveBareSlugFile,
   readEpicPrdTexts,
+  readEpicPrdFiles,
   resolveSlugOrReason,
   jobMatchesSlugAndCwd,
   unknownSlugMessage,

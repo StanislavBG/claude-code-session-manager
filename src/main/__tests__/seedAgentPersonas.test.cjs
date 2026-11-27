@@ -61,7 +61,7 @@ function bundledSeedVersion(name) {
   return String(splitFrontmatter(raw).fm.seedVersion);
 }
 
-const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist', 'competitive-researcher', 'competitive-analyst', 'plan-reviewer'];
+const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist', 'competitive-researcher', 'competitive-analyst', 'plan-reviewer', 'md-network-curator'];
 
 test('fresh seed writes every persona file', async () => {
   await seedAgentPersonas({ logger: silentLogger() });

@@ -1008,6 +1008,21 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       },
     },
   ],
+  "md-network-curator": [
+    {
+      commit: "seed-v1",
+      bodySha256: "04d9ad2c67c7ba55c68661b02883a2a9496a0582571c844022c3f3d3ae53ea41",
+      fm: {
+        description: "Out-of-band weekly curator of a project's markdown network and memory. Runs the maintaining-md-network Weekly consolidation pass headless and read-only, fans out one subagent per transcript batch, and answers with a record of proposed changes. Only proposes; never edits, deletes or queues.",
+        tools: "Read, Grep, Glob, Agent",
+        model: "fable",
+        effort: "max",
+        title: "Engineering — MD Network Curator",
+        packs: "session-manager-dev",
+        executorOnly: "true",
+      },
+    },
+  ],
 });
 
 module.exports = { SHIPPED_PERSONA_SEEDS };

@@ -5,10 +5,12 @@
  * prefs (`state/editorPrefs.ts`), the History screen's analytics/budget
  * prefs (`lib/historyAnalyticsPrefs.ts`), and the Files sidebar's hidden-file
  * toggle (`components/layout/FileTree.tsx`), and the consultation strip's
- * dismissed-version (`components/ConsultationNotice.tsx`) — deliberately global rather than
+ * dismissed-version (`components/ConsultationNotice.tsx`), the Projects page's
+ * split/collapse state (`components/tabs/ProjectsWorkspace.tsx`), and the Agents
+ * sheet's list-column toggle (`components/tabs/agents/AgentSheet.tsx`) — deliberately global rather than
  * per-project, since it's a personal viewing preference, not project data
  * (see `session-manager-operations/ui-prefs/README.md` for the per-project
- * counterpart). One file, five independent owners:
+ * counterpart). One file, seven independent owners:
  * `writeUiSettingsPrefs` always re-reads the current contents before writing
  * its patch (mirrors `appPrefs.ts`'s read-modify-write), so one field's write
  * never clobbers another's. Two of those owners (editor, history) are each a

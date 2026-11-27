@@ -135,3 +135,45 @@ test('dead epic + job worktrees of this project returned; other project not', ()
   const r = w.listProjectTranscripts({ cwd: ROOT, sinceMs: 0, untilMs: 1000, deps: tdeps(files) });
   expect(r.transcripts.map((t) => t.sessionId).sort()).toEqual(['e', 'j']);
 });
+
+test('spread: 7 days x 300 transcripts keeps ~28-29 per day, newest first', () => {
+  const DAY = 86400000;
+  const files = {};
+  for (let d = 0; d < 7; d++) for (let i = 0; i < 300; i++) files[`${own}/s${d}_${i}.jsonl`] = { mtimeMs: d * DAY + i * 1000 + 1, cwd: ROOT };
+  const r = w.listProjectTranscripts({ cwd: ROOT, sinceMs: 0, untilMs: 7 * DAY, deps: tdeps(files) });
+  expect(r.transcripts).toHaveLength(200);
+  expect(r.truncated).toBe(2100 - 200);
+  expect(r.perDay).toHaveLength(7);
+  for (const p of r.perDay) { expect(p.kept).toBeGreaterThanOrEqual(28); expect(p.kept).toBeLessThanOrEqual(29); expect(p.total).toBe(300); }
+  expect(r.perDay.reduce((a, p) => a + p.kept, 0)).toBe(200);
+  expect(r.transcripts[0].sessionId).toBe('s6_299');
+});
+
+test('spread: unused share passes to busy days', () => {
+  const DAY = 86400000;
+  const files = {};
+  for (let i = 0; i < 5; i++) files[`${own}/a${i}.jsonl`] = { mtimeMs: 1 + i, cwd: ROOT };
+  for (let i = 0; i < 300; i++) files[`${own}/b${i}.jsonl`] = { mtimeMs: DAY + 1 + i, cwd: ROOT };
+  const r = w.listProjectTranscripts({ cwd: ROOT, sinceMs: 0, untilMs: 2 * DAY, deps: tdeps(files) });
+  expect(r.transcripts).toHaveLength(200);
+  expect(r.perDay.map((p) => p.kept).sort((a, b) => a - b)).toEqual([5, 195]);
+});
+
+test('history read backwards: 3,000 in-window rows, Lessons in the oldest; stops at pre-window row', () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'hist-'));
+  const file = path.join(dir, 'history.jsonl');
+  const base = T('2026-11-19T00:00:00Z');
+  const rows = [{ id: 'old', slug: 'old', runId: 'ro', cwd: ROOT, finishedAt: new Date(base - 1000).toISOString() }];
+  for (let i = 0; i < 3000; i++) rows.push({ id: `h${i}`, slug: `s${i}`, runId: `r${i}`, cwd: ROOT, finishedAt: new Date(base + i * 1000).toISOString(), pad: 'é'.repeat(100) });
+  fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const got = w.readHistorySince(file, base, 4096);
+  expect(got).toHaveLength(3000);
+  expect(got[0].id).toBe('h2999');
+  expect(got[2999].id).toBe('h0');
+  const d = { ...ldeps([], { '/runs/r0/s0.log': 'Lessons:\n- oldest' }), readHistory: (c, since) => w.readHistorySince(file, since, 4096) };
+  const r = w.collectLessons({ cwd: ROOT, sinceMs: base, untilMs: base + 86400000, deps: d });
+  expect(r.lessons).toHaveLength(1);
+  expect(r.lessons[0]).toMatchObject({ slug: 's0', lines: ['oldest'] });
+  fs.rmSync(dir, { recursive: true, force: true });
+});

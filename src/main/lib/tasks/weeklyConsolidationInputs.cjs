@@ -18,6 +18,53 @@ const MAX_TRANSCRIPTS = 200;
 const MAX_LESSON_LINES = 3;
 const MAX_LESSON_CHARS = 200;
 const HEAD_BYTES = 64 * 1024;
+const HISTORY_CHUNK = 256 * 1024;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Read a JSONL history file backwards in fixed chunks (bounded memory) and
+ * return parsed rows newest-first, stopping at the first row finished before
+ * sinceMs, or the file start. No row/byte cap can stop inside the window.
+ */
+function readHistorySince(file, sinceMs, chunkBytes = HISTORY_CHUNK) {
+  const out = [];
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    let pos = fs.fstatSync(fd).size;
+    let carry = Buffer.alloc(0);
+    let done = false;
+    const take = (line) => {
+      const t = line.trim();
+      if (!t) return;
+      let row;
+      try { row = JSON.parse(t); } catch { return; }
+      if (!row || typeof row !== 'object') return;
+      const f = toMs(row.finishedAt);
+      if (f !== null && f < sinceMs) { done = true; return; }
+      out.push(row);
+    };
+    while (pos > 0 && !done) {
+      const len = Math.min(chunkBytes, pos);
+      pos -= len;
+      const chunk = Buffer.alloc(len);
+      fs.readSync(fd, chunk, 0, len, pos);
+      const buf = Buffer.concat([chunk, carry]);
+      let end = buf.length;
+      let nl = buf.lastIndexOf(0x0a, end - 1);
+      while (nl >= 0 && !done) {
+        take(buf.toString('utf8', nl + 1, end));
+        end = nl;
+        nl = end > 0 ? buf.lastIndexOf(0x0a, end - 1) : -1;
+      }
+      carry = Buffer.from(buf.subarray(0, end));
+    }
+    if (!done && pos === 0 && carry.length) take(carry.toString('utf8'));
+  } catch { /* unreadable → whatever was read */ } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch { /* ignore */ }
+  }
+  return out;
+}
 
 function toMs(v) {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
@@ -52,10 +99,9 @@ function defaultDeps() {
     mainRootOf: (cwd) => require('../cwdClassify.cjs').worktreeMainRootOf(cwd),
     readJobs: () => require('../scheduler/queueStore.cjs').readMergedSync().jobs,
     // Finished jobs leave the queue for the per-project history shard.
-    readHistory: (cwd) => {
-      const { readHistoryFileTailSync } = require('../scheduler/queueHistory.cjs');
+    readHistory: (cwd, sinceMs) => {
       const { projectHistoryPath } = require('../scheduler/queueStore.cjs');
-      return readHistoryFileTailSync(projectHistoryPath(cwd), { maxRows: 500 });
+      return readHistorySince(projectHistoryPath(cwd), sinceMs);
     },
     // The project key gitWorktree mints into <root>/<key>/<name> (same function).
     worktreeKeyOf: (cwd) => {
@@ -101,7 +147,7 @@ function listProjectTranscripts({ cwd, sinceMs, untilMs, deps } = {}) {
   const d = withDefaults(deps);
   const range = { since: sinceMs, until: untilMs };
   const found = [];
-  if (!cwd || typeof cwd !== 'string') return { transcripts: [], truncated: 0, total: 0, range };
+  if (!cwd || typeof cwd !== 'string') return { transcripts: [], truncated: 0, total: 0, perDay: [], range };
   const enc = encodeCwd(cwd);
   for (const folder of d.readdir(d.projectsDir) || []) {
     // Cheap name filter first: the project's own folder (or a sibling sharing its
@@ -125,8 +171,30 @@ function listProjectTranscripts({ cwd, sinceMs, untilMs, deps } = {}) {
     for (const f of inWin) found.push({ path: f.file, sessionId: f.name.slice(0, -'.jsonl'.length), mtimeMs: f.mtimeMs, cwd: sessionCwd });
   }
   found.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.path < b.path ? -1 : 1));
-  const transcripts = found.slice(0, MAX_TRANSCRIPTS);
-  return { transcripts, truncated: found.length - transcripts.length, total: found.length, range };
+  // Spread the cap over the window's days: round-robin one transcript per day
+  // (newest day first, newest first within a day) so unused share passes on.
+  const days = new Map();
+  for (const f of found) {
+    const k = Math.floor((f.mtimeMs - sinceMs) / DAY_MS);
+    if (!days.has(k)) days.set(k, []);
+    days.get(k).push(f);
+  }
+  const order = [...days.keys()].sort((a, b) => b - a);
+  const kept = new Map(order.map((k) => [k, 0]));
+  let n = 0;
+  for (let round = 0; n < MAX_TRANSCRIPTS; round++) {
+    let any = false;
+    for (const k of order) {
+      if (n >= MAX_TRANSCRIPTS) break;
+      if (round < days.get(k).length) { kept.set(k, round + 1); n++; any = true; }
+    }
+    if (!any) break;
+  }
+  const transcripts = [];
+  for (const k of order) transcripts.push(...days.get(k).slice(0, kept.get(k)));
+  transcripts.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.path < b.path ? -1 : 1));
+  const perDay = order.map((k) => ({ dayStartMs: sinceMs + k * DAY_MS, total: days.get(k).length, kept: kept.get(k) }));
+  return { transcripts, truncated: found.length - transcripts.length, total: found.length, perDay, range };
 }
 
 function clip(s) {
@@ -170,7 +238,7 @@ function collectLessons({ cwd, sinceMs, untilMs, deps } = {}) {
   let live = [];
   try { live = d.readJobs(cwd) || []; } catch { live = []; }
   let hist = [];
-  try { hist = d.readHistory(cwd) || []; } catch { hist = []; }
+  try { hist = d.readHistory(cwd, sinceMs) || []; } catch { hist = []; }
   const seen = new Set();
   const jobs = [];
   for (const j of [...live, ...hist]) {
@@ -208,6 +276,6 @@ function collectLessons({ cwd, sinceMs, untilMs, deps } = {}) {
 }
 
 module.exports = {
-  listProjectTranscripts, collectLessons, parseLessonsBlock, inWindow,
+  listProjectTranscripts, collectLessons, readHistorySince, parseLessonsBlock, inWindow,
   MAX_TRANSCRIPTS, MAX_LESSON_LINES, MAX_LESSON_CHARS,
 };

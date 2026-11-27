@@ -242,8 +242,11 @@ Two distinct failure modes — don't conflate them:
   exists to prevent. Tell the human to start the app, and report the finding to
   them in the meantime so it isn't lost.
 - **`feedback_open_session` is absent from your tool list entirely** — the
-  `session-manager-scheduler` MCP server isn't registered for this project.
-  That's a misconfiguration, not an offline app. Tell the human: the app
-  registers the server at user scope the first time it starts; if it is still
-  missing, delete `~/.claude/session-manager/.scheduler-mcp-seeded`, restart the
-  app, and open a new session. Never add an MCP entry yourself.
+  a misconfiguration, not an offline app. STOP: never hand-write the session.
+  Diagnose first: run `claude mcp get session-manager-scheduler`. If it shows
+  **Connected**, the server is registered and the chat's gear scope hid it —
+  look for a `Gear:` notice in the chat and report it to the human as a Session
+  Manager gear bug; never delete the seeded marker or restart for it. Only if it
+  is NOT registered: the app registers it at user scope on first start; delete
+  `~/.claude/session-manager/.scheduler-mcp-seeded`, restart the app, and open a
+  new session. Never add a project `.mcp.json` / MCP entry yourself.

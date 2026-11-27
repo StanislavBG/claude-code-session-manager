@@ -85,11 +85,13 @@ three failure modes have different fixes:
   human to start the app, then retry the same call. Why: a PRD file the API did not write is
   quarantined and never runs.
 - **(b) Create errors with "did not answer" or "Connection closed".** It may still have been written; retry the same call with the same slug (it returns the existing PRD with `alreadyExisted: true`, or per entry `applied`) and never re-issue it under a new slug. `scheduler_get_prd` accepts the bare slug.
-- **(c) Tool ABSENT from your tool list.** The `session-manager-scheduler` MCP server is not
-  registered: a **misconfiguration**, not an offline app.
-  **STOP. Do not write any PRD file.** Tell the human. The app registers the server at user
-  scope the first time it starts. If it is still missing, the human deletes
-  `~/.claude/session-manager/.scheduler-mcp-seeded`, restarts the app, and opens a new session.
+- **(c) Tool ABSENT from your tool list.** A **misconfiguration**, not an offline app.
+  **STOP. Do not write any PRD file.** Diagnose first: run `claude mcp get session-manager-scheduler`.
+  If it shows **Connected**, the server is registered and the chat's gear scope hid it: look for
+  a `Gear:` notice in the chat and report it to the human as a Session Manager gear bug. Never
+  delete the seeded marker or restart for it. Only if it is NOT registered: the app registers it
+  at user scope on first start; the human deletes `~/.claude/session-manager/.scheduler-mcp-seeded`,
+  restarts the app, and opens a new session.
   Never add a project `.mcp.json` entry yourself. Why: it brings back per-repo drift.
 
 ### Steps

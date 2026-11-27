@@ -51,6 +51,18 @@ function defaultDeps() {
     },
     mainRootOf: (cwd) => require('../cwdClassify.cjs').worktreeMainRootOf(cwd),
     readJobs: () => require('../scheduler/queueStore.cjs').readMergedSync().jobs,
+    // Finished jobs leave the queue for the per-project history shard.
+    readHistory: (cwd) => {
+      const { readHistoryFileTailSync } = require('../scheduler/queueHistory.cjs');
+      const { projectHistoryPath } = require('../scheduler/queueStore.cjs');
+      return readHistoryFileTailSync(projectHistoryPath(cwd), { maxRows: 500 });
+    },
+    // The project key gitWorktree mints into <root>/<key>/<name> (same function).
+    worktreeKeyOf: (cwd) => {
+      const { worktreeDirFor } = require('../git/gitWorktree.cjs');
+      return path.basename(path.dirname(worktreeDirFor('epic', cwd, 'x')));
+    },
+    runsDir: () => require('../scheduler/schedulerPaths.cjs').runsDir(),
     readResultText: (logPath) => require('../../scheduler.cjs').extractResultTextFromLog(logPath),
     readStructured: (logPath) => require('../../scheduler.cjs').extractStructuredOutputFromLog(logPath),
   };
@@ -67,7 +79,18 @@ function belongsToProject(sessionCwd, root, d) {
   if (norm(sessionCwd) === norm(root)) return true;
   let main = null;
   try { main = d.mainRootOf(sessionCwd); } catch { main = null; }
-  return !!main && norm(main) === norm(root);
+  if (main && norm(main) === norm(root)) return true;
+  return deadWorktreeOf(sessionCwd, root, d);
+}
+
+/** Dead managed worktree (git admin gone): match the project key in its path. */
+function deadWorktreeOf(sessionCwd, root, d) {
+  const parts = path.resolve(sessionCwd).split(path.sep);
+  const i = parts.findIndex((p) => p === 'session-manager-epic-worktrees' || p === 'session-manager-job-worktrees');
+  if (i < 0 || !parts[i + 1]) return false;
+  let key = null;
+  try { key = d.worktreeKeyOf(root); } catch { key = null; }
+  return !!key && parts[i + 1] === key;
 }
 
 /**
@@ -144,17 +167,29 @@ function collectLessons({ cwd, sinceMs, untilMs, deps } = {}) {
   const range = { since: sinceMs, until: untilMs };
   const lessons = [];
   if (!cwd || typeof cwd !== 'string') return { lessons, range };
-  let jobs = [];
-  try { jobs = d.readJobs(cwd) || []; } catch { jobs = []; }
+  let live = [];
+  try { live = d.readJobs(cwd) || []; } catch { live = []; }
+  let hist = [];
+  try { hist = d.readHistory(cwd) || []; } catch { hist = []; }
+  const seen = new Set();
+  const jobs = [];
+  for (const j of [...live, ...hist]) {
+    if (!j || typeof j !== 'object') continue;
+    const id = j.id ?? j.runId;
+    if (id != null) { if (seen.has(id)) continue; seen.add(id); }
+    jobs.push(j);
+  }
   for (const job of jobs) {
-    if (!job || typeof job !== 'object' || !job.finishedAt) continue;
+    if (!job || typeof job !== 'object' || !job.finishedAt || !job.runId || !job.slug) continue;
     if (!belongsToProject(job.cwd, cwd, d)) continue;
     if (!inWindow(toMs(job.finishedAt), sinceMs, untilMs)) continue;
     const jobId = job.id ?? job.runId ?? null;
     const slug = job.slug ?? null;
+    let logPath = null;
+    try { logPath = path.join(d.runsDir(), String(job.runId), `${job.slug}.log`); } catch { continue; }
     if (job.agentType === 'validator') {
       let so = null;
-      try { so = d.readStructured(job.logPath); } catch { so = null; }
+      try { so = d.readStructured(logPath); } catch { so = null; }
       if (!so || typeof so !== 'object') continue;
       const top = lessonsFromField(so.lessons);
       if (top.length) lessons.push({ slug, jobId, source: 'validator', lines: top });
@@ -164,7 +199,7 @@ function collectLessons({ cwd, sinceMs, untilMs, deps } = {}) {
       }
     } else {
       let text = null;
-      try { text = d.readResultText(job.logPath); } catch { text = null; }
+      try { text = d.readResultText(logPath); } catch { text = null; }
       const lines = parseLessonsBlock(text);
       if (lines.length) lessons.push({ slug, jobId, source: 'dev-lead', lines });
     }

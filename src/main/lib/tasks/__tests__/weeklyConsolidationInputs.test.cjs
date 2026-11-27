@@ -21,6 +21,7 @@ function tdeps(files) {
     stat: (p) => { const f = files[p.slice(PD.length + 1)]; return f ? { mtimeMs: f.mtimeMs } : null; },
     readFirstCwd: (p) => files[p.slice(PD.length + 1)]?.cwd ?? null,
     mainRootOf: (c) => (c === WT ? ROOT : null),
+    worktreeKeyOf: (r) => (r === ROOT ? 'KEYA' : 'KEYB'),
   };
 }
 const own = '-home-u-proj';
@@ -70,9 +71,11 @@ test('empty inputs', () => {
 });
 
 const T = (iso) => Date.parse(iso);
-function ldeps(jobs, texts, structured = {}) {
+function ldeps(jobs, texts, structured = {}, hist = []) {
   return {
     readJobs: () => jobs,
+    readHistory: () => hist,
+    runsDir: () => '/runs',
     mainRootOf: (c) => (c === WT ? ROOT : null),
     readResultText: (p) => texts[p] ?? null,
     readStructured: (p) => structured[p] ?? null,
@@ -82,17 +85,17 @@ function ldeps(jobs, texts, structured = {}) {
 test('lessons: dev-lead trailing block + validator field, own project only, 3 lines, 200 chars', () => {
   const long = 'x'.repeat(300);
   const jobs = [
-    { id: 'j1', slug: 'p1', cwd: ROOT, finishedAt: '2026-11-20T00:00:00Z', logPath: 'l1' },
-    { id: 'j2', slug: 'p2', cwd: WT, finishedAt: '2026-11-21T00:00:00Z', logPath: 'l2', agentType: 'validator' },
-    { id: 'j3', slug: 'p3', cwd: '/home/u/proj-two', finishedAt: '2026-11-21T00:00:00Z', logPath: 'l3' },
-    { id: 'j4', slug: 'p4', cwd: ROOT, finishedAt: null, logPath: 'l4' },
+    { id: 'j1', slug: 'p1', cwd: ROOT, finishedAt: '2026-11-20T00:00:00Z', runId: 'r1' },
+    { id: 'j2', slug: 'p2', cwd: WT, finishedAt: '2026-11-21T00:00:00Z', runId: 'r2', agentType: 'validator' },
+    { id: 'j3', slug: 'p3', cwd: '/home/u/proj-two', finishedAt: '2026-11-21T00:00:00Z', runId: 'r3' },
+    { id: 'j4', slug: 'p4', cwd: ROOT, finishedAt: null, runId: 'r4' },
   ];
   const texts = {
-    l1: `done\n\nLessons:\n- a\n- ${long}\n- c\n- d`,
-    l3: 'Lessons:\n- other',
-    l4: 'Lessons:\n- unfinished',
+    '/runs/r1/p1.log': `done\n\nLessons:\n- a\n- ${long}\n- c\n- d`,
+    '/runs/r3/p3.log': 'Lessons:\n- other',
+    '/runs/r4/p4.log': 'Lessons:\n- unfinished',
   };
-  const so = { l2: { verdicts: [{ prd: 'p9', lessons: ['v1'] }], lessons: 'top1\ntop2' } };
+  const so = { '/runs/r2/p2.log': { verdicts: [{ prd: 'p9', lessons: ['v1'] }], lessons: 'top1\ntop2' } };
   const r = w.collectLessons({ cwd: ROOT, sinceMs: T('2026-11-19T00:00:00Z'), untilMs: T('2026-11-26T00:00:00Z'), deps: ldeps(jobs, texts, so) });
   expect(r.lessons).toHaveLength(3);
   expect(r.lessons[0]).toMatchObject({ slug: 'p1', jobId: 'j1', source: 'dev-lead' });
@@ -103,10 +106,32 @@ test('lessons: dev-lead trailing block + validator field, own project only, 3 li
 });
 
 test('second run over the same week reads zero (consecutive windows)', () => {
-  const jobs = [{ id: 'j1', slug: 'p1', cwd: ROOT, finishedAt: '2026-11-23T00:00:00Z', logPath: 'l1' }];
-  const d = ldeps(jobs, { l1: 'Lessons:\n- a' });
+  const jobs = [{ id: 'j1', slug: 'p1', cwd: ROOT, finishedAt: '2026-11-23T00:00:00Z', runId: 'r1' }];
+  const d = ldeps(jobs, { '/runs/r1/p1.log': 'Lessons:\n- a' });
   const a = T('2026-11-16T00:00:00Z'); const b = T('2026-11-23T00:00:00Z'); const c = T('2026-11-30T00:00:00Z');
   expect(w.collectLessons({ cwd: ROOT, sinceMs: a, untilMs: b, deps: d }).lessons).toHaveLength(0);
   expect(w.collectLessons({ cwd: ROOT, sinceMs: b, untilMs: c, deps: d }).lessons).toHaveLength(1);
   expect(w.collectLessons({ cwd: ROOT, sinceMs: c, untilMs: c + 7 * 86400000, deps: d }).lessons).toHaveLength(0);
+});
+
+test('history-only job collected; live+history dedupe by id; logPath ignored', () => {
+  const h = { id: 'h1', slug: 'ph', runId: 'rh', cwd: ROOT, finishedAt: '2026-11-22T00:00:00Z', logPath: 'bogus' };
+  const dup = { ...h };
+  const d = ldeps([dup], { '/runs/rh/ph.log': 'Lessons:\n- hist' }, {}, [h]);
+  const r = w.collectLessons({ cwd: ROOT, sinceMs: T('2026-11-19T00:00:00Z'), untilMs: T('2026-11-26T00:00:00Z'), deps: d });
+  expect(r.lessons).toHaveLength(1);
+  expect(r.lessons[0]).toMatchObject({ slug: 'ph', jobId: 'h1', lines: ['hist'] });
+});
+
+test('dead epic + job worktrees of this project returned; other project not', () => {
+  const E = '/s/session-manager-epic-worktrees/KEYA/e1';
+  const J = '/s/session-manager-job-worktrees/KEYA/1-x';
+  const X = '/s/session-manager-job-worktrees/KEYB/1-y';
+  const files = {
+    '-s-epic-worktrees-KEYA-e1/e.jsonl': { mtimeMs: 100, cwd: E },
+    '-s-job-worktrees-KEYA-1-x/j.jsonl': { mtimeMs: 100, cwd: J },
+    '-s-job-worktrees-KEYB-1-y/x.jsonl': { mtimeMs: 100, cwd: X },
+  };
+  const r = w.listProjectTranscripts({ cwd: ROOT, sinceMs: 0, untilMs: 1000, deps: tdeps(files) });
+  expect(r.transcripts.map((t) => t.sessionId).sort()).toEqual(['e', 'j']);
 });

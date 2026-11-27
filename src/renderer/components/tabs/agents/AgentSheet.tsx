@@ -27,7 +27,7 @@ import { loadoutOf, type LoadoutState } from './AgentRoster'
  * 64 px avatar rail by default, the 316 px list when expanded — deviation 1), and the sheet itself:
  * header (avatar, name, loadout badge + counts, `edited`, class line + tags, Global | In project,
  * Duplicate, ⋯), DESCRIPTION, STATS, PERSONALITY & GROUNDING preview (Open editor = the shared
- * DocumentEditorPane, full screen), a right column with the Gear (GearPanel) / Constraints (ConstraintsPanel) cards and THIS LOADOUT APPLIES TO, and the bottom save bar. Save / revert / delete /
+ * DocumentEditorPane, full screen), the Gear (GearPanel) card in the centre column, a right column with the Constraints (ConstraintsPanel) card and THIS LOADOUT APPLIES TO, and the bottom save bar. Save / revert / delete /
  * duplicate go through the same AgentLibrary handlers and IPC calls as before.
  */
 
@@ -505,13 +505,13 @@ export function AgentSheet({
                 </div>
                 <div className="min-w-0" data-overridden={overridden('effort') ? 'true' : undefined}>
                   {inProject && overridden('effort') && <div data-testid="agent-overridden-effort" className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide text-accent">overridden · global: {globalDraft.effort}</div>}
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1 min-w-0"><EffortSelect value={view.effort} model={view.model} onChange={(v) => editing({ effort: v })} /></div>
-                  <div data-testid="agent-effort-pips" aria-hidden="true" className="shrink-0 pb-3 flex items-center gap-1">
-                    {EFFORT_PIPS.map((l, i) => (
-                      <span key={l} className={`w-1.5 h-1.5 rounded-full ${i <= EFFORT_PIPS.indexOf(view.effort) ? 'bg-fg-dim' : 'bg-line'}`} />
-                    ))}
-                  </div>
+                  <div className="relative">
+                    <EffortSelect value={view.effort} model={view.model} onChange={(v) => editing({ effort: v })} />
+                    <div data-testid="agent-effort-pips" aria-hidden="true" className="pointer-events-none absolute right-8 top-[22px] h-8 flex items-center gap-1">
+                      {EFFORT_PIPS.map((l, i) => (
+                        <span key={l} className={`w-1.5 h-1.5 rounded-full ${i <= EFFORT_PIPS.indexOf(view.effort) ? 'bg-fg-dim' : 'bg-line'}`} />
+                      ))}
+                    </div>
                   </div>
                 </div>
                 {inProject ? (

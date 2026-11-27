@@ -56,7 +56,7 @@ export function McpPowers({
           <span title={t.id} className={`min-w-0 flex-1 truncate ${on.has(t.id) ? 'text-fg' : 'text-fg-dim'}`}>{t.label === t.id ? short(t.id) : t.label}</span>
           {(() => {
             const m = markFor(marks, server.id, t.id)
-            return m && m !== 'read' ? <span data-badge="risky" data-mark={m} className="shrink-0 px-1 rounded text-[9.5px] uppercase tracking-wide bg-red-500/15 text-red-700">{m}</span> : null
+            return m && m !== 'read' ? <span data-badge="risky" data-mark={m} className="shrink-0 px-1 rounded text-[9.5px] uppercase tracking-wide bg-delta-bad/15 text-delta-bad">{m}</span> : null
           })()}
         </label>
       ))}

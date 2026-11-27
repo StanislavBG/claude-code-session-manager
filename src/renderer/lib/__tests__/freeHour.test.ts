@@ -18,10 +18,11 @@ describe('freeHour', () => {
   })
 
   it('exports the exact URL with utm params', () => {
-    expect(FREE_HOUR_URL).toBe('https://bilko.run/book?utm_source=session-manager&utm_medium=app')
+    expect(FREE_HOUR_URL).toBe('https://bilko.run/book?utm_source=session-manager&utm_medium=app&utm_campaign=free-consultation')
     const u = new URL(FREE_HOUR_URL)
     expect(u.searchParams.get('utm_source')).toBe('session-manager')
     expect(u.searchParams.get('utm_medium')).toBe('app')
+    expect(u.searchParams.get('utm_campaign')).toBe('free-consultation')
   })
 
   it('desktop ok: opens externally, no toast', async () => {

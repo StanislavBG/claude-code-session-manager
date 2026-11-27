@@ -1,4 +1,4 @@
-// The app's single source for the free-hour booking link (a plain link, nothing more).
+// The app's single source for the free-consultation booking link (a plain link, nothing more).
 // Callers: the Feedback panel link, and the Help menu via the 'app:open-free-hour' event.
 // Desktop opens it in the system browser through shell:open; the web build (where
 // shell:open is denied) opens a new browser tab instead.
@@ -6,7 +6,7 @@
 import { toast } from '../state/toast'
 import { isWebRemote } from '../state/epicTerminal'
 
-export const FREE_HOUR_URL = 'https://bilko.run/book?utm_source=session-manager&utm_medium=app'
+export const FREE_HOUR_URL = 'https://bilko.run/book?utm_source=session-manager&utm_medium=app&utm_campaign=free-consultation'
 
 export function openFreeHour(): void {
   const failed = (): void => {

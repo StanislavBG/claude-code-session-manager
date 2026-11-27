@@ -1598,7 +1598,7 @@ app.whenReady().then(async () => {
       label: 'Help',
       submenu: [
         {
-          label: 'Book a Free Hour with Bilko',
+          label: 'Book a Free Consultation',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               sendIfAlive(mainWindow, 'app:open-free-hour');

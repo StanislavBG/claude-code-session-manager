@@ -359,15 +359,16 @@ export function CustomerFeedbackPanel() {
           </form>
 
           <p className="m-0 text-[12.5px] text-fg-dim" data-testid="customer-feedback-free-hour">
-            Rather talk it through?{' '}
+            Want to chat?{' '}
             <button
               type="button"
               className="font-semibold text-accent hover:underline"
               data-testid="customer-feedback-free-hour-link"
               onClick={openFreeHour}
             >
-              Book a free hour with Bilko
+              Book a free consultation
             </button>
+            .
           </p>
 
           <section className="grid gap-2" data-testid="customer-feedback-list">

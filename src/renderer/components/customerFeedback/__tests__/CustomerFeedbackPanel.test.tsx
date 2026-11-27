@@ -162,7 +162,7 @@ describe('CustomerFeedbackPanel', () => {
     expect(open).toHaveBeenCalledTimes(1)
     expect(open).toHaveBeenCalledWith({
       as: 'external',
-      url: 'https://bilko.run/book?utm_source=session-manager&utm_medium=app',
+      url: 'https://bilko.run/book?utm_source=session-manager&utm_medium=app&utm_campaign=free-consultation',
     })
     expect(submit).not.toHaveBeenCalled()
     expect(spies.closePanel).not.toHaveBeenCalled()
@@ -171,6 +171,7 @@ describe('CustomerFeedbackPanel', () => {
   it('free-hour line carries no price text', async () => {
     await mount()
     expect(q('customer-feedback-free-hour')).not.toBeNull()
+    expect(q('customer-feedback-free-hour')!.textContent).toBe('Want to chat? Book a free consultation.')
     const text = q('customer-feedback-panel')!.textContent ?? ''
     expect(text).not.toContain('$')
     expect(text).not.toContain('per hour')

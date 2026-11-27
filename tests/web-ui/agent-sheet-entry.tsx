@@ -20,7 +20,7 @@ const SPEC: Array<[string, string, string | null, Loadout, string[], string, str
   ['bilko-ceo', 'opus', 'medium', 'unbound', ['*'], '#6b4e9b', "Sets the week's priorities for Bilko."],
   ['bilko-host-publisher', 'sonnet', 'low', 'equipped', ['Read', 'Bash', 'mcp__bilko-host__publish_static_project'], '#2f7d6b', 'Publishes finished pages and checks they load.'],
   ['blender-artist', 'sonnet', 'medium', 'equipped', ['Read', 'Bash', 'mcp__blender__execute_blender_code'], '#c2562b', 'Builds and renders 3D scenes from a brief.'],
-  ['builder', 'sonnet', 'medium', 'equipped', ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write'], '#3a6ea5', 'Implements a design end to end, with tests.'],
+  ['builder', 'sonnet', 'medium', 'equipped', ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write', 'mcp__blender__render_thumbnail_to_path'], '#3a6ea5', 'Implements a design end to end, with tests.'],
   ['competitive-analyst', 'sonnet', 'medium', 'undecided', [], '#a5493a', 'Compares a product with named rivals.'],
   ['competitive-researcher', 'haiku', 'low', 'bare', [], '#5b8a3a', 'Finds who else solves the problem.'],
   ['demo-video-builder', 'sonnet', 'medium', 'equipped', ['Read', 'Write', 'Bash'], '#b0407a', 'Turns a working feature into a short demo.'],
@@ -37,13 +37,14 @@ const personas: AgentPersona[] = SPEC.map(([name, model, effort, loadout, tools,
     ? { installedVersion: 6, bundledVersion: 8, edited: true, bundledBody: `You are ${name}. Designs the shape of a change before it is built.\nAlways name the files a change will touch.` }
     : null,
   overridingProjects: i === 4 ? ['Self'] : [],
-  overrideDetails: i === 4 ? [{ project: 'Self', cwd: CWD, fields: ['model'], values: { model: 'opus' }, bodyOverridden: false, issue: null }] : [],
+  overrideDetails: i === 4 ? [{ project: 'Self', cwd: CWD, fields: ['model', 'tools', 'mcpServers', 'packs'], values: { model: 'opus', tools: 'Read, Grep, Glob, Bash, Edit, Write', mcpServers: '[]', packs: 'apple-design' }, bodyOverridden: false, issue: null }] : [],
 }))
 
 const item = (id: string, badges: Array<'risky' | 'banned' | 'floor'> = []) => ({ id, label: id, badges })
 const armory = {
   builtins: [
-    item('Read', ['floor']), item('Grep', ['floor']), item('Glob', ['floor']), item('Bash', ['risky']),
+    item('Agent', ['floor']), item('Skill', ['floor']), item('ToolSearch', ['floor']), item('TodoWrite', ['floor']),
+    item('Read'), item('Grep'), item('Glob'), item('Bash', ['risky']),
     item('Edit'), item('Write'), item('WebFetch'), item('WebSearch'), item('Task', ['banned']),
   ],
   bundledSkills: [item('pdf'), item('docx')],
@@ -58,7 +59,11 @@ const armory = {
     { ...item('apple-design'), skills: ['hig', 'sf-symbols'], source: 'plugin' },
   ],
   unpackedSkills: ['pdf', 'docx'],
-  environments: [],
+  environments: [
+    { name: 'headless-default', summary: 'Sandboxed run: project folder writable, network limited to the model API.' },
+    { name: 'validator-readonly', summary: 'Read-only filesystem; judges a finished plan without changing it.' },
+    { name: 'open-web', summary: 'Sandbox with open outbound network, for research and publishing runs.' },
+  ],
   errors: [],
 }
 
@@ -75,7 +80,7 @@ const api = {
     dismissPersonaUpgrade: async () => ({ ok: true }),
     onChanged: () => () => {},
   },
-  toolRisk: { read: async () => ({ ok: true, marks: {} }) },
+  toolRisk: { read: async () => ({ ok: true, marks: { 'Bash(git push:*)': 'public', 'Bash(rm:*)': 'irreversible', 'mcp__blender__execute_blender_code': 'confirm' } }) },
   claudeConfig: { read: async () => ({ ok: true, data: { permissions: { allow: [], deny: [] } } }) },
   environments: {
     list: async () => ({

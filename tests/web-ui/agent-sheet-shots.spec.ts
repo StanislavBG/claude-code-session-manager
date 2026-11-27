@@ -65,7 +65,17 @@ const FRAMES: Frame[] = [
     if (!drawer || !row || row.x + row.width > drawer.x) throw new Error('the armory drawer must not cover the Gear drop rows')
     await page.locator('[data-testid="armory-item"][data-item="session-manager-scheduler"]').dispatchEvent('dragstart')
     await page.getByTestId('agent-mcp-row').dispatchEvent('dragenter')
-    await page.getByTestId('agent-release-hint').waitFor() } },
+    await page.getByTestId('agent-release-hint').waitFor()
+    // 1e's floating ghost card under the pointer (a native drag image cannot be shot): a clone of the dragged item, tilted, over the MCP row.
+    await page.evaluate(() => {
+      const src = document.querySelector('[data-testid="armory-item"][data-item="session-manager-scheduler"]') as HTMLElement
+      const tgt = document.querySelector('[data-testid="agent-mcp-row"]')!.getBoundingClientRect()
+      const g = src.cloneNode(true) as HTMLElement
+      g.setAttribute('data-testid', 'armory-drag-ghost'); g.removeAttribute('data-item'); g.removeAttribute('draggable')
+      Object.assign(g.style, { position: 'fixed', left: `${tgt.x + 140}px`, top: `${tgt.y + 40}px`, width: '260px', zIndex: '99999', pointerEvents: 'none', transform: 'rotate(-2deg)', boxShadow: '0 12px 28px rgba(0,0,0,.28)', background: 'var(--bg-hi, #fff)', opacity: '0.96' })
+      document.body.appendChild(g)
+    })
+    await page.getByTestId('armory-drag-ghost').waitFor() } },
   // 1f: blender-artist's sheet with the blender server's Powers panel open.
   { name: 'mcp-powers', testid: 'agent-roster', reference: '1f-mcp-powers.png', setUp: async (page) => { await openSheet('blender-artist')(page); await page.locator('[data-testid="agent-mcp-item"][data-server="blender"] [data-testid="agent-mcp-powers-open"]').click(); await page.getByTestId('agent-mcp-powers').waitFor()
     // 1f layout: full server name (not clipped), short tool labels, header children do not overlap.

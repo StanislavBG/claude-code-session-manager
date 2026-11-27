@@ -69,6 +69,20 @@ export function toDraft(p: AgentPersona): Draft {
   }
 }
 
+/**
+ * The `loadout` a save sends. Empty tools alone is NOT Bare: an Undecided persona also drafts
+ * tools [] and must stay Undecided (no `tools:` line). Bare = the Bare choice, or tools cleared
+ * from a saved/new non-empty set. `savedTools` null = a new persona.
+ */
+export function saveLoadout(obj: Draft, savedTools: readonly string[] | null): 'bare' | 'equipped' | 'unbound' | undefined {
+  if (obj.tools.length === 0) {
+    if (obj.loadout === 'bare') return 'bare'
+    return savedTools === null || savedTools.length > 0 ? 'bare' : undefined
+  }
+  if (!obj.loadout) return undefined
+  return obj.loadout === 'unbound' && !obj.tools.includes('*') ? 'equipped' : obj.loadout
+}
+
 function gearOf(p: AgentPersona): Pick<Draft, 'mcpServers' | 'packs' | 'environment'> {
   const g = p as AgentPersona & Pick<Draft, 'mcpServers' | 'packs' | 'environment'>
   return { ...(g.mcpServers ? { mcpServers: g.mcpServers } : {}), ...(g.packs ? { packs: g.packs } : {}), ...(g.environment ? { environment: g.environment } : {}) }

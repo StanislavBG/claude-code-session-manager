@@ -4,7 +4,7 @@ import { Badge } from '../ui/Badge'
 import { ConfigFileCard, ConfigListRow, ConfigListToolbar, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { TagLibrary } from './TagLibrary'
 import { AgentRoster, loadoutOf, loadoutSummary, LOADOUT_DOT } from './agents/AgentRoster'
-import { BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject, type OverlayKeys } from './agents/AgentDetail'
+import { BLANK_DRAFT, overrideParts, saveLoadout, toDraft, type Draft, type OpenProject, type OverlayKeys } from './agents/AgentDetail'
 import { AgentSheet, AgentWorkbench, useAgentsListExpanded } from './agents/AgentSheet'
 import { PersonaUpgradeNotice } from './agents/PersonaUpgradeNotice'
 import { toast } from '../../state/toast'
@@ -236,7 +236,7 @@ function AgentLibraryComponent() {
         ...(obj.mcpServers ? { mcpServers: obj.mcpServers } : {}),
         ...(obj.packs ? { packs: obj.packs } : {}),
         ...(obj.environment ? { environment: obj.environment } : {}),
-        ...(obj.loadout || obj.tools.length === 0 ? { loadout: obj.tools.length === 0 ? 'bare' as const : obj.loadout === 'unbound' && !obj.tools.includes('*') ? 'equipped' as const : obj.loadout } : {}),
+        ...(saveLoadout(obj, existing?.tools ?? null) ? { loadout: saveLoadout(obj, existing?.tools ?? null) } : {}),
         ...(obj.agentCli !== 'claude' && obj.agentCliModel.trim() ? { agentCliModel: obj.agentCliModel.trim() } : {}),
       }
       // savePersona rewrites the whole file, so an existing persona is the base: title and the

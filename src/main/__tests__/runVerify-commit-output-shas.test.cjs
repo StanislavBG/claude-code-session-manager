@@ -44,6 +44,24 @@ test('git log -5 sibling commits are not collected', () => {
   assert.deepEqual(run('siblings', cmd, out).transcriptCommitOutputShas, ['3333333']);
 });
 
+test('sibling subject that is only a substring of the command is not collected', () => {
+  const cmd = 'git add src/main/some-long-path-name && git commit -m "feat: real subject line" -m "Co-Authored-By: Claude <x>"';
+  const out = '4444444 some-long-path-name\n5555555 Co-Authored-By: Claude\n6666666 feat: real subject line';
+  assert.deepEqual(run('substr', cmd, out).transcriptCommitOutputShas, ['6666666']);
+});
+
+test('heredoc -m message is matched on its first line', () => {
+  const cmd = "git commit -m \"$(cat <<'EOF'\nfix(x): heredoc subject line\n\nbody text\nEOF\n)\"";
+  const out = '7777777 fix(x): heredoc subject line\n8888888 body text here';
+  assert.deepEqual(run('heredoc', cmd, out).transcriptCommitOutputShas, ['7777777']);
+});
+
+test('single-quoted and --message= forms', () => {
+  const cmd = "git commit -m 'single quoted subj' --message=\"eq form subject\"";
+  const out = '9999999 single quoted subj\naaaaaaa eq form subject\nbbbbbbb quoted';
+  assert.deepEqual(run('forms', cmd, out).transcriptCommitOutputShas, ['9999999', 'aaaaaaa']);
+});
+
 test('non-commit command is ignored', () => {
   const r = run('noncommit', 'git log --oneline -3', '[main abc1234] subj\nabc1234 subj subject');
   assert.deepEqual(r.transcriptCommitOutputShas, []);

@@ -207,6 +207,25 @@ const GIT_COMMIT_CMD_RE = /\bgit\s+(?:-C\s+\S+\s+)?commit\b/;
 const COMMIT_SUMMARY_RE = /^\[[^\]\s]+(?: \(root-commit\))? ([0-9a-f]{7,40})\]/i;
 const SHA_SUBJECT_RE = /^([0-9a-f]{7,40}) (.+)$/i;
 
+const COMMIT_MESSAGE_ARG_RE = /(?:^|\s)(?:-m|--message)(?:=|\s+)(?:"?\$\(cat <<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\s*\1\s*\)"?|"((?:[^"\\]|\\.)*)"|'([^']*)')/g;
+
+/**
+ * First lines (trimmed) of every -m / --message argument in a git command.
+ * @param {string} command
+ * @returns {string[]}
+ */
+function commitMessageSubjects(command) {
+  /** @type {string[]} */
+  const out = [];
+  if (typeof command !== 'string') return out;
+  for (const m of command.matchAll(COMMIT_MESSAGE_ARG_RE)) {
+    let body = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3].replace(/\\(.)/g, '$1') : (m[4] || '');
+    const first = body.split('\n').map((l) => l.trim()).find((l) => l.length > 0);
+    if (first) out.push(first);
+  }
+  return out;
+}
+
 /**
  * SHAs git printed in the tool_result of a Bash call running `git commit`.
  * A CLAIM only — the scheduler must check it against the run's own HEAD range.
@@ -229,6 +248,7 @@ function collectCommitOutputShas(events) {
     if (ev.kind !== 'tool_result') continue;
     const cmd = commitCmds.get(ev.toolUseId);
     if (cmd === undefined || typeof ev.content !== 'string') continue;
+    const subjects = commitMessageSubjects(cmd);
     for (const raw of ev.content.split('\n')) {
       const ln = raw.trim();
       const m1 = COMMIT_SUMMARY_RE.exec(ln);
@@ -236,7 +256,7 @@ function collectCommitOutputShas(events) {
       const m2 = SHA_SUBJECT_RE.exec(ln);
       if (m2) {
         const subject = m2[2].trim();
-        if (subject.length >= 8 && cmd.includes(subject)) shas.add(m2[1].toLowerCase());
+        if (subject.length >= 8 && subjects.includes(subject)) shas.add(m2[1].toLowerCase());
       }
     }
   }
@@ -1108,6 +1128,7 @@ module.exports = {
   isPolicyDenial,
   checkDeps,
   parseLog,
+  commitMessageSubjects,
   scanSentinel,
   scanHaltLine,
   scanSentinelReason,

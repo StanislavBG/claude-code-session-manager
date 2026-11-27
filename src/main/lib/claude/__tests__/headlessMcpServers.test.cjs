@@ -83,31 +83,32 @@ describe('resolveHeadlessMcpServers', () => {
     expect(credentialed.s).toContain('s ');
     for (const n of needles) expect(credentialed.s).toContain(n);
     expect(credentialed.s).not.toMatch(/sekret/);
+    return credentialed.s;
   };
 
   it('refuses a secret flag followed by a value', () => {
-    refused({ command: 'x', args: ['--API-Key', 'sekret'] }, '--api-key', 'args');
+    expect(refused({ command: 'x', args: ['--API-Key', 'sekret'] }, '--api-key', 'args')).toContain('s ');
   });
   it('refuses a secret flag in --flag=value form', () => {
-    refused({ command: 'x', args: ['--token=sekret'] }, '--token', 'args');
+    expect(refused({ command: 'x', args: ['--token=sekret'] }, '--token', 'args')).toContain('s ');
   });
   it('refuses URL userinfo in args', () => {
-    refused({ command: 'x', args: ['https://u:sekret@host/p'] }, 'userinfo', 'args');
+    expect(refused({ command: 'x', args: ['https://u:sekret@host/p'] }, 'userinfo', 'args')).toContain('s ');
   });
   it('refuses URL userinfo in url', () => {
-    refused({ url: 'https://u:sekret@host/p' }, 'userinfo', 'url');
+    expect(refused({ url: 'https://u:sekret@host/p' }, 'userinfo', 'url')).toContain('s ');
   });
   it('refuses a credential query key in url', () => {
-    refused({ url: 'https://host/p?access_token=sekret' }, 'access_token', 'url');
+    expect(refused({ url: 'https://host/p?access_token=sekret' }, 'access_token', 'url')).toContain('s ');
   });
   it('refuses broader env and header key names', () => {
-    refused({ command: 'x', env: { GITHUB_PAT: 'sekret' } }, 'GITHUB_PAT', 'env');
-    refused({ command: 'x', env: { AWS_CREDENTIALS: 'sekret' } }, 'AWS_CREDENTIALS');
-    refused({ command: 'x', env: { MY_PRIVATE_KEY: 'sekret' } }, 'MY_PRIVATE_KEY');
-    refused({ url: 'https://h', headers: { 'X-Authorization-Extra': 'sekret' } }, 'X-Authorization-Extra', 'headers');
+    expect(refused({ command: 'x', env: { GITHUB_PAT: 'sekret' } }, 'GITHUB_PAT', 'env')).toContain('s ');
+    expect(refused({ command: 'x', env: { AWS_CREDENTIALS: 'sekret' } }, 'AWS_CREDENTIALS')).toContain('s ');
+    expect(refused({ command: 'x', env: { MY_PRIVATE_KEY: 'sekret' } }, 'MY_PRIVATE_KEY')).toContain('s ');
+    expect(refused({ url: 'https://h', headers: { 'X-Authorization-Extra': 'sekret' } }, 'X-Authorization-Extra', 'headers')).toContain('s ');
   });
   it('refuses URL userinfo in an env value', () => {
-    refused({ command: 'x', env: { DB: 'postgres://u:sekret@h/db' } }, 'DB', 'userinfo');
+    expect(refused({ command: 'x', env: { DB: 'postgres://u:sekret@h/db' } }, 'DB', 'userinfo')).toContain('s ');
   });
 
   it('real-config shapes still resolve as known', () => {

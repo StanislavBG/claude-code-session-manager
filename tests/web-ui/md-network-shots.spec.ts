@@ -1,9 +1,9 @@
 import { test, expect, chromium } from '@playwright/test'
 import { build } from 'esbuild'
-import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureWebCss } from './webCss.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -20,10 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '../..')
 
 test('Review MD network screenshots: pane light + dark, explorer Graph view', async ({}, testInfo) => {
-  if (!fs.existsSync(path.join(root, 'dist-web/app.css'))) {
-    execSync('npx vite build --config vite.web.config.ts', { cwd: root, stdio: 'inherit' })
-  }
-  const css = fs.readFileSync(path.join(root, 'dist-web/app.css'), 'utf8')
+  const css = ensureWebCss(root)
   const bundle = (await build({
     entryPoints: [path.join(__dirname, 'project-home-entry.tsx')],
     bundle: true, write: false, format: 'iife', jsx: 'automatic', loader: { '.css': 'empty' },

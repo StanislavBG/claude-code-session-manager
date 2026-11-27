@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const sched = require('../scheduler.cjs');
+const { bareSlug } = require('../lib/prd/depSlugResolve.cjs');
 const { pickNextBatch } = require('../lib/scheduler/schedulerBatch.cjs');
 const { evaluateEpicSettle } = require('../lib/epic/epicSettle.cjs');
 
@@ -248,7 +249,8 @@ describe('hold stamp and create-failed notice', () => {
       const calls = d.notify.mock.calls.filter((c) => c[3] && c[3].notice === 'plan-review-create-failed');
       expect(calls).toHaveLength(1);
       expect(calls[0][2]).toMatch(/^PLAN REVIEW NOT STARTED/);
-      expect(calls[0][2]).toContain('validate');
+      expect(calls[0][2]).toContain(`plan ${bareSlug('90-validate')} could`);
+      expect(calls[0][2]).not.toContain('90-validate');
       expect(calls[0][2]).toContain('refused-x');
       expect(calls[0][3]).toEqual({ prdSlug: '90-validate', notice: 'plan-review-create-failed', allowInactive: true });
     });
@@ -264,6 +266,8 @@ describe('hold stamp and create-failed notice', () => {
       await sched.applyPlanReviewHolds(state, d);
       const calls = d.notify.mock.calls.filter((c) => c[3] && c[3].notice === 'plan-review-create-failed');
       expect(calls).toHaveLength(1);
+      expect(calls[0][2]).toContain(`plan ${bareSlug('90-validate')} could`);
+      expect(calls[0][2]).not.toContain('90-validate');
       expect(calls[0][2]).toContain('boom-y');
     });
   });

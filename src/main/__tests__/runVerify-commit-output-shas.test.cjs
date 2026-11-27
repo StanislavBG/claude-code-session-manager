@@ -77,7 +77,7 @@ test('clusters not ending in m and long options containing m yield no subject', 
   assert.deepEqual(run('noverify', 'git commit --no-verify "fix: a thing here"', out).transcriptCommitOutputShas, []);
 });
 
-test('clusters where a value-taking letter precedes m (-Cm, -Fm) yield no subject', () => {
+test('clusters where a value-taking letter (C, c, F, t) precedes m yield no subject; -am and -sm still match', () => {
   assert.deepEqual(commitMessageSubjects('git commit -Cm "x subj here"'), []);
   assert.deepEqual(commitMessageSubjects('git commit -Fm "x subj here"'), []);
   assert.deepEqual(commitMessageSubjects('git commit -cm "x subj here"'), []);

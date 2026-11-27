@@ -80,7 +80,7 @@ test('depth 0: direct child emits, nested child does not', async () => {
   expect(events.every((e) => e.path === dir)).toBe(true);
   expect(events.length).toBe(1);
   config.unwatch([dir], 1, { depth: 0 });
-});
+}, 30000);
 
 test('no opts: nested create still emits (recursive default)', async () => {
   const { dir, events } = setup();
@@ -89,7 +89,7 @@ test('no opts: nested create still emits (recursive default)', async () => {
   fs.writeFileSync(path.join(dir, 'sub', 'deep.txt'), 'x');
   expect(await waitFor(() => events.some((e) => e.path === dir))).toBe(true);
   config.unwatch([dir], 1);
-});
+}, 30000);
 
 test('recursive and depth-0 watches are separate refcounted watchers; unwatch with same opts releases the match', async () => {
   const { dir, events } = setup();

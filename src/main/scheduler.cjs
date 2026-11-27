@@ -9247,7 +9247,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       let siblingOverlap = false;
       if (!worktree.ok) {
         rangeCommits = await gitTreeGuard.gitRangeCommits(guardCwd, guardHeadBefore, headAtExit);
-        transcriptCommitShas = parseLog(path.join(runDir, `${job.slug}.log`)).transcriptCommitShas || [];
+        // One parseLog call: harness-reported shas plus shas git printed for the run's own
+        // `git commit` Bash call. Both are claims; resolveRunCommitAttribution only credits one inside rangeCommits.
+        const parsedRunLog = parseLog(path.join(runDir, `${job.slug}.log`));
+        transcriptCommitShas = [...new Set([
+          ...(parsedRunLog.transcriptCommitShas || []),
+          ...(parsedRunLog.transcriptCommitOutputShas || []),
+        ])];
         const overlapState = await readQueue().catch(() => ({ jobs: [] }));
         const myStart = Date.parse(dispatchStartedAt) || 0;
         const myEnd = Date.now();

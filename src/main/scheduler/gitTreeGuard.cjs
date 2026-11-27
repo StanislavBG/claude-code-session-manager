@@ -473,6 +473,12 @@ function strandedCommitVerdict({ worktreeHead, landedCommit } = {}) {
  * main checkout with concurrent jobs, so a HEAD move there may be someone else's
  * integration — credit comes only from this run's own integration result. An
  * in-place run keeps the HEAD-delta / time-window behaviour.
+ *
+ * `transcriptCommitShas` carries two evidence sources, unioned by the caller:
+ * the harness-reported commit shas (parseLog `transcriptCommitShas`) and the
+ * shas git printed for the run's own `git commit` call (parseLog
+ * `transcriptCommitOutputShas`). Both are claims: credit goes only to a commit
+ * inside `rangeCommits` (headBefore..headAtExit).
  */
 function resolveRunCommitAttribution({
   ranInWorktree, integratedSha, headBefore, headAtExit, committedInWindow,

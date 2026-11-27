@@ -8,7 +8,7 @@
 
 'use strict';
 
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 const assert = require('node:assert/strict');
 const { finalizeJobWorktree } = require('../scheduler.cjs');
 const { resolveRunCommitAttribution } = require('../scheduler/gitTreeGuard.cjs');
@@ -217,4 +217,62 @@ test('real git: dirty base, job edits carried path further → still in worktree
   fs.writeFileSync(path.join(s.worktree.dir, 'a.txt'), 'a job edit\n');
   const r = await finCarried(s);
   assert.ok(r.worktreeLeftoverDirty.includes('a.txt'), JSON.stringify(r.worktreeLeftoverDirty));
+});
+
+// ── real-git: 1458 shape — overlapping sibling, own commit proven by git's printed sha ──
+const { parseLog, verifyRun } = require('../runVerify.cjs');
+const gitTreeGuardReal = require('../scheduler/gitTreeGuard.cjs');
+
+test('real git: 1458 shape credits own commit via commit-output sha, never the sibling', async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-landed-1458-'));
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-landed-1458-run-'));
+  const writeSpy = vi.spyOn(require('../config.cjs'), 'writeJsonSync').mockImplementation((abs, data) => {
+    fs.writeFileSync(abs, JSON.stringify(data, null, 2) + '\n');
+    return { ok: true, mtimeMs: 0 };
+  });
+  try {
+    const g = (...a) => gitIn(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a);
+    g('init', '-q', '-b', 'main');
+    const mk = (f, msg) => { fs.writeFileSync(path.join(repo, f), `${f}\n`); g('add', '-A'); g('commit', '-q', '-m', msg); return g('rev-parse', 'HEAD'); };
+    const B = mk('base.txt', 'base');
+    const S = mk('sibling.txt', 'sibling work in the shared tree');
+    const subj = 'fix(email): undo groom restores only exact-note delete_rule row';
+    const O = mk('own.txt', subj);
+    const short = O.slice(0, 7);
+
+    const slug = 'prd-1458';
+    const cmd = `git add own.txt && git commit -q -m "${subj}" && git log --oneline -1`;
+    const lines = [
+      '[scheduler] starting',
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: cmd } }] } }),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: `${short} ${subj}` }] } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done.\nSCHEDULER_VERDICT: PASS' }] } }),
+    ];
+    const logPath = path.join(runDir, `${slug}.log`);
+    fs.writeFileSync(logPath, lines.join('\n') + '\n');
+
+    const parsed = parseLog(logPath);
+    const transcriptCommitShas = [...new Set([...(parsed.transcriptCommitShas || []), ...(parsed.transcriptCommitOutputShas || [])])];
+    const rangeCommits = await gitTreeGuardReal.gitRangeCommits(repo, B, O);
+    assert.ok(rangeCommits.includes(S) && rangeCommits.includes(O));
+    const r = resolveRunCommitAttribution({
+      ranInWorktree: false, integratedSha: null, headBefore: B, headAtExit: O,
+      committedInWindow: true, rangeCommits, transcriptCommitShas, siblingOverlap: true,
+    });
+    assert.equal(r.landedCommit, O);
+    assert.notEqual(r.landedCommit, S);
+    assert.equal(r.committedDuringRun, true);
+
+    const prdPath = path.join(runDir, `${slug}.md`);
+    fs.writeFileSync(prdPath, '# Goal\nx\n');
+    const v = await verifyRun({
+      runDir, prdPath, queueEntry: { slug, cwd: repo }, allJobs: [],
+      committedDuringRun: r.committedDuringRun, jobLandedCommitThisRun: r.landedCommit, exitCode: 0,
+    });
+    assert.notEqual(v.verdict, 'pass_no_commit');
+  } finally {
+    writeSpy.mockRestore();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
 });

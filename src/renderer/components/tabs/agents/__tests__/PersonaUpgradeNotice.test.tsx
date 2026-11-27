@@ -61,6 +61,21 @@ describe('PersonaUpgradeNotice', () => {
     expect(err).toHaveBeenCalledWith('boom')
     expect(onDone).not.toHaveBeenCalled()
   })
+  const isDisabled = (id: string) => (host.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement).disabled
+  it.each([
+    ['persona-upgrade-take', take, { backupPath: '/b/x.md', seedVersion: 8 }],
+    ['persona-upgrade-keep', dismiss, { ok: true }],
+  ] as const)('disables both buttons while %s is pending', async (id, fn, value) => {
+    let resolve!: (v: unknown) => void
+    fn.mockReturnValue(new Promise((r) => { resolve = r }))
+    await mount(base)
+    await click(id)
+    expect(isDisabled('persona-upgrade-take')).toBe(true)
+    expect(isDisabled('persona-upgrade-keep')).toBe(true)
+    expect(onDone).not.toHaveBeenCalled()
+    await act(async () => { resolve(value) })
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
   it('renders nothing when upgrade is null', async () => {
     await mount({ ...base, upgrade: null })
     expect(host.querySelector('[data-testid="persona-upgrade-notice"]')).toBeNull()

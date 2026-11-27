@@ -633,7 +633,11 @@ describe('usage hold', () => {
     const a = await setup().call(base());
     const b = await setup({ usageHold: () => null }).call(base());
     expect(b.status).toBe(200);
-    expect(b.body).toEqual(a.body);
+    // slotWaitMs is measured wall-clock; every other field must match exactly.
+    const { slotWaitMs: wa, ...restA } = a.body;
+    const { slotWaitMs: wb, ...restB } = b.body;
+    expect(restB).toEqual(restA);
+    expect(typeof wb).toBe(typeof wa);
   });
 
   test("priority: 'interactive' is refused the same way", async () => {

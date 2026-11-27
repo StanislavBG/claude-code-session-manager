@@ -56,7 +56,7 @@ const { developLoopOffSettingsArgs } = require('./lib/epic/developLoopSpawn.cjs'
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { planEpicSpawn, resolveEpicTurnModel } = require('./lib/epic/epicSpawnPlan.cjs');
-const { buildPersonaToolScope, personaToolScopeArgs, skillDenyArgs, CHAT_HARNESS_MCP_SERVERS } = require('./lib/claude/personaToolScope.cjs');
+const { buildPersonaToolScope, personaToolScopeArgs, skillDenyArgs, HEADLESS_SCOPE_AGENT_NAME, CHAT_HARNESS_MCP_SERVERS } = require('./lib/claude/personaToolScope.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const epicDepsSync = require('./lib/epic/epicDepsSync.cjs');
 const logs = require('./logs.cjs');
@@ -1690,6 +1690,29 @@ function registerChatHandlers() {
 const undecidedLogged = new Set();
 
 /**
+ * Servers in the argv's --mcp-config that no --agents tools entry (mcp__<s> or mcp__<s>__*) grants.
+ * [] when either flag is absent or unparseable. Pure.
+ * @param {string[]} args
+ * @returns {string[]}
+ */
+function ungrantedMcpServers(args) {
+  if (!Array.isArray(args)) return [];
+  const ai = args.indexOf('--agents');
+  const mi = args.indexOf('--mcp-config');
+  if (ai < 0 || mi < 0) return [];
+  let tools; let servers;
+  try {
+    const agents = JSON.parse(args[ai + 1]);
+    const def = agents && agents[HEADLESS_SCOPE_AGENT_NAME];
+    tools = def && Array.isArray(def.tools) ? def.tools.map(String) : null;
+    servers = Object.keys((JSON.parse(args[mi + 1]) || {}).mcpServers || {});
+  } catch { return []; }
+  if (!tools) return [];
+  const granted = new Set(tools.filter((t) => t.startsWith('mcp__')).map((t) => t.slice(5).split('__')[0]));
+  return servers.filter((s) => !granted.has(s));
+}
+
+/**
  * Gear for a chat turn (PRD 4768): the argv that gives an Epic whose pinned snapshot carries
  * `gearBindsChat` the same scope a job gets — persona tools, strict MCP with the declared servers,
  * packs' skill allow-list. HEADLESS_DISALLOWED_TOOLS is deliberately NOT applied to chat.
@@ -1697,7 +1720,7 @@ const undecidedLogged = new Set();
  * An unknown declared server/pack never crashes the turn: it is dropped and reported in `errors`.
  * Pure apart from reading ~/.claude.json and <cwd>/.mcp.json (declared servers), the pack catalog and the seeded MCP entry (injectable for tests).
  * `projectRoot` is the Epic's main project cwd: a worktree `cwd` still sees servers under projects[<main root>].
- * @param {{ snapshot: any, cwd?: string, projectRoot?: string, deps?: { home?: string, knownMcpServers?: Record<string, object>, listPacks?: () => { packs: any[] }, listUnpackedSkills?: () => string[], log?: (msg: string) => void } }} opts
+ * @param {{ snapshot: any, cwd?: string, projectRoot?: string, deps?: { home?: string, knownMcpServers?: Record<string, object>, listPacks?: () => { packs: any[] }, listUnpackedSkills?: () => string[], log?: (msg: string) => void, scopeArgs?: typeof personaToolScopeArgs } }} opts
  * @returns {{ args: string[], errors: string[] }}
  */
 function gearChatArgs({ snapshot, cwd, projectRoot, deps = {} }) {
@@ -1734,7 +1757,8 @@ function gearChatArgs({ snapshot, cwd, projectRoot, deps = {} }) {
   const harness = CHAT_HARNESS_MCP_SERVERS.filter((n) => n === 'session-manager-scheduler' || Object.prototype.hasOwnProperty.call(known || {}, n));
   const declared = [...new Set([...personaDeclared, ...harness])];
   const scope = buildPersonaToolScope(snapshot.tools, { loadout, disallowed: [] });
-  const attempt = personaToolScopeArgs(scope, { mcpServers: known, declaredServers: declared, packs, knownPacks: [...knownPackIds] });
+  const scopeFn = deps.scopeArgs || personaToolScopeArgs;
+  const attempt = scopeFn(scope, { mcpServers: known, declaredServers: declared, packs, knownPacks: [...knownPackIds] });
   /** @type {string[]} */ const errors = [];
   let scopeArgs = attempt.args;
   let equipped = packs;
@@ -1755,12 +1779,14 @@ function gearChatArgs({ snapshot, cwd, projectRoot, deps = {} }) {
       curDeclared = curDeclared.filter((d) => d !== r.name);
       curPacks = curPacks.filter((p) => p !== r.name);
       curScope = curScope ? { tools: curScope.tools.filter((t) => !(t.startsWith('mcp__') && t.slice(5).split('__')[0] === r.name) && t !== r.name) } : curScope;
-      cur = personaToolScopeArgs(curScope, { mcpServers: known, declaredServers: curDeclared, packs: curPacks, knownPacks: [...knownPackIds] });
+      cur = scopeFn(curScope, { mcpServers: known, declaredServers: curDeclared, packs: curPacks, knownPacks: [...knownPackIds] });
       r = cur.refusal;
     }
     scopeArgs = cur.args;
     equipped = curPacks;
   }
+  // A loaded-but-ungranted server is invisible to the CLI (even ToolSearch) — never omit it silently.
+  for (const name of ungrantedMcpServers(scopeArgs)) errors.push(`Gear: "${name}" was loaded but not granted to this chat's tools; its tools are unavailable this turn.`);
   const installedSkills = [...new Set([...catalog.flatMap((p) => p.skills || []), ...unpacked].map(String))];
   const deny = skillDenyArgs({ installedSkills, equippedPacks: equipped, packCatalog: catalog, loadout });
   return { args: [...scopeArgs, ...deny], errors };
@@ -1778,6 +1804,7 @@ module.exports = {
   noteChatRunOrigin,
   turnInstructionFor,
   gearChatArgs,
+  ungrantedMcpServers,
   shouldFollowUp,
   parseStopSignal,
   splitStopSignal,

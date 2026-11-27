@@ -215,3 +215,28 @@ test('harness: missing bilko-host is skipped silently', () => {
   expect(mcpKeys(args)).toEqual([MCP]);
   expect(toolsOf(args)).not.toContain('mcp__bilko-host');
 });
+
+const AGENT = 'sm-headless-scoped';
+const argvOf = (tools, servers) => [
+  '--agents', JSON.stringify({ [AGENT]: { tools } }), '--agent', AGENT,
+  '--mcp-config', JSON.stringify({ mcpServers: servers }), '--strict-mcp-config',
+];
+
+test('ungrantedMcpServers: 0.144.0-shaped argv reports the scheduler', () => {
+  expect(cr.ungrantedMcpServers(argvOf(['Read', 'Skill'], { [MCP]: SRV }))).toEqual([MCP]);
+  expect(cr.ungrantedMcpServers(argvOf(['Read', `mcp__${MCP}__x`], { [MCP]: SRV }))).toEqual([]);
+  expect(cr.ungrantedMcpServers(['--strict-mcp-config'])).toEqual([]);
+});
+
+test('ungrantedMcpServers: gearChatArgs output for an equipped persona is clean', () => {
+  const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'] };
+  const { args } = cr.gearChatArgs({ snapshot: snap, deps: { knownMcpServers: { [MCP]: SRV, 'bilko-host': SRV } } });
+  expect(cr.ungrantedMcpServers(args)).toEqual([]);
+});
+
+test('gearChatArgs: a scope regression that drops the mcp__ grant yields the Gear error', () => {
+  const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'] };
+  const scopeArgs = () => ({ args: argvOf(['Read'], { [MCP]: SRV }), refusal: null });
+  const { errors } = cr.gearChatArgs({ snapshot: snap, deps: { knownMcpServers: { [MCP]: SRV }, scopeArgs } });
+  expect(errors.some((e) => new RegExp(`Gear: "${MCP}" was loaded but not granted to this chat's tools`).test(e))).toBe(true);
+});

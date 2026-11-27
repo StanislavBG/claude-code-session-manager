@@ -1,11 +1,11 @@
 import { test, expect, chromium } from '@playwright/test'
 import { build } from 'esbuild'
 import { createRequire } from 'node:module'
-import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { outDirFor, LIBRARY_SHOTS } from './shotsOutDir.ts'
+import { ensureWebCss } from './webCss.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const __filename = fileURLToPath(import.meta.url)
@@ -31,10 +31,7 @@ play(){this.playing=true},pause(){this.playing=false},seek(x){this.t=x},getTime(
 </script><script>${PLAYER_BRIDGE_SCRIPT}</script></body></html>`
 
 test('Project Home screenshots: knowledge + videos, light + dark', async () => {
-  if (!fs.existsSync(path.join(root, 'dist-web/app.css'))) {
-    execSync('npx vite build --config vite.web.config.ts', { cwd: root, stdio: 'inherit' })
-  }
-  const css = fs.readFileSync(path.join(root, 'dist-web/app.css'), 'utf8')
+  const css = ensureWebCss(root)
   const bundle = (await build({
     entryPoints: [path.join(__dirname, 'project-home-entry.tsx')],
     bundle: true, write: false, format: 'iife', jsx: 'automatic', loader: { '.css': 'empty' },

@@ -86,7 +86,9 @@ function blockingPathsOf(job) {
  * `undefined` and this falls to the same `now` default.
  */
 function buildReviewNotice({ job, report, epicId, now, prior } = {}) {
-  const cause = `${job?.verifierVerdict || 'unknown'}${job?.integrationFailureKind ? `:${job.integrationFailureKind}` : ''}`;
+  const cause = !job?.verifierVerdict && job?.environmentLimit?.kind
+    ? `environment_limit:${job.environmentLimit.kind}`
+    : `${job?.verifierVerdict || 'unknown'}${job?.integrationFailureKind ? `:${job.integrationFailureKind}` : ''}`;
   const filed = Boolean(report && report.filed);
   const summary = filed ? report.summary : `${job?.slug ?? 'unknown job'} stopped (${cause})`;
   const reportPath = filed ? (report.path ?? null) : null;
@@ -143,7 +145,20 @@ function parkedAgeMs(j, now) {
  * SWEEP_MIN_AGE_MINUTES old (parkedAgeMs); a row due on its own skips that
  * check entirely.
  */
-function selectDueReviewNotices(jobs = [], { now = Date.now(), holdMs = DEFAULT_HOLD_MINUTES * 60000 } = {}) {
+// A row reconcile() mints directly at needs_review (never ran, so no park-time
+// stamp) has no `reviewNotice`. Derive one from its born statusHistory entry so
+// it is held and sent once like any park. Non-mutating: returns a shallow copy.
+function withBornNotice(j) {
+  if (!j || j.reviewNotice || j.status !== 'needs_review') return j;
+  const born = Array.isArray(j.statusHistory)
+    ? j.statusHistory.find((h) => h && h.to === 'needs_review' && h.at)
+    : null;
+  if (!born) return j;
+  return { ...j, reviewNotice: buildReviewNotice({ job: j, report: null, epicId: j.epicId ?? j.sourcePromptId ?? null, now: born.at }) };
+}
+
+function selectDueReviewNotices(rawJobs = [], { now = Date.now(), holdMs = DEFAULT_HOLD_MINUTES * 60000 } = {}) {
+  const jobs = Array.isArray(rawJobs) ? rawJobs.map(withBornNotice) : rawJobs;
   const isCandidate = (j) => Boolean(
     j
     && j.reviewNotice

@@ -50,6 +50,10 @@ an unknown declared capability parks the job (`capability_unknown`) instead of s
   snapshot already holds the declared servers/packs. Code: `gearChatArgs` in `src/main/chatRunner.cjs` (tools, strict MCP, packs; an
   unknown server/pack is dropped with a `capability_unknown` warning, never a failed turn;
   `HEADLESS_DISALLOWED_TOOLS` is not applied to chat); stamp in `src/main/lib/claude/agentSnapshot.cjs`.
+  Chat harness: every scoped chat also gets `CHAT_HARNESS_MCP_SERVERS` (`personaToolScope.cjs`:
+  `session-manager-scheduler`, plus `bilko-host` when registered) with no persona `mcpServers:` entry. A declared
+  server is granted whole (`mcp__<server>`). A server loaded but not granted (`ungrantedMcpServers`), or unavailable,
+  surfaces as a `Gear:` notice in the chat, never a silently missing tool.
 - Skills: carried only inside packs. `skillDenyArgs` / `resolveSkillDeny` in `personaToolScope.cjs` add
   `--disallowedTools=Skill(<name>)` for every installed skill not in an equipped pack, at job, Task and chat
   spawns. CLI-bundled skills and `code-review` / `security-review` are never denied.

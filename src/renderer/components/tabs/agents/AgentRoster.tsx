@@ -239,7 +239,7 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
                 onClick={() => onOpen(p.name)}
                 onKeyDown={(e) => onKey(e, i)}
                 style={state === 'undecided' ? { borderColor: HONEY } : undefined}
-                className="relative text-left flex flex-col gap-2 p-3.5 pt-4 rounded-2xl bg-bg-hi border overflow-hidden hover:border-fg-faint ${state === 'undecided' ? 'border-dashed' : 'border-line'} focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                className={`relative text-left flex flex-col gap-2 p-3.5 pt-4 rounded-2xl bg-bg-hi border overflow-hidden hover:border-fg-faint ${state === 'undecided' ? 'border-dashed' : 'border-line'} focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
               >
                 {state === 'unbound' && (
                   <span

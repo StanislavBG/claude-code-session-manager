@@ -67,6 +67,16 @@ describe('AgentRoster', () => {
     expect(container.querySelectorAll('[data-testid="agent-card-hatch"]')).toHaveLength(1)
   })
 
+  it('undecided cards are dashed; equipped cards use border-line', async () => {
+    await mount(SET)
+    const u = container.querySelector('[data-agent-row="ann"]')!
+    const e = container.querySelector('[data-agent-row="eve"]')!
+    expect(u.classList.contains('border-dashed')).toBe(true)
+    expect(e.classList.contains('border-line')).toBe(true)
+    expect(e.classList.contains('border-dashed')).toBe(false)
+    expect(u.className).not.toContain('${')
+  })
+
   it('override footer names the project and keys; undecided cards offer a loadout', async () => {
     const o = { ...mk('olly', 'equipped'), overridingProjects: ['Self'], overrideDetails: [{ project: 'Self', cwd: '/s', fields: ['model', 'tools'], bodyOverridden: false, issue: null }] } as AgentPersona
     await mount([o, mk('u', 'undecided')])

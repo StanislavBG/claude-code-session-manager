@@ -565,6 +565,7 @@ export function AgentSheet({
           </div>
 
           <div className="flex flex-col gap-4 min-w-0">
+            {!armoryOpen && <>
             {inProject && selected && (
               <section data-testid="agent-changed-card" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Changed in {selected.name} <span className="font-normal">{diffs.length}</span></div>
@@ -600,6 +601,7 @@ export function AgentSheet({
               </section>
             )}
             <AppliesToCard />
+            </>}
           </div>
         </div>
 

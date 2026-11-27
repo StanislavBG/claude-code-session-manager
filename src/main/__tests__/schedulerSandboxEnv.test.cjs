@@ -9,7 +9,7 @@ describe('scheduler sandbox env scrub', () => {
     expect(process.env.NODE_USE_ENV_PROXY).toBeUndefined();
   });
   it('a spawned node child prints empty stderr', () => {
-    const r = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { env: process.env, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, ['-e', 'setTimeout(()=>{},10)'], { env: process.env, encoding: 'utf8' });
     expect(r.stderr).toBe('');
   });
 });

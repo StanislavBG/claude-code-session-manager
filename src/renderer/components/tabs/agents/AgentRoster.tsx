@@ -278,6 +278,15 @@ export function AgentRoster({ personas, filter, onFilterChange, onOpen, onNew, v
                   </span>
                   <span className="text-fg-dim truncate" style={state === 'undecided' ? { color: HONEY_FG } : undefined}>{cardSummary(p, state)}</span>
                 </div>
+                {p.upgrade && (
+                  <div>
+                    <span
+                      data-testid={`agent-roster-upgrade-${p.name}`}
+                      title={`v${p.upgrade.installedVersion} installed, v${p.upgrade.bundledVersion} bundled`}
+                      className="inline-block px-2 py-0.5 rounded-full text-[10.5px] font-semibold border border-accent text-accent"
+                    >newer version available</span>
+                  </div>
+                )}
                 {state === 'equipped' && (
                   <div className="flex flex-wrap gap-1 min-h-[20px]">
                     {gear.length > 0 && (gear.length <= 4

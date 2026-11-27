@@ -74,6 +74,17 @@ describe('AgentRoster', () => {
     expect(container.querySelector('[data-agent-row="u"]')!.textContent).toContain('Choose a loadout →')
   })
 
+  it('marks personas with an upgrade as newer version available; none otherwise', async () => {
+    const up = { ...mk('old', 'equipped'), upgrade: { installedVersion: 2, bundledVersion: 5, edited: true, bundledBody: '' } } as AgentPersona
+    await mount([up, { ...mk('cur', 'equipped'), upgrade: null } as AgentPersona, mk('plain', 'bare')])
+    const badge = container.querySelector('[data-testid="agent-roster-upgrade-old"]')!
+    expect(badge.textContent).toBe('newer version available')
+    expect(badge.getAttribute('title')).toBe('v2 installed, v5 bundled')
+    expect(container.querySelector('[data-testid="agent-roster-upgrade-cur"]')).toBeNull()
+    expect(container.querySelector('[data-testid="agent-roster-upgrade-plain"]')).toBeNull()
+    expect(container.querySelectorAll('[data-testid^="agent-roster-upgrade-"]')).toHaveLength(1)
+  })
+
   it('arrow keys move focus and Enter opens the focused card', async () => {
     await mount(SET)
     const cards = [...container.querySelectorAll<HTMLElement>('[data-testid="agent-card"]')]

@@ -107,6 +107,16 @@ describe('resolveHeadlessMcpServers', () => {
     expect(refused({ command: 'x', env: { MY_PRIVATE_KEY: 'sekret' } }, 'MY_PRIVATE_KEY')).toContain('s ');
     expect(refused({ url: 'https://h', headers: { 'X-Authorization-Extra': 'sekret' } }, 'X-Authorization-Extra', 'headers')).toContain('s ');
   });
+  it('refuses token-as-username userinfo in args and env values', () => {
+    expect(refused({ command: 'x', args: ['https://ghp_sekret@github.com/x'] }, 'userinfo', 'args')).toContain('s ');
+    expect(refused({ command: 'x', env: { REPO: 'https://ghp_sekret@github.com/x' } }, 'REPO', 'userinfo')).toContain('s ');
+  });
+  it('scheme-less git@host:path and plain URLs stay known', () => {
+    write(userFile(), { mcpServers: { g: { command: 'x', args: ['git@github.com:org/repo', 'https://host/path'], env: { U: 'https://host/path' } } } });
+    const r = resolveHeadlessMcpServers({ cwd, home });
+    expect(r.known.g).toBeDefined();
+    expect(r.credentialed.g).toBeUndefined();
+  });
   it('refuses URL userinfo in an env value', () => {
     expect(refused({ command: 'x', env: { DB: 'postgres://u:sekret@h/db' } }, 'DB', 'userinfo')).toContain('s ');
   });

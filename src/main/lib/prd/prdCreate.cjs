@@ -90,10 +90,10 @@ const mcpReachDeps = {
       const { parseTools, parseCapabilityList } = require('../../agentLibrary.cjs');
       const { resolvedMcpServerNames } = require('../claude/personaToolScope.cjs');
       const fm = (readOverlayAwarePersona(input.agentType || dflt, { cwd: input.cwd }) || {}).fm;
-      if (!fm) return null;
+      if (!fm) return [];
       const tools = parseTools(typeof fm.tools === 'string' ? fm.tools : '');
       return resolvedMcpServerNames(tools, parseCapabilityList(fm.mcpServers));
-    } catch { return null; }
+    } catch { return []; }
   },
 };
 const telemetryCounters = require('../telemetry/telemetryCounters.cjs');

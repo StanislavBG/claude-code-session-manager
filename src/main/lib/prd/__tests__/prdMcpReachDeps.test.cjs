@@ -49,7 +49,7 @@ test('readPersonaServers never throws on an unreadable persona', () => {
   writePersona('reach-bad', '\0\0 not frontmatter');
   let out;
   expect(() => { out = prdCreate.mcpReachDeps.readPersonaServers({ agentType: 'reach-bad', cwd: tmpHome }); }).not.toThrow();
-  expect(out == null || (Array.isArray(out) && out.length === 0)).toBe(true);
+  expect(out).toEqual([]);
   expect(() => prdCreate.mcpReachDeps.readPersonaServers({ agentType: 'does-not-exist', cwd: '/nonexistent' })).not.toThrow();
 });
 

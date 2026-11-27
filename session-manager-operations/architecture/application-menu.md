@@ -45,7 +45,7 @@ Every menu item is one of two kinds:
 | Dev | Reload App Window | CmdOrCtrl+R | role (`reload`) | Reloads the renderer (`dist/index.html` or the dev server URL) | Electron-native |
 | Dev | Take Heap Snapshot (renderer) | none | click, conditional (`SM_HEAP_SNAPSHOT=1` only) | Captures a `.heapsnapshot` of the renderer process | `src/main/heapSnapshot.cjs` `buildMenuItem()` — see `heap-snapshot-diagnostics.md` |
 | Edit | Undo / Redo / Cut / Copy / Paste / Select All | OS default | role | Standard text-editing commands, native to whichever input has focus | Electron-native |
-| Help | Book a Free Hour with Bilko | none | click | Opens https://bilko.run/book?utm_source=session-manager&utm_medium=app in the system browser | `src/main/index.cjs` click handler → `mainWindow.webContents.send('app:open-free-hour')` → `src/preload/index.cjs` `onOpenFreeHour` → `src/renderer/App.tsx` → `openFreeHour()` in `src/renderer/lib/freeHour.ts`, the same helper the Feedback panel link calls |
+| Help | Book a Free Consultation | none | click | Opens https://bilko.run/book?utm_source=session-manager&utm_medium=app&utm_campaign=free-consultation in the system browser | `src/main/index.cjs` click handler → `mainWindow.webContents.send('app:open-free-hour')` → `src/preload/index.cjs` `onOpenFreeHour` → `src/renderer/App.tsx` → `openFreeHour()` in `src/renderer/lib/freeHour.ts`, the same helper the Feedback panel link calls; the footer strip (`src/renderer/components/ConsultationNotice.tsx`) is the third caller of `openFreeHour` |
 
 ## Rules
 

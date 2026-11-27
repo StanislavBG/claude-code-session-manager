@@ -73,8 +73,10 @@ async function dispatch(job, mainCwd, resumeTarget = null) {
   const result = await executeJob(job, runDir, mainCwd, () => Promise.resolve(), undefined, resumeTarget);
   const argv = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, 'utf8')) : null;
   const meta = JSON.parse(fs.readFileSync(path.join(runDir, `${job.slug}.meta.json`), 'utf8'));
+  const logFile = path.join(runDir, `${job.slug}.log`);
+  const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
   fs.rmSync(runDir, { recursive: true, force: true });
-  return { result, argv, meta };
+  return { result, argv, meta, log };
 }
 
 const argAfter = (argv, flag) => argv[argv.indexOf(flag) + 1];
@@ -173,6 +175,7 @@ test('a pinned snapshot whose persona differs from the job agentType is re-pinne
     expect(changed.agentSnapshotId).toMatch(/^[0-9a-f]{64}$/);
     expect(changed.agentSnapshotId).not.toBe(oldId);
     expect(second.meta.agentSnapshotId).toBe(changed.agentSnapshotId);
+    expect(second.log).toContain(`(re-pinned from ${oldId.slice(0, 8)}: agentType changed)`);
     expect(second.meta.agentSnapshotRepinned).toEqual({ from: oldId, to: changed.agentSnapshotId, reason: 'agentType_changed' });
   } finally {
     fs.rmSync(mainCwd, { recursive: true, force: true });

@@ -116,8 +116,9 @@ for (const [label, lines, name] of [
       const { result, argv, meta } = await dispatch({ slug, cwd: mainCwd, agentType: 'cap-bad' }, mainCwd);
       expect(argv).toBeNull();
       expect(result.exitCode).toBe(-1);
-      expect(result.personaRefusal).toEqual({ code: 'capability_unknown', detail: name });
-      expect(result.error).toBe(`capability_unknown: ${name}`);
+      const detail = label.includes('pack') ? name : `${name} (MCP server not defined in ~/.claude.json, <project>/.mcp.json or the project's local scope)`;
+      expect(result.personaRefusal).toEqual({ code: 'capability_unknown', detail });
+      expect(result.error).toBe(`capability_unknown: ${detail}`);
       expect(meta.personaRefusal.code).toBe('capability_unknown');
     } finally {
       fs.rmSync(mainCwd, { recursive: true, force: true });

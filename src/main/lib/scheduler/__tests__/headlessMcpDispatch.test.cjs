@@ -55,7 +55,9 @@ async function dispatch(mainCwd, slug) {
   fs.rmSync(marker, { force: true });
   const result = await executeJob({ slug, cwd: mainCwd, agentType: 'mcp-persona' }, runDir, mainCwd, () => Promise.resolve());
   const argv = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, 'utf8')) : null;
-  return { result, argv };
+  const logFile = path.join(runDir, `${slug}.log`);
+  const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
+  return { result, argv, log };
 }
 
 test('a user-scope declared server spawns with --mcp-config and --strict-mcp-config', async () => {
@@ -77,7 +79,9 @@ test('a credentialed declared server is refused capability_credentialed and neve
 
 test('an undefined declared server is refused capability_unknown', async () => {
   const { mainCwd, slug } = setup({});
-  const { result, argv } = await dispatch(mainCwd, slug);
+  const { result, argv, log } = await dispatch(mainCwd, slug);
   expect(argv).toBeNull();
-  expect(result.personaRefusal).toEqual({ code: 'capability_unknown', detail: 'bilko-host' });
+  const detail = "bilko-host (MCP server not defined in ~/.claude.json, <project>/.mcp.json or the project's local scope)";
+  expect(result.personaRefusal).toEqual({ code: 'capability_unknown', detail });
+  expect(log).toContain(`capability_unknown: ${detail}`);
 });

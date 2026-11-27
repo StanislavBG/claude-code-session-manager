@@ -5969,7 +5969,7 @@ function jobRiskToolsClearance(prdRiskTools, personaTools) {
   return out;
 }
 
-function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, mcpServerNames = [], pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null, skillDeny = [], knownServers = null }) {
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope, mcpServerNames = [], pluginDirArgs = [], jsonSchema = null, sandboxArgs = null, riskGuardSettingsPath = null, skillDeny = [], knownServers }) {
   let permissionArgs = Array.isArray(sandboxArgs) && sandboxArgs.length ? sandboxArgs : ['--dangerously-skip-permissions'];
   let riskArgs = [];
   if (typeof riskGuardSettingsPath === 'string' && riskGuardSettingsPath) {
@@ -5984,7 +5984,7 @@ function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, 
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
     // Always strict: exactly the persona's resolved servers (dispatch already
     // parked any job whose set names an unknown server — capability_unknown).
-    ...personaToolScopeArgs(toolScope, { mcpServers: knownServers || resolveHeadlessMcpServers({}).known, declaredServers: mcpServerNames }).args,
+    ...personaToolScopeArgs(toolScope, { mcpServers: knownServers, declaredServers: mcpServerNames }).args,
     ...(Array.isArray(pluginDirArgs) ? pluginDirArgs : []),
     ...(jsonSchema && typeof jsonSchema === 'object' ? ['--json-schema', JSON.stringify(jsonSchema)] : []),
     ...riskArgs,
@@ -6097,18 +6097,19 @@ function ensureTimeoutShimOnce() {
  */
 async function resolveJobAgentSnapshot(job, cwd, packs) {
   let repinFrom = null;
+  let pinnedSnap = null;
   if (typeof job.agentSnapshotId === 'string' && job.agentSnapshotId) {
-    const snap = await agentSnapshot.readAgentSnapshot(cwd, job.agentSnapshotId);
-    if (!snap) {
+    pinnedSnap = await agentSnapshot.readAgentSnapshot(cwd, job.agentSnapshotId);
+    if (!pinnedSnap) {
       return { refusal: { code: 'agent_snapshot_missing', detail: `pinned agent snapshot ${job.agentSnapshotId} is missing or does not match its id` } };
     }
     // An explicit persona change (the PRD's agentType moved) is an audited re-pin.
-    if (snap.name && snap.name !== (job.agentType || 'dev-lead')) {
+    if (pinnedSnap.name && pinnedSnap.name !== (job.agentType || DEFAULT_PRD_AGENT_TYPE)) {
       repinFrom = job.agentSnapshotId;
     }
   }
-  if (typeof job.agentSnapshotId === 'string' && job.agentSnapshotId && !repinFrom) {
-    const snap = await agentSnapshot.readAgentSnapshot(cwd, job.agentSnapshotId);
+  if (pinnedSnap && !repinFrom) {
+    const snap = pinnedSnap;
     return {
       refusal: null,
       systemPrompt: snap.body || null,
@@ -6557,7 +6558,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   if (personaResolution.refusal) {
     const { code, detail } = personaResolution.refusal;
     const refusalError = `${code}: ${detail}`;
-    safeLog(`[scheduler] persona refused for ${job.slug} — not spawned: ${refusalError}${code === 'capability_unknown' ? ` (an MCP server must be defined in ~/.claude.json or ${path.join(cwd, '.mcp.json')})` : ''}\n`);
+    safeLog(`[scheduler] persona refused for ${job.slug} — not spawned: ${refusalError}\n`);
     closeFd();
     config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: refusalError, personaRefusal: { code, detail }, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY, ...setupMeta });
     return { exitCode: -1, durationMs: 0, error: refusalError, sessionId, personaRefusal: { code, detail } };
@@ -6627,7 +6628,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // missing from the resolved known map, or an unknown persona-declared pack,
   // parks the job needs_review 'capability_unknown: <name>'; a credential-bearing
   // one parks 'capability_credentialed'. Never spawned with a widened config.
-  const mcpResolution = resolveHeadlessMcpServers({ cwd });
+  const mcpResolution = resolveHeadlessMcpServers({ cwd, projectRoot: job.cwd || defaultCwd });
   let capRefusal = null;
   for (const name of resolvedMcpServerNames(personaToolScope?.tools, personaResolution.mcpServers || [])) {
     if (Object.prototype.hasOwnProperty.call(mcpResolution.credentialed, name)) {
@@ -6644,7 +6645,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     });
     if (capabilityCheck.refusal) {
       const { code, name } = capabilityCheck.refusal;
-      capRefusal = { code, detail: name };
+      const isPack = Array.isArray(unknownPacks) && unknownPacks.includes(String(name));
+      capRefusal = { code, detail: code === 'capability_unknown' && !isPack ? `${name} (MCP server not defined in ~/.claude.json, <project>/.mcp.json or the project's local scope)` : name };
     }
   }
   if (capRefusal) {

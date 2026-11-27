@@ -47,7 +47,7 @@ describe('seedSchedulerMcp.schedulerServerEntry', () => {
 describe('buildClaudeSpawnArgs mcp-config ordering', () => {
   it('element after the --mcp-config value starts with --', () => {
     const argv = buildClaudeSpawnArgs({
-      model: 'm', sessionId: 's', toolScope: { tools: [tool, 'Skill'] },
+      model: 'm', sessionId: 's', toolScope: { tools: [tool, 'Skill'] }, knownServers: { [SERVER_NAME]: entry },
     });
     const i = argv.indexOf('--mcp-config');
     assert.ok(i >= 0);

@@ -146,7 +146,9 @@ function fallback(target, p) {
     },
   })
 }
-window.api = fallback({ siteFeedback }, '')
+// Non-owner state: the scenes show the plain project feedback tab, no owner inbox.
+const customerFeedback = { ownerInfo: async () => ({ ownerMode: false, projectCwd: null }) }
+window.api = fallback({ siteFeedback, customerFeedback }, '')
 
 const empty = libraryKeyStats([], undefined)
 function Shell() {

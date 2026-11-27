@@ -116,6 +116,8 @@ function buildPlanReviewInput({ epicId, cwd, epicGoal, validateSlug, members, ba
     agentType: 'plan-reviewer',
     tag: 'build',
     sourcePromptId: epicId,
+    // The plan's own PRDs are incomplete; without a disposition prdCreate refuses.
+    disposition: 'new-head',
     cwd,
   };
 }

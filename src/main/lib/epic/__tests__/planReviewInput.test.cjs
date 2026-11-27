@@ -32,6 +32,9 @@ describe('planReviewInput', () => {
       for (const c of m.acceptanceCriteria) expect(n).toContain(c);
     }
     expect(input.acceptanceCriteria).toContain('Review 03-launch-demo');
+    expect(input.disposition).toBe('new-head');
+    expect(input.dependsOn).toBeUndefined();
+    expect(buildPlanReviewInput({ ...fx, cwd: '/p', round: 2 }).disposition).toBe('new-head');
     expect(buildPlanReviewInput({ ...fx, cwd: '/p', round: 2 }).slug).toBe('plan-review-validate-launcher-r2');
   });
 

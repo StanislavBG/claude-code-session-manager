@@ -198,6 +198,8 @@ const { transitionJob, emitJobEvent, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = r
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduler/scheduleJobSchema.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
+/** (validateSlug#round) pairs whose refused plan-review create is already audited. */
+const planReviewRefusedLogged = new Set();
 const heldSchedulerTurns = require('./lib/scheduler/heldSchedulerTurns.cjs');
 const autoStartedSession = require('./lib/feedback-remote/autoStartedSession.cjs');
 const preflightCheck = require('./lib/scheduler/preflightCheck.cjs');
@@ -8408,7 +8410,15 @@ async function applyPlanReviewHolds(state, deps = {}) {
         const baseSha = await gitHead(v.cwd);
         const input = buildPlanReviewInput({ epicId, cwd: v.cwd, epicGoal, validateSlug: v.slug, members, baseSha, round });
         const res = await createPrd(input);
-        if (res && res.ok === false) console.warn('[scheduler] plan review PRD not created', reviewSlug, res.error || res.reason || '');
+        if (res && res.ok === false) {
+          const err = String(res.error || res.reason || '');
+          console.warn('[scheduler] plan review PRD not created', reviewSlug, err);
+          const refusedKey = `${vslug}#${round}`;
+          if (!planReviewRefusedLogged.has(refusedKey)) {
+            planReviewRefusedLogged.add(refusedKey);
+            appendAuditEvent('plan_review_create_refused', { validateSlug: vslug, round, error: err });
+          }
+        }
       } catch (e) {
         console.error('[scheduler] plan review PRD create failed', reviewSlug, e?.message || e);
       }

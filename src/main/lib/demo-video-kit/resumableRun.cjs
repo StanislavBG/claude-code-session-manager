@@ -263,25 +263,32 @@ function supervise(args) {
   // Not detached: the step and anything it spawns stay in this process group.
   const step = spawn(process.execPath, argv, { stdio: ['ignore', 'inherit', 'inherit'], cwd: process.cwd() });
   const every = Math.min(LEASE_CHECK_MAX_MS, Math.max(1, Math.floor(leaseMs / 4)));
-  const timer = setInterval(() => {
-    let age = Infinity;
-    try { age = Date.now() - fs.statSync(leasePath(stateDir)).mtimeMs; } catch { /* missing lease = no caller */ }
-    if (age <= leaseMs) return;
-    clearInterval(timer);
-    try {
-      writeResult(stateDir, key, { ok: false, error: `abandoned: no caller for ${Math.round(leaseMs / 60000)} min` });
-    } catch { /* stateDir gone */ }
-    process.stderr.write(`resumableRun supervisor: lease expired, stopping group ${process.pid}\n`);
-    killTree(process.pid);
-    process.exit(1);
-  }, every);
+  let timer = null;
+  const startLeaseClock = () => {
+    // The lease clock starts when the step process actually exists, not when
+    // startOrAttach ran: a loaded machine can delay this supervisor past leaseMs.
+    refreshLease(stateDir);
+    timer = setInterval(() => {
+      let age = Infinity;
+      try { age = Date.now() - fs.statSync(leasePath(stateDir)).mtimeMs; } catch { /* missing lease = no caller */ }
+      if (age <= leaseMs) return;
+      clearInterval(timer);
+      try {
+        writeResult(stateDir, key, { ok: false, error: `abandoned: no caller for ${Math.round(leaseMs / 60000)} min` });
+      } catch { /* stateDir gone */ }
+      process.stderr.write(`resumableRun supervisor: lease expired, stopping group ${process.pid}\n`);
+      killTree(process.pid);
+      process.exit(1);
+    }, every);
+  };
+  step.on('spawn', startLeaseClock);
   step.on('error', (err) => {
     process.stderr.write(`resumableRun supervisor: step failed to start: ${err.message}\n`);
-    clearInterval(timer);
+    if (timer) clearInterval(timer);
     process.exit(1);
   });
   step.on('exit', (code, signal) => {
-    clearInterval(timer);
+    if (timer) clearInterval(timer);
     // The step wrote its result before exiting; stop whatever it left in this
     // group (e.g. a voice wrapper's grandchildren). The waiter is not in it.
     const exitCode = code ?? (signal ? 1 : 0);

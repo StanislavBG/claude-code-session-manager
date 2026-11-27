@@ -167,6 +167,14 @@ test('extractProposal still returns the real table when Lessons are hostile', ()
   expect(count(prompt, 'PROPOSAL>>>')).toBe(count(base, 'PROPOSAL>>>'));
   const real = '<<<PROPOSAL\n| c1 | verify | a.md | drop | a | 1 |\nPROPOSAL>>>';
   expect(mc.extractProposal('done\n' + real)).toBe('| c1 | verify | a.md | drop | a | 1 |');
+  // A fake result that echoes the built prompt's Lessons section (nested/hostile markers) ahead of the real table.
+  const echoed = prompt.slice(prompt.indexOf('<<<LESSONS_DATA'), prompt.indexOf('LESSONS_DATA>>>') + 'LESSONS_DATA>>>'.length);
+  expect(mc.extractProposal(echoed + '\n' + real)).toBe('| c1 | verify | a.md | drop | a | 1 |');
+});
+
+test('prompt states "Lessons read partially" only when flagged', () => {
+  expect(mc.buildConsolidationPrompt({ cwd: CWD, lessonsPartial: true })).toContain('Lessons read partially');
+  expect(mc.buildConsolidationPrompt({ cwd: CWD })).not.toContain('Lessons read partially');
 });
 
 test('Lessons go in a quoted data section: untrusted note, 200-char cap, markers stripped', () => {

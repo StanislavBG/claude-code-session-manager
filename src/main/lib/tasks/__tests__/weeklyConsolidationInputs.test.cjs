@@ -167,13 +167,49 @@ test('history read backwards: 3,000 in-window rows, Lessons in the oldest; stops
   const rows = [{ id: 'old', slug: 'old', runId: 'ro', cwd: ROOT, finishedAt: new Date(base - 1000).toISOString() }];
   for (let i = 0; i < 3000; i++) rows.push({ id: `h${i}`, slug: `s${i}`, runId: `r${i}`, cwd: ROOT, finishedAt: new Date(base + i * 1000).toISOString(), pad: 'é'.repeat(100) });
   fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
-  const got = w.readHistorySince(file, base, 4096);
+  const got = w.readHistorySince(file, base, 4096).rows;
   expect(got).toHaveLength(3000);
   expect(got[0].id).toBe('h2999');
   expect(got[2999].id).toBe('h0');
-  const d = { ...ldeps([], { '/runs/r0/s0.log': 'Lessons:\n- oldest' }), readHistory: (c, since) => w.readHistorySince(file, since, 4096) };
+  const d = { ...ldeps([], { '/runs/r0/s0.log': 'Lessons:\n- oldest' }), readHistory: (c, since) => w.readHistorySince(file, since, 4096).rows };
   const r = w.collectLessons({ cwd: ROOT, sinceMs: base, untilMs: base + 86400000, deps: d });
   expect(r.lessons).toHaveLength(1);
   expect(r.lessons[0]).toMatchObject({ slug: 's0', lines: ['oldest'] });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('history: in-window row just behind a pre-window row is still collected; slack is bounded', () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'hist-'));
+  const file = path.join(dir, 'history.jsonl');
+  const base = T('2026-11-19T00:00:00Z');
+  const row = (id, t) => JSON.stringify({ id, finishedAt: new Date(t).toISOString() });
+  fs.writeFileSync(file, [row('late', base + 10), row('pre', base - 1000), row('behind', base + 5)].join('\n') + '\n');
+  const r = w.readHistorySince(file, base, 64);
+  expect(r.partial).toBe(false);
+  expect(r.rows.map((x) => x.id)).toEqual(['behind', 'late']);
+  // in-order: pre-window row at the head, nothing after it collected
+  const lines = [row('old', base - 5)];
+  for (let i = 0; i < w.HISTORY_SLACK_ROWS + 50; i++) lines.push(row(`far${i}`, base - 100000 + i));
+  lines.push(row('in', base + 1));
+  fs.writeFileSync(file, lines.join('\n') + '\n');
+  expect(w.readHistorySince(file, base, 64).rows.map((x) => x.id)).toEqual(['in']);
+  expect(w.readHistorySince(path.join(dir, 'missing.jsonl'), base)).toEqual({ rows: [], partial: false });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('history: a mid-read error is flagged partial and reaches collectLessons', () => {
+  const fs = require('node:fs');
+  const orig = fs.readSync;
+  const os = require('node:os'); const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'hist-'));
+  const file = path.join(dir, 'history.jsonl');
+  fs.writeFileSync(file, 'x'.repeat(10));
+  fs.readSync = () => { throw new Error('EIO'); };
+  let r;
+  try { r = w.readHistorySince(file, 0, 4); } finally { fs.readSync = orig; }
+  expect(r.partial).toBe(true);
+  const d = { ...ldeps([], {}), readHistory: () => ({ rows: [], partial: true }) };
+  expect(w.collectLessons({ cwd: ROOT, sinceMs: 0, untilMs: 1, deps: d }).lessonsPartial).toBe(true);
   fs.rmSync(dir, { recursive: true, force: true });
 });

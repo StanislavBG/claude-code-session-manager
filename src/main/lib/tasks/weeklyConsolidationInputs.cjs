@@ -19,15 +19,21 @@ const MAX_LESSON_LINES = 3;
 const MAX_LESSON_CHARS = 200;
 const HEAD_BYTES = 64 * 1024;
 const HISTORY_CHUNK = 256 * 1024;
+const HISTORY_SLACK_ROWS = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Read a JSONL history file backwards in fixed chunks (bounded memory) and
  * return parsed rows newest-first, stopping at the first row finished before
- * sinceMs, or the file start. No row/byte cap can stop inside the window.
+ * sinceMs (after a bounded slack of HISTORY_SLACK_ROWS further rows, so a few
+ * out-of-order rows are still collected), or the file start. No row/byte cap
+ * can stop inside the window. Returns { rows, partial }; partial = a read error
+ * cut the scan short.
  */
 function readHistorySince(file, sinceMs, chunkBytes = HISTORY_CHUNK) {
   const out = [];
+  let partial = false;
+  let slack = -1; // -1 = no pre-window row seen yet
   let fd;
   try {
     fd = fs.openSync(file, 'r');
@@ -41,7 +47,10 @@ function readHistorySince(file, sinceMs, chunkBytes = HISTORY_CHUNK) {
       try { row = JSON.parse(t); } catch { return; }
       if (!row || typeof row !== 'object') return;
       const f = toMs(row.finishedAt);
-      if (f !== null && f < sinceMs) { done = true; return; }
+      if (slack >= 0) {
+        if (slack-- <= 0) { done = true; return; }
+      }
+      if (f !== null && f < sinceMs) { if (slack < 0) slack = HISTORY_SLACK_ROWS; return; }
       out.push(row);
     };
     while (pos > 0 && !done) {
@@ -60,10 +69,13 @@ function readHistorySince(file, sinceMs, chunkBytes = HISTORY_CHUNK) {
       carry = Buffer.from(buf.subarray(0, end));
     }
     if (!done && pos === 0 && carry.length) take(carry.toString('utf8'));
-  } catch { /* unreadable → whatever was read */ } finally {
+  } catch (e) {
+    // A missing history file is just empty; any other error is a partial read.
+    if (!(e && e.code === 'ENOENT')) partial = true;
+  } finally {
     if (fd !== undefined) try { fs.closeSync(fd); } catch { /* ignore */ }
   }
-  return out;
+  return { rows: out, partial };
 }
 
 function toMs(v) {
@@ -238,7 +250,12 @@ function collectLessons({ cwd, sinceMs, untilMs, deps } = {}) {
   let live = [];
   try { live = d.readJobs(cwd) || []; } catch { live = []; }
   let hist = [];
-  try { hist = d.readHistory(cwd, sinceMs) || []; } catch { hist = []; }
+  let lessonsPartial = false;
+  try {
+    const h = d.readHistory(cwd, sinceMs);
+    if (Array.isArray(h)) hist = h;
+    else if (h && Array.isArray(h.rows)) { hist = h.rows; lessonsPartial = !!h.partial; }
+  } catch { hist = []; lessonsPartial = true; }
   const seen = new Set();
   const jobs = [];
   for (const j of [...live, ...hist]) {
@@ -272,10 +289,10 @@ function collectLessons({ cwd, sinceMs, untilMs, deps } = {}) {
       if (lines.length) lessons.push({ slug, jobId, source: 'dev-lead', lines });
     }
   }
-  return { lessons, range };
+  return lessonsPartial ? { lessons, range, lessonsPartial: true } : { lessons, range };
 }
 
 module.exports = {
-  listProjectTranscripts, collectLessons, readHistorySince, parseLessonsBlock, inWindow,
+  listProjectTranscripts, collectLessons, readHistorySince, HISTORY_SLACK_ROWS, parseLessonsBlock, inWindow,
   MAX_TRANSCRIPTS, MAX_LESSON_LINES, MAX_LESSON_CHARS,
 };

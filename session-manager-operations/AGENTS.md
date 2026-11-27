@@ -27,7 +27,7 @@ Epic lifecycle: [`prompt-sessions/README.md#lifecycle`](prompt-sessions/README.m
 | `HUMAN_LEARN` | not owned | tracked | knowledge-base pages | keep | [link](HUMAN_LEARN/README.md) |
 | `logs` | OWNERS → logs | runtime | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | tracked | free Field Manual source | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
-| `md-network` | not owned | tracked | human `steering.md`; read-only for code | keep | — |
+| `md-network` | not owned | tracked | human `steering.md`; read-only for code | keep | none |
 | `memory-clusters` | OWNERS → memory-clusters | runtime | memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
 | `plan-records` | OWNERS → scheduler | runtime | validator + ship/deploy records, `<epic-id>/<slug>.md` | `planRecordsDays` after Epic completes (default 14d) | [link](plan-records/README.md) |
 | `project-brief` | OWNERS → project-home | tracked | synthesized per-project Brief | keep | [link](project-brief/README.md) |

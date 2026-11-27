@@ -7517,7 +7517,9 @@ function readRunOutcomeSidecars(runDir, slug) {
  */
 const INVESTIGATION_LAUNCH_KEY = 'investigation';
 
-async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) {
+function spawnInvestigation(failedJob, runDir, opts) { return trackInFlight(spawnInvestigationUntracked(failedJob, runDir, opts)); }
+
+async function spawnInvestigationUntracked(failedJob, runDir, { deadChild = null } = {}) {
   // Auto-dispatch hold first — before anything below can spawn a process
   // (probeClaudeVersion included). A held needs_review row stays eligible for
   // the periodic auto-fix pass; a plain 'failed' row (never a
@@ -8563,7 +8565,28 @@ function auditPreflightHold(slug, command, result, hold, extra = {}) {
   } catch { /* audit must not break dispatch */ }
 }
 
-async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, siblingJobs = null) {
+// In-flight launch tracker: every spawnJob / spawnResumeRecovery / spawnInvestigation
+// run is registered here until it settles, so whenIdle() is a deterministic
+// "nothing this module launched is still running" signal (no polling, no clock).
+const inFlightLaunches = new Set();
+function trackInFlight(promise) {
+  inFlightLaunches.add(promise);
+  const done = () => { inFlightLaunches.delete(promise); };
+  promise.then(done, done);
+  return promise;
+}
+
+/** Resolves once every tracked launch has settled, including launches that a
+ *  settling launch's own finally-tick started. Never rejects. */
+async function whenIdle() {
+  while (inFlightLaunches.size > 0) {
+    await Promise.allSettled([...inFlightLaunches]);
+  }
+}
+
+function spawnJob(...args) { return trackInFlight(spawnJobUntracked(...args)); }
+
+async function spawnJobUntracked(job, runId, runDir, defaultCwd, resumeTarget = null, siblingJobs = null) {
   // PRD 1408: the queue rows in scope at dispatch (tickQueue's own
   // state.jobs, threaded straight down — never re-read here or inside
   // executeJob) decide whether this job's own finish protocol still needs to
@@ -10352,7 +10375,9 @@ async function reclaimTerminalJobOrphansThrottled(state) {
  * own dispatch mutate is what stamps resumeRecoveryAttempted, atomically
  * with the 'running' transition).
  */
-async function spawnResumeRecovery(job, resumeTarget) {
+function spawnResumeRecovery(job, resumeTarget) { return trackInFlight(spawnResumeRecoveryUntracked(job, resumeTarget)); }
+
+async function spawnResumeRecoveryUntracked(job, resumeTarget) {
   // No queue rows in scope here (unlike tickQueue's own dispatch loop) — read
   // once, before delegating to spawnJob, so hasDownstreamValidator still
   // never runs inside executeJob itself. Its config also feeds the hold below.
@@ -15838,6 +15863,7 @@ module.exports = {
   driveUpgradeDrain,
   clearStaleDrainAtBoot,
   stop,
+  whenIdle,
   runDueJobs,
   pollLoop,
   maybeLaunchWhenAvailable,

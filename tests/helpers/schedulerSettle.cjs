@@ -17,8 +17,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const STEPS = 400;
-const STEP_MS = 25;
 const PRDS_REL = ['session-manager-operations', 'scheduler', 'epics', 'fixture-epic', 'prds'];
 const QUEUE_REL = ['session-manager-operations', 'scheduler', 'state', 'queue.json'];
 
@@ -31,13 +29,11 @@ async function settleScheduler({ scheduler, holdGate, projectsDir }) {
   // A gate that holds everything, so the flush tick below cannot launch a leftover row.
   scheduler._setLoadGateForTests(holdGate);
 
-  // spawnJob's finally releases the slot and calls tickQueue() in one synchronous
-  // block, so at 0 that tick is already on the chain.
-  for (let i = 0; i < STEPS && sessionSlots.inUse() > 0; i += 1) {
-    await new Promise((r) => setTimeout(r, STEP_MS));
-  }
+  // Deterministic: resolves when every launch the scheduler started has settled
+  // (spawnJob's finally releases its slot and ticks again; whenIdle loops until none remain).
+  await scheduler.whenIdle();
   if (sessionSlots.inUse() > 0) {
-    throw new Error(`settleScheduler: sessionSlots.inUse()=${sessionSlots.inUse()} still in use after ${STEPS * STEP_MS}ms`);
+    throw new Error(`settleScheduler: sessionSlots.inUse()=${sessionSlots.inUse()} after scheduler.whenIdle()`);
   }
 
   await scheduler.tickQueue();

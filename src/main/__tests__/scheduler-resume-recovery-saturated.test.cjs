@@ -98,18 +98,13 @@ beforeAll(() => {
   ` });
 });
 
-// Root cause: the stub `claude` is a real node child. Under a loaded full-suite
-// run its startup alone can exceed settleScheduler's fixed 10 s (400 x 25 ms) slot-drain
-// wait AND vitest's default 10 s hook timeout. Drain the slots here against a generous
-// deadline first (no assertion depends on it), so settleScheduler sees 0 in use.
+// Observed root cause (4917): under a loaded suite the slot holders were in-flight
+// spawnJob runs (slot held, pid still null) whose stub `claude` node child took 7-14 s
+// to start. settleScheduler awaits scheduler.whenIdle() — settle of those runs — so
+// no wall-clock poll or extended hook timeout is needed.
 afterEach(async () => {
-  const sessionSlots = require('../lib/scheduler/sessionSlots.cjs');
-  const deadline = Date.now() + 80_000;
-  while (sessionSlots.inUse() > 0 && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 25));
-  }
   await settleScheduler({ scheduler, holdGate, projectsDir: path.join(tmpHome, 'Projects') });
-}, 120_000);
+});
 
 afterAll(async () => {
   await new Promise((r) => setTimeout(r, 500));

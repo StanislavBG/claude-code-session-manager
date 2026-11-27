@@ -218,23 +218,40 @@ function startedByOf(raw) {
   return r.success ? r.data : null;
 }
 
-/** fixes[] ({ prd, missKind }) from this Epic's PRD files (prds/ and prds-archived/); [] on any failure. */
+const MAX_FIX_FILES = 2000;
+/** abs path -> { mtimeMs, size, fixes } — a repeat read re-parses only files whose stat changed. */
+const fixesCache = new Map();
+
+/** fixes[] ({ prd, missKind }) from this Epic's PRD files (prds/ and prds-archived/); [] on any failure. At most MAX_FIX_FILES files per call (the newest by name are kept). */
 function readEpicFixes(cwd, epicId) {
   const out = [];
   try {
     if (!isSafeEpicId(epicId)) return out;
     const base = path.join(opsPath(cwd, 'scheduler', 'epics'), epicId);
+    let files = [];
     for (const sub of ['prds', 'prds-archived']) {
       let names;
       try { names = fs.readdirSync(path.join(base, sub)); } catch { continue; }
-      for (const n of names.filter((x) => x.endsWith('.md')).sort()) {
-        try {
-          const { fm } = splitFrontmatter(fs.readFileSync(path.join(base, sub, n), 'utf8'));
-          const list = typeof fm.fixes === 'string' ? parseFixes(fm.fixes) : null;
-          for (const f of list || []) out.push({ prd: f.prd, missKind: f.missKind });
-        } catch { /* skip unreadable PRD */ }
-      }
+      for (const n of names.filter((x) => x.endsWith('.md')).sort()) files.push(path.join(base, sub, n));
     }
+    if (files.length > MAX_FIX_FILES) files = files.slice(-MAX_FIX_FILES);
+    const seen = new Set(files);
+    for (const file of files) {
+      try {
+        const st = fs.statSync(file);
+        let hit = fixesCache.get(file);
+        if (!hit || hit.mtimeMs !== st.mtimeMs || hit.size !== st.size) {
+          const { fm } = splitFrontmatter(fs.readFileSync(file, 'utf8'));
+          const list = typeof fm.fixes === 'string' ? parseFixes(fm.fixes) : null;
+          hit = { mtimeMs: st.mtimeMs, size: st.size, fixes: (list || []).map((f) => ({ prd: f.prd, missKind: f.missKind })) };
+          fixesCache.set(file, hit);
+        }
+        for (const f of hit.fixes) out.push({ prd: f.prd, missKind: f.missKind });
+      } catch { fixesCache.delete(file); /* skip unreadable or deleted PRD */ }
+    }
+    // Drop deleted/out-of-scope files of this Epic from the cache.
+    const prefix = base + path.sep;
+    for (const k of fixesCache.keys()) if (k.startsWith(prefix) && !seen.has(k)) fixesCache.delete(k);
   } catch { /* none */ }
   return out;
 }
@@ -458,4 +475,4 @@ async function listOpenEpicRecords(cwd, opts = {}) {
   }
 }
 
-module.exports = { readVerdictFiles, listOpenEpicRecords, getEpicRecord, findEpicProject };
+module.exports = { readEpicFixes, readVerdictFiles, listOpenEpicRecords, getEpicRecord, findEpicProject };

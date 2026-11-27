@@ -8,12 +8,12 @@
 
 'use strict';
 
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { listOpenEpicRecords, getEpicRecord, findEpicProject } = require('../epicOutsideRead.cjs');
+const { listOpenEpicRecords, getEpicRecord, findEpicProject, readEpicFixes } = require('../epicOutsideRead.cjs');
 const { recordExternalRef } = require('../externalRefIndex.cjs');
 
 const tmpDirs = [];
@@ -574,4 +574,35 @@ test('planReviewStats: unreviewed plans and escapes from verdict files + PRD fix
   expect(rec.planReviewStats.unreviewed.plans).toBe(1);
   expect(rec.planReviewStats.unreviewed.escapes).toBe(1);
   expect(rec.planReviewStats.unreviewed.refuted).toBe(1);
+});
+
+test('readEpicFixes: caches per file by stat, re-reads a touched file, drops deleted, caps at 2000', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const prds = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'e-cache', 'prds');
+  fs.mkdirSync(prds, { recursive: true });
+  const fx = (n) => JSON.stringify([{ prd: `${n}-a`, missKind: 'spec-gap', reason: 'gap' }]);
+  const a = path.join(prds, '2-fix.md');
+  const b = path.join(prds, '3-fix.md');
+  fs.writeFileSync(a, `---\nfixes: ${fx(1)}\n---\n\n# Goal\n`);
+  fs.writeFileSync(b, `---\nfixes: ${fx(2)}\n---\n\n# Goal\n`);
+  const spy = vi.spyOn(fs, 'readFileSync');
+  try {
+    const prdReads = () => spy.mock.calls.filter((c) => String(c[0]).startsWith(prds)).length;
+    expect(readEpicFixes(cwd, 'e-cache')).toHaveLength(2);
+    expect(prdReads()).toBe(2);
+    expect(readEpicFixes(cwd, 'e-cache')).toHaveLength(2);
+    expect(prdReads()).toBe(2);
+    fs.writeFileSync(a, `---\nfixes: ${fx(9)}\n---\n\n# Goal\n\nmore\n`);
+    const r = readEpicFixes(cwd, 'e-cache');
+    expect(prdReads()).toBe(3);
+    expect(r.map((f) => f.prd)).toEqual(['9-a', '2-a']);
+    fs.rmSync(b);
+    expect(readEpicFixes(cwd, 'e-cache').map((f) => f.prd)).toEqual(['9-a']);
+    for (let i = 0; i < 2100; i++) fs.writeFileSync(path.join(prds, `z${String(i).padStart(5, '0')}.md`), '# x\n');
+    spy.mockClear();
+    expect(() => readEpicFixes(cwd, 'e-cache')).not.toThrow();
+    expect(prdReads()).toBeLessThanOrEqual(2000);
+  } finally {
+    spy.mockRestore();
+  }
 });

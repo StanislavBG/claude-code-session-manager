@@ -1,10 +1,10 @@
 import { test, expect, chromium, type Browser, type Page } from '@playwright/test'
 import { build } from 'esbuild'
-import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { outDirFor, type ShotsSpec } from './shotsOutDir.ts'
+import { ensureWebCss } from './webCss.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -106,10 +106,7 @@ let css = ''
 let bundle = ''
 
 test.beforeAll(async () => {
-  if (!fs.existsSync(path.join(root, 'dist-web/app.css'))) {
-    execSync('npx vite build --config vite.web.config.ts', { cwd: root, stdio: 'inherit' })
-  }
-  css = fs.readFileSync(path.join(root, 'dist-web/app.css'), 'utf8')
+  css = ensureWebCss(root)
   bundle = (await build({
     entryPoints: [path.join(__dirname, 'agent-sheet-entry.tsx')],
     bundle: true, write: false, format: 'iife', jsx: 'automatic', loader: { '.css': 'empty' }, logLevel: 'error',

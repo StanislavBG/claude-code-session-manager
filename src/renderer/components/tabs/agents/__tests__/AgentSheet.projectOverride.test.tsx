@@ -21,12 +21,12 @@ type Detail = NonNullable<AgentPersona['overrideDetails']>[number]
 const detail = (cwd: string, fields: string[], values: Record<string, string>, bodyOverridden = false): Detail => ({
   project: cwd.split('/').filter(Boolean).pop()!, cwd, fields, values, bodyOverridden, issue: null,
 })
-function persona(details: Detail[] = []): AgentPersona {
+function persona(details: Detail[] = [], name = 'dev-lead', loadout = 'equipped'): AgentPersona {
   return {
-    name: 'dev-lead', description: 'd', tools: ['Read', 'Grep'], model: 'sonnet', effort: null, color: null,
+    name, description: 'd', tools: ['Read', 'Grep'], model: 'sonnet', effort: null, color: null,
     tags: [], projects: [], action: null, actionLabel: null, path: '/x/dev-lead.md', body: 'b',
     overridingProjects: details.map((d) => d.project), overrideDetails: details,
-    ...({ loadout: 'equipped' } as object),
+    ...({ loadout } as object),
   } as AgentPersona
 }
 
@@ -36,12 +36,12 @@ let savePersona: ReturnType<typeof vi.fn>
 let removeOverride: ReturnType<typeof vi.fn>
 const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve() }
 
-async function mount(details: Detail[], cwds: string[]) {
+async function mount(details: Detail[], cwds: string[], extra: AgentPersona[] = []) {
   savePersona = vi.fn().mockResolvedValue({ ok: true, path: '' })
   removeOverride = vi.fn().mockResolvedValue({ ok: true })
   ;(window as unknown as { api: unknown }).api = {
     agents: {
-      listPersonas: vi.fn().mockResolvedValue([persona(details)]),
+      listPersonas: vi.fn().mockResolvedValue([persona(details), ...extra]),
       armory: vi.fn().mockResolvedValue({ builtins: ['Read', 'Grep', 'Edit'].map((id) => ({ id, label: id, badges: [] })), bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], errors: [] }),
       savePersona, deletePersona: vi.fn(), removeOverride, onChanged: vi.fn(() => () => {}),
     },
@@ -63,6 +63,7 @@ async function mount(details: Detail[], cwds: string[]) {
 
 const q = (el: HTMLElement, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
 const click = async (b: HTMLElement) => { await act(async () => { b.dispatchEvent(new MouseEvent('click', { bubbles: true })); await flush() }) }
+const row = (el: HTMLElement, name: string) => Array.from(el.querySelectorAll('[data-testid="config-list-row"]')).find((r) => r.textContent?.includes(name)) as HTMLElement
 const goInProject = async (el: HTMLElement) => {
   const b = Array.from(el.querySelectorAll('[data-testid="agent-scope-switch"] button')).find((x) => x.textContent === 'In project') as HTMLElement
   await click(b)
@@ -194,5 +195,17 @@ describe('AgentSheet In project mode', () => {
     await choose(el, '/work/alpha')
     await pickModel(el, 'opus')
     expect(error).toHaveBeenCalledWith('project not open')
+  })
+
+  it('the Armory drawer collapses Constraints into the centre column and resets when the persona changes to an Undecided one', async () => {
+    const el = await mount([], [], [persona([], 'zed-new', 'undecided')])
+    const centre = () => q(el, 'agent-gear-slot')?.parentElement
+    await click(row(el, 'dev-lead'))
+    await click(q(el, 'agent-open-armory')!)
+    const slot = q(el, 'agent-constraints-slot')!
+    expect(slot.dataset.collapsed).toBe('true')
+    expect(slot.parentElement).toBe(centre())
+    await click(row(el, 'zed-new'))
+    expect(q(el, 'agent-constraints-slot')!.dataset.collapsed).toBeUndefined()
   })
 })

@@ -254,6 +254,8 @@ export function AgentSheet({
   const projectView: Draft = { ...globalDraft, ...overlay }
   const view = inProject && selected ? projectView : obj
   const [armoryOpen, setArmoryOpen] = useState(false)
+  const personaKey = saved?.name ?? null
+  useEffect(() => { setArmoryOpen(false) }, [personaKey])
   const diffs = inProject && selected ? overlayDiff(globalDraft, overlay, selected.name) : []
   const otherOverrides = inProject && selected ? (saved?.overrideDetails ?? []).filter((d) => d.cwd !== selected.cwd && projects.some((p) => p.cwd === d.cwd)) : []
   const globalOthers = inProject && selected ? projects.filter((p) => p.cwd !== selected.cwd && !otherOverrides.some((d) => d.cwd === p.cwd)).length : 0
@@ -540,6 +542,8 @@ export function AgentSheet({
               ? <LoadoutFirstRun obj={obj} set={set} picking={picking} setPicking={setPicking} onDismiss={() => setChoiceDismissed(true)} />
               : <GearPanel obj={view} set={editing} onOpenChange={setArmoryOpen} {...(inProject && selected ? { baseline: globalDraft, onRestore: reset, projectName: selected.name } : {})} />}
 
+            {armoryOpen && <ConstraintsPanel obj={view} set={editing} collapsed />}
+
             <section data-testid="agent-personality" data-busy={busy ? 'true' : undefined} className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
               <div className="flex items-center gap-2">
                 <span className="flex-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">
@@ -577,7 +581,7 @@ export function AgentSheet({
                 ))}
               </section>
             )}
-            <ConstraintsPanel obj={view} set={editing} collapsed={armoryOpen} />
+            {!armoryOpen && <ConstraintsPanel obj={view} set={editing} />}
             {inProject && selected && (
               <section data-testid="agent-other-projects" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Other open projects</div>

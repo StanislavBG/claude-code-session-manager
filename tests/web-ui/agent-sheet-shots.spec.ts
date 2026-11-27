@@ -110,8 +110,8 @@ const FRAMES: Frame[] = [
     if (!/PROJECT OVERLAY.*\/Self\/\.claude\/agents\/builder\.md/.test((await page.getByTestId('agent-header-path').textContent()) ?? '')) throw new Error('header path must be the overlay path')
     if (await page.getByTestId('agent-details').count()) throw new Error('no empty DETAILS card in project mode')
     await page.getByTestId('agent-other-projects').waitFor()
-    // The changed card must not claim 'Same as global' while a gear key differs.
-    if (await page.getByTestId('agent-changed-card').getByText('Same as global.').count() && await page.locator('[data-testid^="agent-overridden-"]').count() === 0 && await page.getByTestId('agent-overridden-mcpServers').count()) throw new Error('changed card contradicts the gear diff')
+    // The override shot must show the overridden gear key (a guard that can never throw is no guard).
+    if (await page.getByTestId('agent-overridden-mcpServers').count() === 0) throw new Error('project-override shot shows no agent-overridden-mcpServers marker')
   } },
   // Persona upgrade: the roster card's marker, then the sheet's notice + the list row badge with the diff open.
   { name: 'persona-upgrade-roster', testid: 'agent-roster', reference: '(none: no design mock)', setUp: async (page) => { await expect(page.getByTestId('agent-roster-upgrade-architect')).toBeVisible() } },

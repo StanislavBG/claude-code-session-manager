@@ -82,6 +82,7 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName, onOpenCh
   const [armory, setArmory] = useState<Armory | null>(null)
   const [open, setOpen] = useState(false)
   useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
+  useEffect(() => () => { onOpenChange?.(false) }, [onOpenChange])
   const [powersOf, setPowersOf] = useState<string | null>(null)
   const [dragging, setDragging] = useState<{ kind: ArmoryKind; id: string } | null>(null)
 

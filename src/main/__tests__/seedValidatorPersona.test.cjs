@@ -152,7 +152,8 @@ test('the seeded validator body asks for a self-review only and lists every find
   const { body } = splitFrontmatter(raw);
   const trimmed = body.trim();
 
-  expect(raw.length).toBeLessThan(6000);
+  // f29a2a50 added the Lessons block; its sha256 is in shippedPersonaSeeds, so >6000 is allowed.
+  expect(raw.length).toBeLessThan(7000);
   expect(trimmed).not.toContain('/code-review');
   expect(trimmed).not.toContain('/security-review');
   expect(trimmed).toContain('Self-review it for correctness, unsafe input handling, secrets, path traversal, and duplication of an existing helper.');
@@ -167,8 +168,8 @@ test('the seeded validator reads full commit messages and turns Follow-up traile
   const raw = fs.readFileSync(seedSrc('validator'), 'utf8');
   const { fm, body } = splitFrontmatter(raw);
 
-  expect(raw.length).toBeLessThanOrEqual(6000);
-  expect(fm.seedVersion).toBe('14');
+  expect(raw.length).toBeLessThanOrEqual(7000);
+  expect(fm.seedVersion).toBe('15');
   expect(body).toContain("git log --format='%h %B' <base>..HEAD");
   expect(body).not.toContain('git log --oneline');
   expect(body).toContain('Every `Follow-up:` commit trailer is a Minor finding (missKind `other`) on its PRD; quote it.');
@@ -180,6 +181,6 @@ test('the seeded dev-lead puts follow-ups in a Follow-up commit trailer', () => 
   const { fm, body } = splitFrontmatter(raw);
 
   expect(raw.length).toBeLessThanOrEqual(6000);
-  expect(fm.seedVersion).toBe('9');
+  expect(fm.seedVersion).toBe('10');
   expect(body).toContain('A follow-up goes in a `Follow-up: <one line>` commit trailer, never only in this report.');
 });

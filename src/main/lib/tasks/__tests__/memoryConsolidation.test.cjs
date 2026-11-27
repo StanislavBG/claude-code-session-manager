@@ -316,22 +316,22 @@ test.each(['usage_held', 'slot_timeout'])('a week whose only Task has status %s 
   expect(h.listCalls[0].o.limit).toBeGreaterThan(1);
 });
 
-test('default steeringPath: real path when the file exists, null when missing or ephemeral; never throws', () => {
+test('default steeringPath: exact path when the file exists, null when missing or the root is refused; never throws', () => {
   const { steeringPath } = mc.defaultDeps();
-  // Ephemeral (tmpdir) root: opsPath refuses -> null, no throw.
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-mc-steer-'));
   try {
     fs.mkdirSync(path.join(tmpRoot, '.git'));
     const dir = path.join(tmpRoot, 'session-manager-operations', 'md-network');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'steering.md'), 'x');
-    let r;
-    expect(() => { r = steeringPath(tmpRoot); }).not.toThrow();
-    expect(r === null || r === path.join(dir, 'steering.md')).toBe(true);
+    // opsPath accepts this root (only os.tmpdir() itself and linked worktrees are refused).
+    expect(steeringPath(tmpRoot)).toBe(path.join(dir, 'steering.md'));
     fs.rmSync(path.join(dir, 'steering.md'));
     expect(() => steeringPath(tmpRoot)).not.toThrow();
     expect(steeringPath(tmpRoot)).toBeNull();
   } finally { fs.rmSync(tmpRoot, { recursive: true, force: true }); }
+  // Refused roots (relative path, os.tmpdir() itself) -> null, no throw.
+  expect(steeringPath(os.tmpdir())).toBeNull();
   expect(() => steeringPath('relative/garbage')).not.toThrow();
   expect(steeringPath('relative/garbage')).toBeNull();
 });

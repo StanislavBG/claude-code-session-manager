@@ -24,6 +24,8 @@ interface TabSpec {
   label: string
   /** Optional: select a row first so the shot matches the design render's selection. */
   select?: string
+  /** Agents only: the tab lands on the roster, so open this agent first (the folder card renders only once one is open). */
+  openAgent?: string
   /** The left-column file card and its eyebrow. */
   card: string
   eyebrow: string
@@ -122,7 +124,7 @@ const TABS: Record<Face, { search: string; eyebrow: string; scope: string; count
         },
       },
       {
-        tab: 'agents', label: 'Agents', card: 'config-file-card', eyebrow: 'AGENTS FOLDER',
+        tab: 'agents', label: 'Agents', openAgent: 'architect', card: 'config-file-card', eyebrow: 'AGENTS FOLDER',
         header: 'config-detail-header', headerText: ['AGENT · USER · ~/.claude/agents/architect.md', 'architect'],
         extra: async (page, panel) => {
           await expect(rows(page)).toHaveCount(9)
@@ -133,21 +135,17 @@ const TABS: Record<Face, { search: string; eyebrow: string; scope: string; count
           expect(await runtime.locator('select').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')?.toUpperCase()))).toEqual(['MODEL', 'EFFORT', 'RUNS ON'])
           // Rendered label text (the labels are CSS-uppercased), each sitting above its select.
           expect(await runtime.locator('label').evaluateAll((els) => els.map((e) => (e.firstElementChild as HTMLElement).innerText.trim()))).toEqual(['MODEL', 'EFFORT', 'RUNS ON'])
-          // The prompt editor follows the config card, inside the 1040px frame (finding 25).
-          const card = await panel.getByTestId('agent-runtime-card').boundingBox()
-          const editor = await panel.getByTestId('agent-detail-editor').boundingBox()
-          expect(editor!.y).toBeGreaterThanOrEqual(card!.y + card!.height)
-          expect(editor!.y - (card!.y + card!.height)).toBeLessThan(40)
-          expect(editor!.y).toBeLessThan(VIEWPORT.height - 100)
-          expect(await panel.getByTestId('agent-runtime-card').evaluate((el) => el.nextElementSibling?.getAttribute('data-testid'))).toBe('agent-detail-editor')
-          // The editor fills the rest of the pane: its status bar sits in the first view, no scroll (wave-5 Minor 1).
-          expect(await page.getByTestId('config-workbench-detail').evaluate((el) => el.scrollTop)).toBe(0)
-          const status = await panel.getByTestId('editor-status-bar').boundingBox()
-          expect(status!.y + status!.height).toBeLessThanOrEqual(VIEWPORT.height)
-          // …and reaches the bottom of the pane: an editor shrunk back to its floor fails (wave-6 Minor 1).
-          const detail = await page.getByTestId('config-workbench-detail').boundingBox()
-          expect(detail!.y + detail!.height - (status!.y + status!.height)).toBeLessThanOrEqual(48)
+          // The persona prompt editor is a full-screen dialog opened from the sheet (agent-open-editor).
+          await expect(panel.getByTestId('agent-detail-editor')).toHaveCount(0)
+          await panel.getByTestId('agent-open-editor').click()
+          const editor = panel.getByTestId('agent-detail-editor')
+          await expect(editor).toBeVisible()
+          await expect(editor.getByTestId('tiptap-editor')).toContainText('You are the architect')
           await editorChrome(panel)
+          const status = await editor.getByTestId('editor-status-bar').boundingBox()
+          expect(status!.y + status!.height).toBeLessThanOrEqual(VIEWPORT.height)
+          await panel.getByTestId('agent-editor-close').click()
+          await expect(editor).toHaveCount(0)
         },
       },
     ],
@@ -230,18 +228,19 @@ const TABS: Record<Face, { search: string; eyebrow: string; scope: string; count
  * bottom. Runs after every PNG is written and writes none itself.
  */
 async function shortBodyFills(page: Page) {
-  await rows(page).filter({ hasText: 'builder' }).filter({ hasNotText: 'demo-video-builder' }).first().click()
+  // Coming back to the Agents tab lands on the roster again: open builder from its card.
+  await page.locator('[data-agent-row="builder"]').click()
   const header = page.getByTestId('config-detail-header').first()
   await expect(header).toContainText('~/.claude/agents/builder.md')
-  await expect(page.getByTestId('tiptap-editor')).toContainText('You are builder.')
-  const detail = page.getByTestId('config-workbench-detail')
-  const bottom = await detail.evaluate((el) => {
-    const r = el.getBoundingClientRect()
-    return r.top + el.clientTop + el.clientHeight
-  })
-  const editor = await page.getByTestId('agent-detail-editor').boundingBox()
-  expect(bottom - (editor!.y + editor!.height)).toBeGreaterThanOrEqual(0)
-  expect(bottom - (editor!.y + editor!.height)).toBeLessThanOrEqual(48)
+  await page.getByTestId('agent-open-editor').click()
+  const editor = page.getByTestId('agent-detail-editor')
+  await expect(editor).toBeVisible()
+  await expect(editor.getByTestId('tiptap-editor')).toContainText('You are builder.')
+  // Full-screen dialog: it fills the viewport whatever the prompt length.
+  const box = await editor.boundingBox()
+  expect(box!.height).toBeGreaterThanOrEqual(VIEWPORT.height - 1)
+  await page.getByTestId('agent-editor-close').click()
+  await expect(editor).toHaveCount(0)
 }
 
 /**
@@ -252,19 +251,14 @@ async function shortBodyFills(page: Page) {
  */
 async function shortPane(page: Page) {
   await page.setViewportSize({ width: VIEWPORT.width, height: 700 })
-  const detail = page.getByTestId('config-workbench-detail')
-  await expect.poll(() => detail.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
-  const editor = await page.getByTestId('agent-detail-editor').boundingBox()
-  expect(editor!.height).toBeGreaterThanOrEqual(320)
-  await detail.evaluate((el) => { el.scrollTop = el.scrollHeight })
-  await expect.poll(() => detail.evaluate((el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 1)).toBe(true)
-  const box = await detail.evaluate((el) => {
-    const r = el.getBoundingClientRect()
-    return { top: r.top + el.clientTop, bottom: r.top + el.clientTop + el.clientHeight }
-  })
-  const status = await page.getByTestId('editor-status-bar').boundingBox()
-  expect(status!.y).toBeGreaterThanOrEqual(box.top)
-  expect(status!.y + status!.height).toBeLessThanOrEqual(box.bottom)
+  // The prompt editor is a full-screen dialog: at 700px it still fits and its status bar stays on screen.
+  await page.getByTestId('agent-open-editor').click()
+  const editor = page.getByTestId('agent-detail-editor')
+  await expect(editor).toBeVisible()
+  const status = await editor.getByTestId('editor-status-bar').boundingBox()
+  expect(status!.y + status!.height).toBeLessThanOrEqual(700)
+  await page.getByTestId('agent-editor-close').click()
+  await expect(editor).toHaveCount(0)
 }
 
 /**
@@ -418,6 +412,14 @@ test('Claude config screenshots: every Home and Project tab at 1592x1040', async
         if (t.select) {
           const row = page.getByTestId(t.select)
           await (await row.count() ? row : page.getByTestId('skills-item').filter({ hasText: `/${t.select}` })).first().click()
+        }
+        if (t.openAgent) {
+          // Roster landing first, then open the agent and expand the list so the AGENTS FOLDER card (eyebrow) renders.
+          await expect(page.getByTestId(`${face}-claude-config-panel-${t.tab}`).getByTestId('agent-roster')).toBeVisible()
+          await page.getByTestId(`${face}-claude-config-panel-${t.tab}`).locator(`[data-agent-row="${t.openAgent}"]`).click()
+          // An opened agent shows the list as an avatar rail; expand it so the folder card + rows render.
+          const toggle = page.getByTestId('agent-list-toggle')
+          if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click()
         }
         // Band: title, and exactly this tab active.
         await expect(band.getByText('Claude config', { exact: true })).toBeVisible()

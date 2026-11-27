@@ -270,7 +270,12 @@ const api = {
     savePersona: async () => ({ ok: true, path: personas[0].path }),
     deletePersona: async () => ({ ok: true }),
     removeOverride: async () => ({ ok: true }),
+    armory: async () => ({ builtins: [], bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], environments: [], errors: [] }),
     onChanged: () => () => {},
+  },
+  toolRisk: {
+    read: async () => ({ ok: true, path: '~/.claude/tool-risk.json', marks: {}, interactive: false }),
+    write: async () => ({ ok: true }),
   },
   memory: {
     list: async () => ({ entries: memoryEntries, workspace: 'self', dir: MEM_DIR, autoMemoryEnabled: true, error: null }),

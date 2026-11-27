@@ -461,6 +461,20 @@
  },
  {
   "ns": "agents",
+  "method": "takeBundledPersona",
+  "channel": "agents:take-bundled-persona",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "agents",
+  "method": "dismissPersonaUpgrade",
+  "channel": "agents:dismiss-persona-upgrade",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "agents",
   "method": "removeOverride",
   "channel": "agents:remove-override",
   "kind": "invoke",

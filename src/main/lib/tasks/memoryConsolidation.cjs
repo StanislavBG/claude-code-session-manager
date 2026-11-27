@@ -28,6 +28,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
+const { OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 
 const PIPELINE = 'memory-consolidation';
 const MISSION_ID = 'memory-consolidation';
@@ -47,7 +48,7 @@ const READ_ONLY_TOOLS = Object.freeze(['Read', 'Grep', 'Glob', SUBAGENT_TOOL]);
 const TASK_TIMEOUT_SEC = 3600;
 const FIRST_RUN_WINDOW_MS = WEEK_MS;
 const PRIOR_RUN_LOOKBACK_MS = 90 * DAY_MS;
-const STEERING_REL = path.join('session-manager-operations', 'md-network', 'steering.md');
+const STEERING_REL = path.join(OPS_ROOT_DIR, 'md-network', 'steering.md');
 const WEEKLY_DOC = 'plugins/session-manager-dev/skills/maintaining-md-network/weekly-consolidation.md';
 
 const LESSON_LINE_MAX = 200;

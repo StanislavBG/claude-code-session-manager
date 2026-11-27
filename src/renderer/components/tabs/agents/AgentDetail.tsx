@@ -49,8 +49,17 @@ export interface Draft {
   packs?: string[]
   /** Declared sandbox environment profile (`environment:` frontmatter); absent = headless-default. */
   environment?: string
-  /** The loadout decision made in this draft (first-run choice). Absent = no decision made here; `tools` alone carries Equipped/Unbound. */
-  loadout?: 'bare' | 'equipped' | 'unbound'
+  /** Explicit loadout: seeded from the saved persona, changed only by user actions (tool edits, Bare/Unbound choices). */
+  loadout: DraftLoadout
+}
+
+export type DraftLoadout = 'undecided' | 'bare' | 'equipped' | 'unbound'
+const LOADOUTS: readonly string[] = ['undecided', 'bare', 'equipped', 'unbound']
+
+/** A draft patch with the loadout a tool edit implies: tools now empty -> 'bare', otherwise 'equipped'. An explicit patch.loadout wins. */
+export function withToolEdit(patch: Partial<Draft>): Partial<Draft> {
+  if (!patch.tools || patch.loadout) return patch
+  return { ...patch, loadout: patch.tools.length === 0 ? 'bare' : 'equipped' }
 }
 
 export function toDraft(p: AgentPersona): Draft {
@@ -65,22 +74,14 @@ export function toDraft(p: AgentPersona): Draft {
     body: p.body,
     agentCli: p.agentCli ?? 'claude',
     agentCliModel: p.agentCliModel ?? '',
+    loadout: LOADOUTS.includes(String((p as { loadout?: string }).loadout)) ? (p as { loadout: DraftLoadout }).loadout : 'undecided',
     ...gearOf(p),
   }
 }
 
-/**
- * The `loadout` a save sends. Empty tools alone is NOT Bare: an Undecided persona also drafts
- * tools [] and must stay Undecided (no `tools:` line). Bare = the Bare choice, or tools cleared
- * from a saved/new non-empty set. `savedTools` null = a new persona.
- */
-export function saveLoadout(obj: Draft, savedTools: readonly string[] | null): 'bare' | 'equipped' | 'unbound' | undefined {
-  if (obj.tools.length === 0) {
-    if (obj.loadout === 'bare') return 'bare'
-    return savedTools === null || savedTools.length > 0 ? 'bare' : undefined
-  }
-  if (!obj.loadout) return undefined
-  return obj.loadout === 'unbound' && !obj.tools.includes('*') ? 'equipped' : obj.loadout
+/** The `loadout` a save sends: the draft's explicit loadout; 'undecided' sends none (no `tools:` line is written). */
+export function saveLoadout(obj: Draft): 'bare' | 'equipped' | 'unbound' | undefined {
+  return obj.loadout === 'undecided' ? undefined : obj.loadout
 }
 
 function gearOf(p: AgentPersona): Pick<Draft, 'mcpServers' | 'packs' | 'environment'> {
@@ -88,7 +89,7 @@ function gearOf(p: AgentPersona): Pick<Draft, 'mcpServers' | 'packs' | 'environm
   return { ...(g.mcpServers ? { mcpServers: g.mcpServers } : {}), ...(g.packs ? { packs: g.packs } : {}), ...(g.environment ? { environment: g.environment } : {}) }
 }
 
-export const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '', agentCli: 'claude', agentCliModel: '' }
+export const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '', agentCli: 'claude', agentCliModel: '', loadout: 'equipped' }
 
 type OverrideDetail = NonNullable<AgentPersona['overrideDetails']>[number]
 

@@ -4,7 +4,7 @@ import { Badge } from '../ui/Badge'
 import { ConfigFileCard, ConfigListRow, ConfigListToolbar, ConfigWorkbench } from '../claudeConfig/ConfigLayout'
 import { TagLibrary } from './TagLibrary'
 import { AgentRoster, loadoutOf, loadoutSummary, LOADOUT_DOT } from './agents/AgentRoster'
-import { BLANK_DRAFT, overrideParts, saveLoadout, toDraft, type Draft, type OpenProject, type OverlayKeys } from './agents/AgentDetail'
+import { BLANK_DRAFT, overrideParts, saveLoadout, toDraft, withToolEdit, type Draft, type OpenProject, type OverlayKeys } from './agents/AgentDetail'
 import { AgentSheet, AgentWorkbench, useAgentsListExpanded } from './agents/AgentSheet'
 import { PersonaUpgradeNotice } from './agents/PersonaUpgradeNotice'
 import { toast } from '../../state/toast'
@@ -198,7 +198,7 @@ function AgentLibraryComponent() {
     setDraft(null); setCreating(false); setConfirmDelete(false); setRowConfirmDelete(null)
     setSelectedName(name)
   }
-  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...(d ?? (saved ? toDraft(saved) : BLANK_DRAFT)), ...patch }))
+  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...(d ?? (saved ? toDraft(saved) : BLANK_DRAFT)), ...withToolEdit(patch) }))
   const create = () => { setDraft({ ...BLANK_DRAFT }); setCreating(true); setConfirmDelete(false) }
   const duplicate = () => {
     if (!obj) return
@@ -236,7 +236,7 @@ function AgentLibraryComponent() {
         ...(obj.mcpServers ? { mcpServers: obj.mcpServers } : {}),
         ...(obj.packs ? { packs: obj.packs } : {}),
         ...(obj.environment ? { environment: obj.environment } : {}),
-        ...(saveLoadout(obj, existing?.tools ?? null) ? { loadout: saveLoadout(obj, existing?.tools ?? null) } : {}),
+        ...(saveLoadout(obj) ? { loadout: saveLoadout(obj) } : {}),
         ...(obj.agentCli !== 'claude' && obj.agentCliModel.trim() ? { agentCliModel: obj.agentCliModel.trim() } : {}),
       }
       // savePersona rewrites the whole file, so an existing persona is the base: title and the

@@ -1,24 +1,29 @@
 import { describe, it, expect } from 'vitest'
-import { saveLoadout, toDraft } from '../AgentDetail'
+import { saveLoadout, toDraft, withToolEdit, type Draft } from '../AgentDetail'
 import type { AgentPersona } from '../../../../../preload/api'
 
-const persona = (tools: string[]) => ({ name: 'a', tools, tags: [], body: '' } as unknown as AgentPersona)
+const persona = (tools: string[], loadout?: string) => ({ name: 'a', tools, tags: [], body: '', ...(loadout ? { loadout } : {}) } as unknown as AgentPersona)
+const edit = (d: Draft, patch: Partial<Draft>): Draft => ({ ...d, ...withToolEdit(patch) })
 
 describe('saveLoadout', () => {
-  it('undecided persona with a description edit sends no loadout', () => {
-    const d = { ...toDraft(persona([])), description: 'x' }
-    expect(saveLoadout(d, [])).toBeUndefined()
+  it('saved Bare + description edit sends bare', () => {
+    const d = { ...toDraft(persona([], 'bare')), description: 'x' }
+    expect(saveLoadout(d)).toBe('bare')
   })
-  it('clearing the last tool of an Equipped persona sends bare', () => {
-    const d = { ...toDraft(persona(['Read'])), tools: [] }
-    expect(saveLoadout(d, ['Read'])).toBe('bare')
+  it('saved Undecided + model edit sends no loadout and no tools', () => {
+    const d = { ...toDraft(persona([])), model: 'opus' }
+    expect(saveLoadout(d)).toBeUndefined()
+    expect(d.tools).toEqual([])
   })
-  it('the Bare choice sends bare', () => {
-    const d = { ...toDraft(persona([])), loadout: 'bare' as const }
-    expect(saveLoadout(d, [])).toBe('bare')
+  it('Undecided add-then-clear ends bare', () => {
+    const d1 = edit(toDraft(persona([])), { tools: ['Read'] })
+    expect(saveLoadout(d1)).toBe('equipped')
+    expect(saveLoadout(edit(d1, { tools: [] }))).toBe('bare')
   })
-  it('equipped / unbound choices pass through', () => {
-    expect(saveLoadout({ ...toDraft(persona([])), loadout: 'equipped', tools: ['Read'] }, [])).toBe('equipped')
-    expect(saveLoadout({ ...toDraft(persona([])), loadout: 'unbound', tools: ['*'] }, [])).toBe('unbound')
+  it('Equipped clear-all sends bare', () => {
+    expect(saveLoadout(edit(toDraft(persona(['Read'], 'equipped')), { tools: [] }))).toBe('bare')
+  })
+  it('Unbound choice sends unbound', () => {
+    expect(saveLoadout(edit(toDraft(persona([])), { loadout: 'unbound', tools: ['*'] }))).toBe('unbound')
   })
 })

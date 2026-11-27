@@ -20,7 +20,7 @@ async function mount() {
   document.body.appendChild(container)
   root = createRoot(container)
   const Host = () => {
-    const [d, setD] = useState<Draft>({ ...BLANK_DRAFT, name: 'builder', tools: [] })
+    const [d, setD] = useState<Draft>({ ...BLANK_DRAFT, name: 'builder', tools: [], loadout: 'undecided' })
     const [picking, setPicking] = useState(false)
     const [dismissed, setDismissed] = useState(false)
     latest = d
@@ -73,7 +73,7 @@ describe('LoadoutFirstRun', () => {
     await act(async () => { q('[data-testid="agent-choose-pick"]')!.click(); await Promise.resolve() })
     expect(q('[data-testid="agent-armory"]')).toBeTruthy()
     expect(q('[data-equipped="true"]')).toBeNull()
-    expect(latest.loadout).toBeUndefined()
+    expect(latest.loadout).toBe('undecided')
     await act(async () => { (q('[data-item="Edit"] button') as HTMLElement).click() })
     expect(latest.tools).toEqual(['Edit'])
     expect(latest.loadout).toBe('equipped')

@@ -119,3 +119,20 @@ test('a global save with explicit empty mcpServers/packs writes `[]`, which list
   await savePersona({ ...base, name: 'e', model: 'opus', globalDir });
   expect(await fsp.readFile(path.join(globalDir, 'e.md'), 'utf8')).toContain('mcpServers: []');
 });
+
+test('loadout round-trips: bare stays bare, undecided stays undecided, equipped/unbound survive', async () => {
+  const globalDir = await mkTmp();
+  const list = () => listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: idPath });
+  const one = async (name, extra) => {
+    await savePersona({ ...base, name, model: 'opus', globalDir, ...extra });
+    // a description-only re-save sends the same payload the renderer would for an untouched loadout
+    await savePersona({ ...base, name, model: 'sonnet', description: 'edited', globalDir, ...extra });
+    return (await list()).find((p) => p.name === name);
+  };
+  expect((await one('b', { tools: [], loadout: 'bare' })).loadout).toBe('bare');
+  expect((await one('u', { tools: [] })).loadout).toBe('undecided');
+  expect((await one('e', { tools: ['Read'], loadout: 'equipped' })).loadout).toBe('equipped');
+  expect((await one('x', { tools: ['*'], loadout: 'unbound' })).loadout).toBe('unbound');
+  expect(await fsp.readFile(path.join(globalDir, 'b.md'), 'utf8')).toMatch(/^tools:/m);
+  expect(await fsp.readFile(path.join(globalDir, 'u.md'), 'utf8')).not.toMatch(/^tools:/m);
+});

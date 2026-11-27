@@ -15,7 +15,7 @@ const MCP = (id: string) => `mcp__${id}__`
 
 /** True once the draft carries a decision (a choice made here, or tools edited away from the saved ones). */
 export function isDecided(obj: Draft, savedTools: readonly string[]): boolean {
-  return !!obj.loadout || JSON.stringify(obj.tools) !== JSON.stringify(savedTools)
+  return obj.loadout !== 'undecided' || JSON.stringify(obj.tools) !== JSON.stringify(savedTools)
 }
 
 /** Whether the first-run choice replaces the Gear panel (AgentSheet renders one or the other). */

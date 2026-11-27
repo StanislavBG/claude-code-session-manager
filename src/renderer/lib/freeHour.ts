@@ -1,5 +1,6 @@
 // The app's single source for the free-consultation booking link (a plain link, nothing more).
-// Callers: the Feedback panel link, and the Help menu via the 'app:open-free-hour' event.
+// Callers: the Feedback panel link, the Help menu via the 'app:open-free-hour' event, and the
+// consultation strip above the footer (src/renderer/components/ConsultationNotice.tsx).
 // Desktop opens it in the system browser through shell:open; the web build (where
 // shell:open is denied) opens a new browser tab instead.
 // The README carries the same link with utm_medium=readme.

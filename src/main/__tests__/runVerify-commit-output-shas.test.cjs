@@ -62,6 +62,21 @@ test('single-quoted and --message= forms', () => {
   assert.deepEqual(run('forms', cmd, out).transcriptCommitOutputShas, ['9999999', 'aaaaaaa']);
 });
 
+test('-am / -qam short-flag clusters and attached -m"subj" values are collected', () => {
+  const out = 'cccccc1 fix: a thing here\nddddddd other sibling subject';
+  assert.deepEqual(run('am', 'git commit -am "fix: a thing here"', out).transcriptCommitOutputShas, ['cccccc1']);
+  assert.deepEqual(run('qam', 'git commit -qam "fix: a thing here"', out).transcriptCommitOutputShas, ['cccccc1']);
+  assert.deepEqual(run('attached', 'git commit -m"fix: a thing here"', out).transcriptCommitOutputShas, ['cccccc1']);
+  assert.deepEqual(run('attached-sq', "git commit -m'fix: a thing here'", out).transcriptCommitOutputShas, ['cccccc1']);
+});
+
+test('clusters not ending in m and long options containing m yield no subject', () => {
+  const out = 'eeeeee1 fix: a thing here';
+  assert.deepEqual(run('F', 'git commit -a -F "fix: a thing here"', out).transcriptCommitOutputShas, []);
+  assert.deepEqual(run('amend', 'git commit --amend "fix: a thing here"', out).transcriptCommitOutputShas, []);
+  assert.deepEqual(run('noverify', 'git commit --no-verify "fix: a thing here"', out).transcriptCommitOutputShas, []);
+});
+
 test('non-commit command is ignored', () => {
   const r = run('noncommit', 'git log --oneline -3', '[main abc1234] subj\nabc1234 subj subject');
   assert.deepEqual(r.transcriptCommitOutputShas, []);

@@ -207,7 +207,7 @@ const GIT_COMMIT_CMD_RE = /\bgit\s+(?:-C\s+\S+\s+)?commit\b/;
 const COMMIT_SUMMARY_RE = /^\[[^\]\s]+(?: \(root-commit\))? ([0-9a-f]{7,40})\]/i;
 const SHA_SUBJECT_RE = /^([0-9a-f]{7,40}) (.+)$/i;
 
-const COMMIT_MESSAGE_ARG_RE = /(?:^|\s)(?:-m|--message)(?:=|\s+)(?:"?\$\(cat <<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\s*\1\s*\)"?|"((?:[^"\\]|\\.)*)"|'([^']*)')/g;
+const COMMIT_MESSAGE_ARG_RE = /(?:^|\s)(?:-[a-zA-Z]*m|--message)(?:=|\s+|(?=["']))(?:"?\$\(cat <<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\s*\1\s*\)"?|"((?:[^"\\]|\\.)*)"|'([^']*)')/g;
 
 /**
  * First lines (trimmed) of every -m / --message argument in a git command.

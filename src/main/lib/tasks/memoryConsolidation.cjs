@@ -1,22 +1,24 @@
 'use strict';
 
 /**
- * memoryConsolidation.cjs — a weekly, per-project memory review Task.
+ * memoryConsolidation.cjs — the weekly, per-project md-network Task.
  *
  * For every project whose human switch 'Scripts may run Tasks' is ON, at most
  * once per 7 days (or earlier, at most once per 24 h, while the project's
  * MEMORY.md index is over the health.cjs memory budget) this starts ONE Task
  * through the existing Task start path — POST /admin/tasks on the app's own
  * loopback admin server (switch check, persona → pinned --model/--effort,
- * slot cap, ledger). The Task:
- *   - gets the memoryStale.cjs candidates (memoryTool.stale → scoreMemories)
- *     and the index size in its prompt,
- *   - runs a maintaining-md-network Drift check, read-only,
- *   - answers with ONE keep/move/drop table.
- * This module then posts that table as ONE "Needs you" item
- * (POST /admin/needs-you). Nothing is ever deleted or edited: the Task runs
- * with read-only tools (Read, Grep, Glob) and its prompt forbids writes; the
- * human decides from the Needs you item.
+ * slot cap, ledger). The Task runs the maintaining-md-network "Weekly
+ * consolidation" pass as persona md-network-curator (Fable, max):
+ *   - window = [previous counted run's start, now); first run: last 7 days,
+ *   - inputs = this project's transcripts and the PRD jobs' Lessons blocks in
+ *     the window (weeklyConsolidationInputs.cjs), the memoryStale candidates,
+ *     the index size and the optional steering file path,
+ *   - output = the record between the PROPOSAL markers.
+ * This module posts ONE "Needs you" item (POST /admin/needs-you) whose title
+ * carries the counts; the full record stays in the Task body. Nothing is ever
+ * deleted or edited: the Task runs read-only (Read, Grep, Glob + the subagent
+ * tool); the owner accepts or rejects each change via Review MD network.
  *
  * Cadence state is the Task ledger itself (caller.pipeline ===
  * PIPELINE) — no new ops namespace, no second writer.
@@ -25,10 +27,11 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
 const path = require('node:path');
+const fs = require('node:fs');
 
 const PIPELINE = 'memory-consolidation';
 const MISSION_ID = 'memory-consolidation';
-const AGENT = 'dev-lead';
+const AGENT = 'md-network-curator';
 const NEEDS_YOU_APP = 'memory-consolidation';
 const DAY_MS = 86_400_000;
 const WEEK_MS = 7 * DAY_MS;
@@ -39,7 +42,13 @@ const MAX_CANDIDATES = 60;
 const NEEDS_YOU_WHY_MAX = 1000;
 const PROPOSAL_START = '<<<PROPOSAL';
 const PROPOSAL_END = 'PROPOSAL>>>';
-const READ_ONLY_TOOLS = Object.freeze(['Read', 'Grep', 'Glob']);
+const SUBAGENT_TOOL = 'Agent';
+const READ_ONLY_TOOLS = Object.freeze(['Read', 'Grep', 'Glob', SUBAGENT_TOOL]);
+const TASK_TIMEOUT_SEC = 3600;
+const FIRST_RUN_WINDOW_MS = WEEK_MS;
+const PRIOR_RUN_LOOKBACK_MS = 90 * DAY_MS;
+const STEERING_REL = path.join('session-manager-operations', 'md-network', 'steering.md');
+const WEEKLY_DOC = 'plugins/session-manager-dev/skills/maintaining-md-network/weekly-consolidation.md';
 
 const NO_DELETE_RULE = 'Do NOT delete, move, rename, edit or create any file. You only propose; the human decides.';
 
@@ -48,10 +57,10 @@ const inFlight = new Set();
 
 /**
  * The Task prompt. Pure.
- * @param {{ cwd: string, memoryDir?: string|null, candidates?: Array<any>, budget?: { bytes?: number, lines?: number, maxBytes?: number, maxLines?: number, overBudget?: boolean } | null }} o
+ * @param {{ cwd: string, memoryDir?: string|null, candidates?: Array<any>, budget?: any, window?: { sinceMs: number, untilMs: number }|null, transcripts?: Array<{ path: string }>, transcriptsTruncated?: number, lessons?: Array<{ slug?: any, jobId?: any, source?: string, lines: string[] }>, steeringPath?: string|null }} o
  * @returns {string}
  */
-function buildConsolidationPrompt({ cwd, memoryDir = null, candidates = [], budget = null } = /** @type {any} */ ({})) {
+function buildConsolidationPrompt({ cwd, memoryDir = null, candidates = [], budget = null, window = null, transcripts = [], transcriptsTruncated = 0, lessons = [], steeringPath = null } = /** @type {any} */ ({})) {
   const list = (Array.isArray(candidates) ? candidates : []).slice(0, MAX_CANDIDATES);
   const lines = list.length
     ? list.map((c) => {
@@ -63,37 +72,50 @@ function buildConsolidationPrompt({ cwd, memoryDir = null, candidates = [], budg
   const budgetLine = budget && Number.isFinite(budget.bytes)
     ? `MEMORY.md index: ${budget.bytes} bytes / ${budget.lines} lines (budget ${budget.maxBytes} bytes / ${budget.maxLines} lines)${budget.overBudget ? ' — OVER BUDGET: Claude Code loads only the first 200 lines / 25 KB, so entries past that are invisible.' : '.'}`
     : 'MEMORY.md index size: unknown.';
+  const windowLine = window
+    ? `Window: [${new Date(window.sinceMs).toISOString()}, ${new Date(window.untilMs).toISOString()}) — half-open; ignore anything outside it.`
+    : 'Window: unknown.';
+  const tl = Array.isArray(transcripts) ? transcripts : [];
+  const transcriptLines = tl.length
+    ? tl.map((t) => `- ${t.path}`).join('\n') + (transcriptsTruncated > 0 ? `\n- (+${transcriptsTruncated} more not listed)` : '')
+    : '- (no transcripts in the window)';
+  const ls = Array.isArray(lessons) ? lessons : [];
+  const lessonLines = ls.length
+    ? ls.map((l) => `- ${l.slug || l.jobId || 'job'} (${l.source || 'job'}): ${(l.lines || []).join(' | ')}`).join('\n')
+    : '- (no Lessons blocks in the window)';
 
   return [
-    `You are reviewing the auto-memory and markdown network of the project at ${cwd}.`,
+    `You are running the maintaining-md-network "Weekly consolidation" pass for the project at ${cwd}.`,
+    `Follow ${WEEKLY_DOC} (the maintaining-md-network skill) exactly.`,
     '',
     'HARD RULES',
     `1. ${NO_DELETE_RULE}`,
-    '2. Use only read tools (Read, Grep, Glob). Never run a shell command, never write.',
-    '3. Your whole answer is ONE keep/move/drop table. It is posted as ONE "Needs you" item for the owner; do not split it.',
+    `2. Use only read tools (Read, Grep, Glob) and the ${SUBAGENT_TOOL} tool for subagents. Never run a shell command, never write.`,
+    '3. Your whole answer is the record, ONE document. It is posted as ONE "Needs you" item for the owner; do not split it.',
     '',
     'INPUTS',
+    windowLine,
     `Memory folder: ${memoryDir || '(unknown — skip memory files you cannot read)'}`,
     budgetLine,
     'Stale candidates (memoryStale scoreMemories):',
     lines,
+    'Session transcripts in the window (read-only):',
+    transcriptLines,
+    'Lessons blocks from PRD jobs in the window:',
+    lessonLines,
+    steeringPath ? `Steering file (read it first): ${steeringPath}` : 'Steering file: none.',
     '',
-    'STEPS',
-    '1. Read each candidate memory file and the MEMORY.md index.',
-    '2. Run a maintaining-md-network Drift check (read-only): if',
-    '   plugins/session-manager-dev/skills/maintaining-md-network/SKILL.md exists in this project, follow its',
-    '   "Drift check" mode; otherwise check that every fact lives in exactly one place and that links and',
-    '   paths in CLAUDE.md / AGENTS.md / docs / memories resolve.',
-    '3. For each candidate and each drift finding pick one action:',
-    '   keep (still true and needed), move (belongs in a named doc or memory — give the target), drop (stale or duplicated).',
-    '',
-    'OUTPUT — exactly this, nothing before or after:',
+    'OUTPUT — the record from weekly-consolidation.md ("The record"), exactly this, nothing before or after:',
     PROPOSAL_START,
-    '| Item | Action (keep/move/drop) | Target (for move) | Why |',
-    '|---|---|---|---|',
-    '| ... | ... | ... | ... |',
+    '<the record: header, Totals: adds N, merges N, removals N, and the change table>',
     PROPOSAL_END,
   ].join('\n');
+}
+
+/** { adds, merges, removals } from the record's Totals line, else null. */
+function parseTotals(record) {
+  const m = /adds\s+(\d+)\s*,\s*merges\s+(\d+)\s*,\s*removals\s+(\d+)/i.exec(String(record || ''));
+  return m ? { adds: Number(m[1]), merges: Number(m[2]), removals: Number(m[3]) } : null;
 }
 
 /** The table between the markers, else the whole result text, trimmed. */
@@ -165,6 +187,12 @@ function defaultDeps() {
       const r = await require('../../memoryTool.cjs').stale({ cwd });
       return (r && Array.isArray(r.entries) ? r.entries : []).filter((e) => e && e.stale);
     },
+    listTranscripts: (/** @type {any} */ o) => require('./weeklyConsolidationInputs.cjs').listProjectTranscripts(o),
+    collectLessons: (/** @type {any} */ o) => require('./weeklyConsolidationInputs.cjs').collectLessons(o),
+    steeringPath: (/** @type {string} */ cwd) => {
+      const p = path.join(cwd, STEERING_REL);
+      try { return fs.existsSync(p) ? p : null; } catch { return null; }
+    },
   };
 }
 
@@ -187,6 +215,9 @@ async function lastStartMs(listTasks, cwd, sinceMs) {
  *   listTasks?: (cwd: string, o: any) => Promise<{ tasks: any[] }>,
  *   measureBudget?: (cwd: string) => any,
  *   staleCandidates?: (cwd: string) => Promise<any[]>,
+ *   listTranscripts?: (o: any) => any,
+ *   collectLessons?: (o: any) => any,
+ *   steeringPath?: (cwd: string) => string|null,
  *   adminPost?: (path: string, body: any) => Promise<{ status: number, body: any }>,
  * } }} o
  */
@@ -214,7 +245,23 @@ async function maybeStartConsolidation({ cwd, now = Date.now(), deps = {} } = /*
     let candidates = [];
     try { candidates = await d.staleCandidates(key); } catch { candidates = []; }
 
-    const prompt = buildConsolidationPrompt({ cwd: key, memoryDir: budget ? budget.dir : null, candidates, budget });
+    // Window start = the previous counted run's start, so two runs never overlap.
+    let prev = last;
+    if (prev == null) {
+      try { prev = await lastStartMs(d.listTasks, key, now - PRIOR_RUN_LOOKBACK_MS); } catch { prev = null; }
+    }
+    const window = { sinceMs: prev != null ? prev : now - FIRST_RUN_WINDOW_MS, untilMs: now };
+    let tr = { transcripts: [], truncated: 0 };
+    try { tr = d.listTranscripts({ cwd: key, sinceMs: window.sinceMs, untilMs: window.untilMs }) || tr; } catch { /* inputs are best-effort */ }
+    let ls = { lessons: [] };
+    try { ls = d.collectLessons({ cwd: key, sinceMs: window.sinceMs, untilMs: window.untilMs }) || ls; } catch { /* best-effort */ }
+    let steeringPath = null;
+    try { steeringPath = d.steeringPath(key); } catch { steeringPath = null; }
+
+    const prompt = buildConsolidationPrompt({
+      cwd: key, memoryDir: budget ? budget.dir : null, candidates, budget, window,
+      transcripts: tr.transcripts, transcriptsTruncated: tr.truncated, lessons: ls.lessons, steeringPath,
+    });
     const reason = last == null ? 'weekly' : 'over_budget';
     inFlight.add(key);
     const done = runAndPost({ cwd: key, now, prompt, reason, adminPost: d.adminPost })
@@ -234,7 +281,7 @@ async function runAndPost({ cwd, now, prompt, reason, adminPost }) {
     missionId: MISSION_ID,
     prompt,
     priority: 'batch',
-    timeoutSec: 1800,
+    timeoutSec: TASK_TIMEOUT_SEC,
     slotWaitSec: 1800,
     caller: { pipeline: PIPELINE, runId, step: reason },
     runtime: {
@@ -251,14 +298,17 @@ async function runAndPost({ cwd, now, prompt, reason, adminPost }) {
   const proposal = extractProposal(resultText);
   if (!proposal) return { ok: false, error: 'empty_proposal', taskId: b.taskId };
 
-  const note = `\n…(full table: Task ${b.taskId}, Scheduler → Tasks)`;
-  const why = proposal.length > NEEDS_YOU_WHY_MAX
-    ? proposal.slice(0, NEEDS_YOU_WHY_MAX - note.length) + note
-    : proposal;
+  const totals = parseTotals(proposal);
+  const counts = totals ? `${totals.adds} adds, ${totals.merges} merges, ${totals.removals} removals` : 'counts not stated';
+  const why = [
+    `Weekly md-network consolidation proposes ${counts}. Nothing was changed.`,
+    "To act: press Review MD network with Mode 'Weekly consolidation', then accept or reject each change.",
+    `The full record is in Task ${b.taskId} (Scheduler → Tasks, or task_get).`,
+  ].join('\n').slice(0, NEEDS_YOU_WHY_MAX);
   const posted = await adminPost('/admin/needs-you', {
     app: NEEDS_YOU_APP,
     id: `memory-consolidation:${runId}`,
-    title: `Memory review for ${path.basename(cwd)}: keep / move / drop`,
+    title: `MD network weekly review for ${path.basename(cwd)}: ${counts}`,
     why,
     cwd,
   });
@@ -303,6 +353,9 @@ module.exports = {
   maybeStartConsolidation,
   startConsolidationTimer,
   extractProposal,
+  parseTotals,
+  AGENT,
+  TASK_TIMEOUT_SEC,
   adminPosterFor,
   PIPELINE,
   NO_DELETE_RULE,

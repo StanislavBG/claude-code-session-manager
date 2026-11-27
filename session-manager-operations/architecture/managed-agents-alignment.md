@@ -150,7 +150,9 @@ outcome record the validator is cross-checked against.
 **Law:** memory maintenance only proposes; it never deletes or edits. The human decides.
 
 - Code: `src/main/lib/tasks/memoryConsolidation.cjs` — a weekly read-only Task (behind the 'Scripts may run
-  Tasks' switch) posts one keep/move/drop Needs you item.
+  Tasks' switch) runs the maintaining-md-network Weekly consolidation pass as `md-network-curator` (Fable, max):
+  the week's transcripts and Lessons blocks in, one record out, posted as one Needs you item with the counts.
+  Applied only after the owner accepts each change (Review MD network, Mode 'Weekly consolidation').
 - Why: automated pruning once dropped live memories; a proposal costs one review, a wrong delete is lost.
 
 ## Mitigations

@@ -8,6 +8,8 @@
 
 import { test, expect, beforeEach } from 'vitest';
 const mc = require('../memoryConsolidation.cjs');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const CWD = '/tmp/sm-mc-project';
 const NOW = Date.parse('2026-11-23T12:00:00Z');
@@ -18,6 +20,7 @@ beforeEach(() => mc._resetForTests());
 function harness({ switchOn = true, lastStartedAt = null, lastStatus = 'ok', overBudget = false } = {}) {
   const posts = [];
   const listCalls = [];
+  const inputCalls = [];
   const deps = {
     usageHold: () => null,
     isTaskSwitchOn: () => switchOn,
@@ -28,15 +31,18 @@ function harness({ switchOn = true, lastStartedAt = null, lastStatus = 'ok', ove
     },
     measureBudget: () => ({ dir: '/tmp/mem', bytes: overBudget ? 30000 : 1000, lines: overBudget ? 250 : 10, maxBytes: 25600, maxLines: 200, overBudget }),
     staleCandidates: async () => [{ name: 'old_note.md', ageDays: 120, inboundLinks: 0, reasons: ['90+ days old with no inbound links'], deadRefs: [] }],
+    listTranscripts: (o) => { inputCalls.push(['transcripts', o]); return { transcripts: [{ path: '/home/x/.claude/projects/p/s1.jsonl' }], truncated: 2 }; },
+    collectLessons: (o) => { inputCalls.push(['lessons', o]); return { lessons: [{ slug: 'prd-1', source: 'dev-lead', lines: ['always X'] }] }; },
+    steeringPath: () => '/tmp/sm-mc-project/session-manager-operations/md-network/steering.md',
     adminPost: async (p, body) => {
       posts.push({ path: p, body });
       if (p === '/admin/tasks') {
-        return { status: 200, body: { ok: true, taskId: 't-1', status: 'ok', envelope: { result: 'x\n<<<PROPOSAL\n| old_note.md | drop | | stale |\nPROPOSAL>>>\n' } } };
+        return { status: 200, body: { ok: true, taskId: 't-1', status: 'ok', envelope: { result: 'x\n<<<PROPOSAL\n# record\n- Totals: adds 1, merges 2, removals 3\n| c1 | verify | old_note.md | drop | a, b | 2 |\nPROPOSAL>>>\n' } } };
       }
       return { status: 200, body: { ok: true, item: { id: body.id } } };
     },
   };
-  return { deps, posts, listCalls };
+  return { deps, posts, listCalls, inputCalls };
 }
 
 test('switch off: nothing starts, nothing is posted', async () => {
@@ -57,13 +63,58 @@ test('weekly cadence: first run starts via POST /admin/tasks and posts ONE Needs
   expect(h.posts.map((p) => p.path)).toEqual(['/admin/tasks', '/admin/needs-you']);
   const task = h.posts[0].body;
   expect(task.caller.pipeline).toBe(mc.PIPELINE);
-  expect(task.runtime.tools).toEqual(['Read', 'Grep', 'Glob']);
+  expect(task.agent).toBe('md-network-curator');
+  expect(task.timeoutSec).toBe(3600);
+  expect(task.runtime.tools).toEqual(['Read', 'Grep', 'Glob', 'Agent']);
+  expect(task.runtime.allowedTools).toEqual(['Read', 'Grep', 'Glob', 'Agent']);
   expect(task.prompt).toContain('old_note.md');
   const ny = h.posts[1].body;
-  expect(ny.why).toBe('| old_note.md | drop | | stale |');
+  expect(ny.title).toContain('1 adds, 2 merges, 3 removals');
+  expect(ny.why).toContain("Review MD network");
+  expect(ny.why).toContain("'Weekly consolidation'");
+  expect(ny.why).toContain('t-1');
   expect(ny.cwd).toBe(CWD);
   // the cadence window is 7 days
   expect(Date.parse(h.listCalls[0].o.since)).toBe(NOW - 7 * DAY);
+});
+
+test('runtime tools are read-only: no Bash, Edit or Write', () => {
+  expect(mc.READ_ONLY_TOOLS).toEqual(['Read', 'Grep', 'Glob', 'Agent']);
+  for (const bad of ['Bash', 'Edit', 'Write']) expect(mc.READ_ONLY_TOOLS).not.toContain(bad);
+});
+
+test('the seeded persona resolves to Fable at max effort', () => {
+  const md = fs.readFileSync(path.join(__dirname, '../../../../seed/agents', mc.AGENT + '.md'), 'utf8');
+  expect(md).toMatch(/^model: fable$/m);
+  expect(md).toMatch(/^effort: max$/m);
+});
+
+test('first run: prompt names the 7-day window, transcripts, lessons, memory, stale, budget and steering', async () => {
+  const h = harness();
+  const r = await mc.maybeStartConsolidation({ cwd: CWD, now: NOW, deps: h.deps });
+  await r.done;
+  const p = h.posts[0].body.prompt;
+  expect(p).toContain(new Date(NOW - 7 * DAY).toISOString());
+  expect(p).toContain(new Date(NOW).toISOString());
+  expect(p).toContain('/home/x/.claude/projects/p/s1.jsonl');
+  expect(p).toContain('+2 more');
+  expect(p).toContain('prd-1');
+  expect(p).toContain('always X');
+  expect(p).toContain('/tmp/mem');
+  expect(p).toContain('old_note.md');
+  expect(p).toContain('MEMORY.md index');
+  expect(p).toContain('steering.md');
+  expect(p).toContain('weekly-consolidation.md');
+  expect(p).toContain('<<<PROPOSAL');
+  expect(h.inputCalls[0][1]).toMatchObject({ cwd: CWD, sinceMs: NOW - 7 * DAY, untilMs: NOW });
+});
+
+test('the window starts at the previous counted run', async () => {
+  const prev = NOW - 8 * DAY;
+  const h = harness({ lastStartedAt: new Date(prev).toISOString() });
+  const r = await mc.maybeStartConsolidation({ cwd: CWD, now: NOW, deps: h.deps });
+  await r.done;
+  expect(h.inputCalls[0][1].sinceMs).toBe(prev);
 });
 
 test('weekly cadence: a run 3 days ago blocks; one 8 days ago does not', async () => {
@@ -98,14 +149,14 @@ test('a second call while one is in flight does not start another', async () => 
   await a.done;
 });
 
-test('prompt carries the no-delete rule, read-only tools and one keep/move/drop table for one Needs you item', () => {
+test('prompt carries the no-delete rule, read-only tools and the record for one Needs you item', () => {
   const p = mc.buildConsolidationPrompt({ cwd: CWD, memoryDir: '/tmp/mem', candidates: [] });
   expect(p).toContain(mc.NO_DELETE_RULE);
   expect(p).toMatch(/Do NOT delete/);
   expect(p).toMatch(/edit/);
-  expect(p).toMatch(/ONE keep\/move\/drop table/);
   expect(p).toMatch(/ONE "Needs you" item/);
-  expect(p).toMatch(/Drift check/);
+  expect(p).toMatch(/Weekly consolidation/);
+  expect(p).toContain('Steering file: none.');
 });
 
 test('a failed Task posts nothing to Needs you', async () => {

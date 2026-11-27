@@ -40,6 +40,12 @@ written, the append resolves `null` — and a `task_transition_refused` record g
 A `task.started` with no end reads as `running` until `startedAt + timeoutSec + 120 s` passes, then
 `interrupted` — a read-side `running → interrupted` edge that also goes through the table. Malformed lines are skipped and counted (`skippedLines`), never thrown.
 
+## Weekly consolidation Task
+
+`pipeline: memory-consolidation` (`memoryConsolidation.cjs`) runs the maintaining-md-network Weekly consolidation
+pass as `md-network-curator` (Fable, max), read-only, at most weekly per project. Its Task body holds the full
+record; the owner accepts or rejects each change via Review MD network, Mode 'Weekly consolidation'.
+
 ## Retention
 
 `tasksDays` in `~/.claude/session-manager/ops-retention.json` (`opsRetentionSettings.cjs`,

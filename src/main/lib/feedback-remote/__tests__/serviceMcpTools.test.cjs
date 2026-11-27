@@ -161,7 +161,18 @@ test('feedback_list_projects toRequest matches the stdio handler', async () => {
   const { handleCallTool } = requireServer();
   await handleCallTool({ params: { name: 'feedback_list_projects', arguments: {} } });
   const shaped = byName('feedback_list_projects').toRequest({});
-  expect(shaped).toEqual({ method: 'GET', path: '/admin/feedback/targets' });
+  expect(shaped).toEqual({ method: 'GET', path: '/admin/feedback/targets', query: {} });
+  expect(requests).toHaveLength(1);
+  expectSameRequest(requests[0], shaped);
+});
+
+test('feedback_list_projects forwards cwd / limit / offset identically on both surfaces', async () => {
+  const requests = await fakeAdmin();
+  const { handleCallTool } = requireServer();
+  const args = { cwd: '/abs/receiver', limit: 50, offset: 100 };
+  await handleCallTool({ params: { name: 'feedback_list_projects', arguments: args } });
+  const shaped = byName('feedback_list_projects').toRequest(args);
+  expect(shaped.query).toEqual({ cwd: '/abs/receiver', limit: '50', offset: '100' });
   expect(requests).toHaveLength(1);
   expectSameRequest(requests[0], shaped);
 });

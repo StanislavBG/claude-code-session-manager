@@ -8,7 +8,7 @@
  *
  *   scheduler_create_prd({ ... })  -> POST /admin/scheduler/create-prd
  *
- *   feedback_list_projects()       -> GET  /admin/feedback/targets
+ *   feedback_list_projects({cwd?,limit?,offset?}) -> GET /admin/feedback/targets
  *   feedback_open_session({ ... }) -> POST /admin/feedback/open-session
  *   feedback_reply({ message, outcome, ... }) -> POST /admin/feedback/reply
  *
@@ -76,7 +76,7 @@ const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription, FIXES_INPUT_SCHEMA } 
 // Shared with paired services (serviceMcpTools.cjs) so both see the same
 // schemas. Its service-only tools (macro_run, events_read) are never listed here.
 const {
-  FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA, FEEDBACK_OPEN_SESSION_INPUT_SCHEMA, MACRO_LIST_INPUT_SCHEMA, EPIC_GET_INPUT_SCHEMA,
+  FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA, feedbackListProjectsQuery, FEEDBACK_OPEN_SESSION_INPUT_SCHEMA, MACRO_LIST_INPUT_SCHEMA, EPIC_GET_INPUT_SCHEMA,
 } = require('../src/main/lib/feedback-remote/serviceMcpTools.cjs');
 const { SERVICE_TOOL_NAMES } = require('../src/main/lib/feedback-remote/servicePairings.cjs');
 const { EPIC_OUTSIDE_STATES } = require('../src/main/lib/epic/epicOutsideState.cjs');
@@ -2133,7 +2133,8 @@ async function handleCallTool(request) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'feedback_list_projects') {
-      const result = await adminRequest('GET', '/admin/feedback/targets');
+      const qs = new URLSearchParams(feedbackListProjectsQuery(args)).toString();
+      const result = await adminRequest('GET', `/admin/feedback/targets${qs ? `?${qs}` : ''}`);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'feedback_open_session') {

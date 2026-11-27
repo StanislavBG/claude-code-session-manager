@@ -4,7 +4,7 @@
  * each { name, description, inputSchema, toRequest(args) } where toRequest
  * maps the call onto the loopback admin route it mirrors:
  *
- *   feedback_list_projects()                -> GET  /admin/feedback/targets
+ *   feedback_list_projects({cwd?,limit?,offset?}) -> GET /admin/feedback/targets
  *   feedback_open_session({ ... })          -> POST /admin/feedback/open-session
  *   macro_list({ cwd? })                    -> GET  /admin/macros?cwd=
  *   macro_run({ cwd, id, inputs?, effort?, externalRef? }) -> POST /admin/macros/run
@@ -32,7 +32,26 @@
 const { MCP_TOOL_CATALOG, composeDescription } = require('../mcpToolCatalog.cjs');
 const { SERVICE_TOOL_NAMES } = require('./servicePairings.cjs');
 
-const FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA = { type: 'object', properties: {} };
+const FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    cwd: {
+      type: 'string',
+      description: 'Optional: answer yes/no for this one absolute path instead of listing — returns { lookup: { cwd, canReceive, reason } }, independent of how recently the project was active.',
+    },
+    limit: { type: 'integer', minimum: 1, maximum: 1000, description: 'Optional page size (default 200, max 1000).' },
+    offset: { type: 'integer', minimum: 0, description: 'Optional page start (default 0). Page while hasMore is true.' },
+  },
+};
+
+/** Shared by the service and stdio handlers: tool args -> GET query. */
+function feedbackListProjectsQuery(args) {
+  const query = {};
+  if (typeof args?.cwd === 'string') query.cwd = args.cwd;
+  if (args?.limit !== undefined) query.limit = String(args.limit);
+  if (args?.offset !== undefined) query.offset = String(args.offset);
+  return query;
+}
 
 const FEEDBACK_OPEN_SESSION_INPUT_SCHEMA = {
   type: 'object',
@@ -209,7 +228,7 @@ const SERVICE_TOOLS = Object.freeze([
     name: 'feedback_list_projects',
     description: catalogDescription('feedback_list_projects'),
     inputSchema: FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA,
-    toRequest: () => ({ method: 'GET', path: '/admin/feedback/targets' }),
+    toRequest: (args) => ({ method: 'GET', path: '/admin/feedback/targets', query: feedbackListProjectsQuery(args) }),
   },
   {
     name: 'feedback_open_session',
@@ -316,6 +335,7 @@ module.exports = {
   SERVICE_ONLY_TOOL_NAMES,
   EVENTS_READ_KINDS,
   FEEDBACK_LIST_PROJECTS_INPUT_SCHEMA,
+  feedbackListProjectsQuery,
   FEEDBACK_OPEN_SESSION_INPUT_SCHEMA,
   MACRO_LIST_INPUT_SCHEMA,
   EPIC_GET_INPUT_SCHEMA,

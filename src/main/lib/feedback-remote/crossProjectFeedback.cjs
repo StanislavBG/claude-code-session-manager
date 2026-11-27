@@ -119,12 +119,23 @@ const MAX_ORIGIN_ASK_CHARS = 300;
 const MAX_HUMAN_QUOTE_CHARS = 2000;
 const KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-/** Bound on how many `~/.claude/projects/` folders listFeedbackTargets will
- *  resolve. That directory accumulates one folder per path the CLI was ever
- *  launched from (thousands here — see CLAUDE.md's knownProjectAggregate
- *  note), so the scan is capped at the most recently active folders and
- *  reports the truncation rather than silently covering a subset. */
-const TARGET_SCAN_LIMIT = 300;
+/** Page size for listFeedbackTargets. The scan itself is NEVER capped — every
+ *  `~/.claude/projects/` folder is resolved (see the folder memo below) — so a
+ *  quiet project can't fall off the list; only the returned page is bounded.
+ *  The old 300-most-recent-folders scan cap silently dropped real projects
+ *  (2026-11-27: /home/bilko/Projects/3PMahjong missing, 14k folders on disk). */
+const TARGET_PAGE_DEFAULT = 200;
+const TARGET_PAGE_MAX = 1000;
+/** How many transcript folders are resolved concurrently on a cold scan. */
+const TARGET_SCAN_CONCURRENCY = 32;
+/** full folder path -> { mtimeMs, cwd }: the resolved main-checkout cwd (or
+ *  null) for a transcript folder at that folder mtime. A folder's mtime bumps
+ *  when a transcript file is added, which is the only thing that can change
+ *  which file's head names its cwd, so an unchanged mtime means an unchanged
+ *  answer. Makes every scan after the first a stat pass (14k folders cold
+ *  ~20 s, warm well under 1 s). Bounded by the folder count on disk; entries
+ *  for vanished folders are pruned per scan of their root. */
+const targetFolderMemo = new Map();
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
@@ -1180,7 +1191,9 @@ async function openReplyFallbackSession(input = {}, deps = {}) {
 }
 
 /**
- * listFeedbackTargets() → { projects: [{ cwd, lastActivity }], scanned, truncated }
+ * listFeedbackTargets({ limit?, offset?, cwd? }) →
+ *   { projects: [{ cwd, lastActivity }], total, offset, limit, hasMore, scanned }
+ *   or, with `cwd`: { lookup: { cwd, canReceive, reason } }
  *
  * Which projects can receive feedback. Resolved the same way CLAUDE.md
  * requires everywhere else: a PROJECT IS A CWD, resolved from transcript
@@ -1188,7 +1201,9 @@ async function openReplyFallbackSession(input = {}, deps = {}) {
  * into a path. A folder whose cwd cannot be resolved is DROPPED, not guessed.
  *
  * Two sources:
- *   1. transcript folders under `~/.claude/projects/` (above);
+ *   1. EVERY transcript folder under `~/.claude/projects/` (no recency cap —
+ *      `scanned` is how many folders were read; resolution is memoized per
+ *      folder mtime in targetFolderMemo);
  *   2. the created-projects ledger (`createdProjects.cjs`, injectable as
  *      `createdProjects`, default `getCreatedProjects()`), so a folder made by
  *      project_create is a target before anyone has worked in it. Ledger cwds
@@ -1197,9 +1212,18 @@ async function openReplyFallbackSession(input = {}, deps = {}) {
  *      cwd in both sources is listed once.
  * Results are then filtered to directories that still exist AND already carry
  * an operations root — exactly `openFeedbackSession`'s own precondition, so
- * this list can't offer a target that would then be refused.
+ * this list can't offer a target that would then be refused. Sorted newest
+ * activity first, then paged by `offset`/`limit` (default 200, max 1000);
+ * `total` counts every target and `hasMore` says another page exists.
+ *
+ * `cwd` is the authoritative yes/no for one path, independent of transcripts:
+ * it runs openFeedbackSession's own toCwd checks (validatePath, existing
+ * directory, operations root), so a project that was never chatted in — or
+ * whose transcripts were deleted — still answers yes when it can receive.
  */
-async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT, projectsDir, createdProjects } = {}) {
+async function listFeedbackTargets({ limit = TARGET_PAGE_DEFAULT, offset = 0, cwd, projectsDir, createdProjects } = {}) {
+  if (cwd !== undefined) return { lookup: lookupFeedbackTarget(cwd) };
+
   const root = resolveProjectsDir(projectsDir);
   let entries;
   try {
@@ -1207,32 +1231,24 @@ async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT, projectsDir, cre
   } catch {
     entries = [];
   }
-  const dirs = entries.filter((e) => e.isDirectory());
+  const dirs = entries.filter((e) => e.isDirectory()).map((d) => path.join(root, d.name));
 
-  // Newest-first by folder mtime, so the cap keeps the projects actually in
-  // use rather than an arbitrary alphabetical slice.
-  const stamped = [];
-  for (const d of dirs) {
-    const full = path.join(root, d.name);
-    try {
-      stamped.push({ full, mtimeMs: (await fsp.stat(full)).mtimeMs });
-    } catch { /* raced away */ }
+  const resolved = [];
+  for (let i = 0; i < dirs.length; i += TARGET_SCAN_CONCURRENCY) {
+    const batch = await Promise.all(dirs.slice(i, i + TARGET_SCAN_CONCURRENCY).map(resolveTargetFolder));
+    for (const r of batch) if (r) resolved.push(r);
   }
-  stamped.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const scanned = stamped.slice(0, limit);
+  // Prune memo entries for folders under this root that no longer exist.
+  const live = new Set(dirs);
+  for (const key of targetFolderMemo.keys()) {
+    if (path.dirname(key) === root && !live.has(key)) targetFolderMemo.delete(key);
+  }
 
   const byCwd = new Map();
-  for (const { full, mtimeMs } of scanned) {
-    const rawCwd = await resolveCwdFromTranscriptDir(full);
-    if (!rawCwd) continue;
-    // Job/Epic worktrees carry a tracked operations root too, so each would
-    // list as a project. Collapse to the main checkout (same resolver the
-    // admin routes use); a worktree whose main checkout can't be proven
-    // stays ephemeral/worktree-shaped and is dropped, never listed.
-    const cwd = resolveProjectContext({ cwd: rawCwd }).cwd;
-    if (!cwd || isEphemeralCwd(cwd)) continue;
-    const prior = byCwd.get(cwd);
-    if (!prior || prior.lastActivity < mtimeMs) byCwd.set(cwd, { cwd, lastActivity: mtimeMs });
+  for (const { cwd: c, mtimeMs } of resolved) {
+    if (!c) continue;
+    const prior = byCwd.get(c);
+    if (!prior || prior.lastActivity < mtimeMs) byCwd.set(c, { cwd: c, lastActivity: mtimeMs });
   }
 
   // Second source: the created-projects ledger. A broken ledger never hides
@@ -1248,12 +1264,83 @@ async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT, projectsDir, cre
     if (!prior || prior.lastActivity < e.createdAt) byCwd.set(e.cwd, { cwd: e.cwd, lastActivity: e.createdAt });
   }
 
-  const projects = [...byCwd.values()]
+  const all = [...byCwd.values()]
     .filter((p) => isDirectory(p.cwd) && isSessionManagerProject(p.cwd))
-    .sort((a, b) => b.lastActivity - a.lastActivity)
+    .sort((a, b) => b.lastActivity - a.lastActivity);
+
+  const pageLimit = clampInt(limit, 1, TARGET_PAGE_MAX, TARGET_PAGE_DEFAULT);
+  const pageOffset = clampInt(offset, 0, Number.MAX_SAFE_INTEGER, 0);
+  const projects = all
+    .slice(pageOffset, pageOffset + pageLimit)
     .map((p) => ({ cwd: p.cwd, lastActivity: new Date(p.lastActivity).toISOString() }));
 
-  return { projects, scanned: scanned.length, truncated: Math.max(0, stamped.length - scanned.length) };
+  return {
+    projects,
+    total: all.length,
+    offset: pageOffset,
+    limit: pageLimit,
+    hasMore: pageOffset + projects.length < all.length,
+    scanned: dirs.length,
+  };
+}
+
+function clampInt(v, min, max, fallback) {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+/** One transcript folder → { cwd, mtimeMs } (cwd null when unresolvable or a
+ *  worktree/ephemeral path), or null when the folder raced away. Memoized by
+ *  folder mtime. */
+async function resolveTargetFolder(full) {
+  let mtimeMs;
+  try {
+    mtimeMs = (await fsp.stat(full)).mtimeMs;
+  } catch {
+    targetFolderMemo.delete(full);
+    return null;
+  }
+  const hit = targetFolderMemo.get(full);
+  if (hit && hit.mtimeMs === mtimeMs) return hit;
+  const rawCwd = await resolveCwdFromTranscriptDir(full);
+  let cwd = null;
+  if (rawCwd) {
+    // Job/Epic worktrees carry a tracked operations root too, so each would
+    // list as a project. Collapse to the main checkout (same resolver the
+    // admin routes use); a worktree whose main checkout can't be proven
+    // stays ephemeral/worktree-shaped and is dropped, never listed.
+    const c = resolveProjectContext({ cwd: rawCwd }).cwd;
+    if (c && !isEphemeralCwd(c)) cwd = c;
+  }
+  const rec = { mtimeMs, cwd };
+  targetFolderMemo.set(full, rec);
+  return rec;
+}
+
+/**
+ * lookupFeedbackTarget(cwd) → { cwd, canReceive, reason }
+ *
+ * The exact toCwd checks openFeedbackSession runs, minus the same-project
+ * check (no fromCwd here). `reason` is null on yes, else one of
+ * 'invalid' | 'rejected' | 'not-a-directory' | 'no-operations-root'.
+ */
+function lookupFeedbackTarget(cwd) {
+  if (typeof cwd !== 'string' || !cwd.trim()) return { cwd: null, canReceive: false, reason: 'invalid' };
+  let resolved;
+  try {
+    resolved = config.validatePath(path.resolve(cwd));
+  } catch {
+    return { cwd: path.resolve(cwd), canReceive: false, reason: 'rejected' };
+  }
+  if (!isDirectory(resolved)) return { cwd: resolved, canReceive: false, reason: 'not-a-directory' };
+  if (!isSessionManagerProject(resolved)) return { cwd: resolved, canReceive: false, reason: 'no-operations-root' };
+  return { cwd: resolved, canReceive: true, reason: null };
+}
+
+/** Test isolation: forget every memoized folder resolution. */
+function __resetFeedbackTargetMemoForTests() {
+  targetFolderMemo.clear();
 }
 
 /** Read the `cwd` field off the first JSON line of the newest .jsonl in a
@@ -1301,7 +1388,14 @@ async function resolveCwdFromTranscriptDir(dir) {
 
 /** Registers both routes on the injected loopback admin transport. Mirrors
  *  prdCreate.cjs's registerAdminRoute — auth is the transport's job. */
-function registerAdminRoute(adminHttp, { getServiceStore } = {}) {
+function registerAdminRoute(adminHttp, { getServiceStore, warmTargetsAfterMs = null } = {}) {
+  // Optional deferred warm-up of the target-folder memo, so the first
+  // feedback_list_projects after boot doesn't pay the cold scan (seconds over
+  // ~14k transcript folders). Opt-in: tests register routes without it.
+  if (Number.isFinite(warmTargetsAfterMs)) {
+    const t = setTimeout(() => { listFeedbackTargets({}).catch(() => {}); }, warmTargetsAfterMs);
+    if (typeof t.unref === 'function') t.unref();
+  }
   adminHttp.registerRoute('POST', '/admin/feedback/open-session', async (req, res) => {
     const raw = await readBody(req);
     let parsed;
@@ -1335,7 +1429,10 @@ function registerAdminRoute(adminHttp, { getServiceStore } = {}) {
     // where a feedback session may be written (that stays governed by
     // openFeedbackSession's own validatePath + ops-root checks).
     const projectsDir = query?.get('projectsDir') || undefined;
-    const result = await listFeedbackTargets({ projectsDir });
+    const cwd = query?.get('cwd') ?? undefined;
+    const limit = query?.get('limit') ?? undefined;
+    const offset = query?.get('offset') ?? undefined;
+    const result = await listFeedbackTargets({ projectsDir, cwd, limit, offset });
     sendJson(res, 200, { ok: true, ...result });
   });
 }
@@ -1367,5 +1464,7 @@ module.exports = {
   findOpenReplyFallback,
   openReplyFallbackSession,
   listFeedbackTargets,
+  lookupFeedbackTarget,
+  __resetFeedbackTargetMemoForTests,
   registerAdminRoute,
 };

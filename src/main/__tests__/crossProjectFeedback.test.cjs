@@ -734,19 +734,66 @@ test('folds several transcript folders that resolve to ONE cwd into a single ent
 test('a missing projects root yields an empty list, never a throw', async () => {
   await expect(
     listFeedbackTargets({ projectsDir: path.join(os.tmpdir(), 'sm-xproj-nonexistent-root') }),
-  ).resolves.toEqual({ projects: [], scanned: 0, truncated: 0 });
+  ).resolves.toEqual({ projects: [], total: 0, offset: 0, limit: 200, hasMore: false, scanned: 0 });
 });
 
-test('reports truncation instead of silently covering a subset', async () => {
-  const real = await mkProject();
+test('lists a quiet project however many newer folders exist (no recency cap)', async () => {
+  // 2026-11-27: the old scan read only the 300 newest folders, so a quiet
+  // project (3PMahjong) fell off the list and Kiln refused it as a target.
+  const quiet = await mkProject();
+  const busy = await mkProject();
+  const entries = { 'old-quiet': JSON.stringify({ cwd: quiet }) };
+  for (let i = 0; i < 320; i++) entries[`busy-${i}`] = JSON.stringify({ cwd: busy });
+  const root = await mkProjectsRoot(entries);
+  const old = new Date(Date.now() - 365 * 24 * 3600 * 1000);
+  fs.utimesSync(path.join(root, 'old-quiet'), old, old);
+  const res = await listFeedbackTargets({ projectsDir: root, createdProjects: { list: () => [] } });
+  expect(res.scanned).toBe(321);
+  expect(res.total).toBe(2);
+  expect(res.projects.map((p) => p.cwd)).toEqual([busy, quiet]);
+});
+
+test('pages by limit/offset with total and hasMore', async () => {
+  const a = await mkProject();
+  const b = await mkProject();
+  const c = await mkProject();
   const root = await mkProjectsRoot({
-    a: JSON.stringify({ cwd: real }),
-    b: JSON.stringify({ cwd: real }),
-    c: JSON.stringify({ cwd: real }),
+    a: JSON.stringify({ cwd: a }), b: JSON.stringify({ cwd: b }), c: JSON.stringify({ cwd: c }),
   });
-  const res = await listFeedbackTargets({ projectsDir: root, limit: 2 });
-  expect(res.scanned).toBe(2);
-  expect(res.truncated).toBe(1);
+  const none = { list: () => [] };
+  const p1 = await listFeedbackTargets({ projectsDir: root, createdProjects: none, limit: 2 });
+  expect(p1).toMatchObject({ total: 3, offset: 0, limit: 2, hasMore: true });
+  expect(p1.projects).toHaveLength(2);
+  const p2 = await listFeedbackTargets({ projectsDir: root, createdProjects: none, limit: '2', offset: '2' });
+  expect(p2).toMatchObject({ total: 3, offset: 2, limit: 2, hasMore: false });
+  expect(p2.projects).toHaveLength(1);
+  expect(new Set([...p1.projects, ...p2.projects].map((p) => p.cwd))).toEqual(new Set([a, b, c]));
+});
+
+test('a folder that gains a newer transcript is re-resolved (memo keyed by folder mtime)', async () => {
+  const first = await mkProject();
+  const second = await mkProject();
+  const root = await mkProjectsRoot({ enc: JSON.stringify({ cwd: first }) });
+  const none = { list: () => [] };
+  expect((await listFeedbackTargets({ projectsDir: root, createdProjects: none })).projects.map((p) => p.cwd)).toEqual([first]);
+  const dir = path.join(root, 'enc');
+  fs.writeFileSync(path.join(dir, 'session-b.jsonl'), `${JSON.stringify({ cwd: second })}\n`);
+  const later = new Date(Date.now() + 60_000);
+  fs.utimesSync(path.join(dir, 'session-b.jsonl'), later, later);
+  fs.utimesSync(dir, later, later);
+  expect((await listFeedbackTargets({ projectsDir: root, createdProjects: none })).projects.map((p) => p.cwd)).toEqual([second]);
+});
+
+test('cwd lookup answers yes/no with openFeedbackSession\'s own toCwd checks, no transcripts needed', async () => {
+  const managed = await mkProject();
+  const bare = await mkProject({ managed: false });
+  const empty = path.join(os.tmpdir(), 'sm-xproj-nonexistent-root');
+  await expect(listFeedbackTargets({ cwd: managed, projectsDir: empty }))
+    .resolves.toEqual({ lookup: { cwd: managed, canReceive: true, reason: null } });
+  expect((await listFeedbackTargets({ cwd: bare })).lookup).toEqual({ cwd: bare, canReceive: false, reason: 'no-operations-root' });
+  expect((await listFeedbackTargets({ cwd: path.join(managed, 'missing') })).lookup)
+    .toMatchObject({ canReceive: false, reason: 'not-a-directory' });
+  expect((await listFeedbackTargets({ cwd: '' })).lookup).toEqual({ cwd: null, canReceive: false, reason: 'invalid' });
 });
 
 test('isSessionManagerProject is the only definition of a valid target', async () => {

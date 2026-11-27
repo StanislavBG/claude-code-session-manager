@@ -44,7 +44,7 @@ function registerAppAdminRoutes(adminHttp, deps = {}) {
   // Project-to-project feedback conduit — the app is the only process holding
   // several projects' operations roots open, so it performs the cross-folder
   // write (lib/feedback-remote/crossProjectFeedback.cjs).
-  require('./lib/feedback-remote/crossProjectFeedback.cjs').registerAdminRoute(adminHttp);
+  require('./lib/feedback-remote/crossProjectFeedback.cjs').registerAdminRoute(adminHttp, { warmTargetsAfterMs: 60_000 });
   // POST /admin/projects/create — a paired service's new local (+ private GitHub) project; broadcasts `projects:created`.
   require('./lib/feedback-remote/projectCreate.cjs').registerAdminRoute(adminHttp);
   // POST /admin/services/pair-local[/confirm] — same-machine service pairing with no window step.

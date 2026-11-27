@@ -92,7 +92,7 @@ test('a folder made by createServiceProject is listed with an empty projectsDir'
 
   const res = await listFeedbackTargets({ projectsDir: s.projectsDir, createdProjects: s.ledger });
   expect(res.scanned).toBe(0);
-  expect(res.truncated).toBe(0);
+  expect(res.total).toBe(1);
   expect(res.projects).toHaveLength(1);
   expect(res.projects[0].cwd).toBe(made.cwd);
   const createdAt = s.ledger.findByCwd(made.cwd).createdAt;

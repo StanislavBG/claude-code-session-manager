@@ -62,8 +62,10 @@ feedback_list_projects()
 ```
 
 Returns every project on this machine that can receive feedback (each already
-has a `session-manager-operations/` directory). Match the user's name for the
-project against a real `cwd` from that list.
+has a `session-manager-operations/` directory), paged (`total`, `hasMore`; pass
+`offset` for the next page). Match the user's name for the project against a
+real `cwd` from that list. When you already have a path, check it with
+`feedback_list_projects({ cwd })` — `lookup.canReceive` is the exact answer.
 
 If the project you want is **absent**, it has simply never been opened in
 Session Manager. Do not invent a path and do not create the directory. Tell the

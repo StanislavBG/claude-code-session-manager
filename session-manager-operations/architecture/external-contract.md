@@ -85,6 +85,46 @@ find the Epic again by your id and a retry never makes a second Epic.
 | Where stored | on the Epic as `source.externalRef`, and in a per-project ref index |
 | Scope | unique per **receiving project** (`cwd`) |
 
+### Finding a `toCwd`: `feedback_list_projects` (MCP) / `GET /admin/feedback/targets`
+
+A project can receive feedback when its folder exists and has a `session-manager-operations/` directory.
+Logic: `listFeedbackTargets` in [`crossProjectFeedback.cjs`](../../src/main/lib/feedback-remote/crossProjectFeedback.cjs).
+
+**Scope.** The list holds every such project found from two sources: every folder under
+`~/.claude/projects/` (all of them, with no cap on how recently a project was active) and the
+`project_create` ledger. Worktrees are folded into their main checkout. A project nobody ever started a
+Claude session in and that `project_create` did not make is not listed. Use the lookup for those.
+
+**List.** Query `limit` (default 200, 1 to 1000) and `offset` (default 0). Newest activity first.
+
+```json
+{ "ok": true, "projects": [{ "cwd": "/home/me/Projects/game", "lastActivity": "2026-11-27T20:31:00.000Z" }],
+  "total": 30, "offset": 0, "limit": 200, "hasMore": false, "scanned": 14840 }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `total` | Every project that can receive feedback. |
+| `hasMore` | `true` when another page exists. Call again with `offset` + `projects.length`. |
+| `scanned` | How many `~/.claude/projects/` folders were read. Every folder is read. |
+
+**Lookup.** Query `cwd=<absolute path>` answers for one path only. It runs the same `toCwd` checks as
+`feedback_open_session`, so the answer is exact even for a project that has been quiet a long time or has no
+transcripts:
+
+```json
+{ "ok": true, "lookup": { "cwd": "/home/me/Projects/game", "canReceive": true, "reason": null } }
+```
+
+`reason` is `null` when `canReceive` is `true`. Otherwise it is one of: `invalid` (empty), `rejected`
+(the path is not allowed, e.g. a system or temp folder), `not-a-directory`, or `no-operations-root`. To
+check a target before sending, use the lookup, not a search of the list. `feedback_open_session` still
+refuses `toCwd` = `fromCwd`.
+
+**Cost.** The first list after the app starts reads every folder. On ~15k folders that takes seconds.
+The app warms it 60 s after boot. Later calls re-read only folders that changed (well under 1 s). The
+lookup never scans.
+
 ### A. `feedback_open_session` (MCP) / `POST /admin/feedback/open-session`
 
 Opens a `proposed` Epic in **another** project (`toCwd`). A human there must approve it before it runs.
@@ -944,7 +984,7 @@ Defined once in [`serviceMcpTools.cjs`](../../src/main/lib/feedback-remote/servi
 
 | Tool | Arguments (required in **bold**) | Route it mirrors |
 | --- | --- | --- |
-| `feedback_list_projects` | none | `GET /admin/feedback/targets` |
+| `feedback_list_projects` | `cwd` (lookup), `limit` (1-1000), `offset` | `GET /admin/feedback/targets` ([§2](#finding-a-tocwd-feedback_list_projects-mcp--get-adminfeedbacktargets)) |
 | `feedback_open_session` | **`toCwd`**, **`title`**, **`motivation`**, **`acceptanceCriteria`**, **`body`**, `fromCwd`, `plan`, `outOfScope`, `series`, `tag`, `fromEpicId`, `agentType`, `referencePaths`, `autoStart`, `humanRequestQuote`, `externalRef`, `replyMode` | `POST /admin/feedback/open-session` (§2 A) |
 | `macro_list` | `cwd` | `GET /admin/macros` |
 | `macro_run` | **`cwd`**, **`id`**, `inputs` (string map), `effort`, `externalRef` | `POST /admin/macros/run` (§2 B) |

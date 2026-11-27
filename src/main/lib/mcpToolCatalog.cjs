@@ -332,7 +332,8 @@ const MCP_TOOL_CATALOG = [
     whenToUse: "Call this FIRST when you need the exact `toCwd` for feedback_open_session and are not certain of it — never guess a path.",
     whenNotToUse: 'A project missing from this list has simply never been opened in Session Manager; ask the human to open it once rather than inventing a path.',
     exampleArgs: {},
-    notes: null,
+    notes: 'Lists every target, newest activity first, paged: { projects, total, offset, limit, hasMore }; limit defaults to 200 (max 1000), '
+      + 'page with offset while hasMore. To validate one path, pass cwd: the answer is { lookup: { cwd, canReceive, reason } } and is exact for any project, however long it has been quiet.',
   },
   {
     name: 'feedback_open_session',

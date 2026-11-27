@@ -140,7 +140,9 @@ const { verifyRun, captureArtifactEvidence, parseLog, scanSentinel, scanForeignW
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/scheduler/terminalRunOutcome.cjs');
 const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan, fixPlanRecordPath } = require('./lib/scheduler/fixPlanSlug.cjs');
 const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSinceRun.cjs');
-const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
+const { declaredPathsForPrd, issuedAtForPrd, extractDeclaredPaths } = require('./lib/prd/prdDeclaredPaths.cjs');
+const { sandboxWarnings } = require('./lib/prd/prdSandboxWarnings.cjs');
+const { extractSection: extractPrdSection } = require('./lib/scheduler/definitionOfDone.cjs');
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const jobLeftovers = require('./lib/scheduler/jobLeftovers.cjs');
 const planReviewHold = require('./scheduler/planReviewHold.cjs');
@@ -15169,6 +15171,18 @@ const remote = {
           { agentType: fm.agentType, riskTools: fm.riskTools, cwd: fm.cwd || cwd },
           prdCreate.mcpReachDeps,
         ));
+      } catch { /* advisory only — never fails the update */ }
+      try {
+        const effFiles = Array.isArray(files) ? files : extractDeclaredPaths(newBody);
+        const crit = Array.isArray(fm.criteria) && fm.criteria.length
+          ? fm.criteria.map((c) => (typeof c === 'string' ? c : c?.statement))
+          : [extractPrdSection(newBody, 'Acceptance criteria')];
+        patchWarnings = patchWarnings.concat(sandboxWarnings({
+          files: effFiles,
+          goal: extractPrdSection(newBody, 'Goal'),
+          implementationNotes: extractPrdSection(newBody, 'Implementation notes'),
+          acceptanceCriteria: crit.filter((c) => typeof c === 'string'),
+        }));
       } catch { /* advisory only — never fails the update */ }
       return patchWarnings.length
         ? { ok: true, slug, bytesWritten: stat.size, warnings: patchWarnings }

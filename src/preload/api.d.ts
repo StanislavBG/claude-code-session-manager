@@ -2992,6 +2992,8 @@ export interface WebRemoteService {
   lastSeenAt: number;
   /** How the pairing was approved: owner window (default) or the loopback admin API. */
   pairedVia?: 'window' | 'local';
+  /** Owner grant: work this service opens in these projects ('*' = all) starts without a second approval. null = off. */
+  startWork?: { targets: string[] } | null;
 }
 
 export interface WebRemotePendingService {
@@ -3041,6 +3043,10 @@ export type WebRemoteServiceConfirmSasResult =
 /** webRemote.cjs servicePairCancel: `cancelled` = a pending pairing was dropped; `dropped` = waiting clients torn down. */
 export type WebRemoteServicePairCancelResult =
   | { ok: true; cancelled: boolean; dropped: number }
+  | { ok: false; error: string };
+
+export type WebRemoteServiceSetStartWorkResult =
+  | { ok: true; service: WebRemoteService }
   | { ok: false; error: string };
 
 export type WebRemoteServiceRevokeResult =
@@ -3772,6 +3778,8 @@ export interface SessionManagerAPI {
     servicePairCancel: (pairingId: string) => Promise<WebRemoteServicePairCancelResult>;
     /** Revoke a paired service locally and at the relay (relay failure still revokes locally). */
     serviceRevoke: (serviceId: string) => Promise<WebRemoteServiceRevokeResult>;
+    /** Set (or with [] revoke) the owner's startWork grant: projects ('*' = all) where work this service opens auto-starts. */
+    serviceSetStartWork: (serviceId: string, targets: string[]) => Promise<WebRemoteServiceSetStartWorkResult>;
     /** Revoke an orphaned relay client. */
     relayClientRevoke: (clientId: string) => Promise<WebRemoteMutationResult>;
   };

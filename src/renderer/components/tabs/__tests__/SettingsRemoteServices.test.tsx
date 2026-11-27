@@ -72,6 +72,7 @@ beforeEach(() => {
     })),
     serviceConfirmSas: vi.fn(async () => ({ ok: true, service })),
     serviceRevoke: vi.fn(async () => ({ ok: true, relayRevoked: true })),
+    serviceSetStartWork: vi.fn(async () => ({ ok: true, service })),
     relayClientRevoke: vi.fn(async () => ({ ok: true })),
     servicePairCancel: vi.fn(async () => {
       list = { ...list, pending: list.pending.filter((p) => p.pairingId !== 'pair-1') }
@@ -296,6 +297,60 @@ describe('SettingsRemoteServices', () => {
     expect(api.serviceRevoke).not.toHaveBeenCalled()
     await click(q('remote-service-revoke-confirm'))
     expect(api.serviceRevoke).toHaveBeenCalledWith('svc-1')
+  })
+
+  describe('May start work it opens', () => {
+    const setMode = async (v: string) => {
+      const sel = q('remote-service-start-work-mode') as HTMLSelectElement
+      await act(async () => {
+        sel.value = v
+        sel.dispatchEvent(new Event('change', { bubbles: true }))
+        await flush()
+      })
+    }
+    const withGrant = (targets: string[] | null) => {
+      list = { ok: true, services: [{ ...service, startWork: targets ? { targets } : null }], pending: [], relayOrphans: [] }
+    }
+
+    it('is off by default and shows no project list', async () => {
+      withGrant(null)
+      await mount()
+      expect((q('remote-service-start-work-mode') as HTMLSelectElement).value).toBe('off')
+      expect(qa('remote-service-start-work-project')).toHaveLength(0)
+    })
+
+    it('turns on for all projects', async () => {
+      withGrant(null)
+      await mount()
+      await setMode('all')
+      expect(api.serviceSetStartWork).toHaveBeenCalledWith('svc-1', ['*'])
+    })
+
+    it('shows the current grant and changes its scope', async () => {
+      withGrant(['/home/u/Self'])
+      await mount()
+      expect((q('remote-service-start-work-mode') as HTMLSelectElement).value).toBe('selected')
+      const other = container!.querySelector('[data-cwd="/home/u/Other"]') as HTMLElement
+      await click(other)
+      expect(api.serviceSetStartWork).toHaveBeenCalledWith('svc-1', ['/home/u/Self', '/home/u/Other'])
+    })
+
+    it('turns off to revoke', async () => {
+      withGrant(['*'])
+      await mount()
+      expect((q('remote-service-start-work-mode') as HTMLSelectElement).value).toBe('all')
+      await setMode('off')
+      expect(api.serviceSetStartWork).toHaveBeenCalledWith('svc-1', [])
+    })
+
+    it('shows a failed save as a toast error', async () => {
+      withGrant(null)
+      api.serviceSetStartWork.mockResolvedValueOnce({ ok: false, error: 'no_such_service' })
+      await mount()
+      await setMode('all')
+      expect(lastToast()?.kind).toBe('error')
+      expect(lastToast()?.message).toContain('no_such_service')
+    })
   })
 
   it('lists relay orphans and revokes one behind a confirm', async () => {

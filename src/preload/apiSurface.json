@@ -2316,6 +2316,17 @@
  },
  {
   "ns": "webRemote",
+  "method": "serviceSetStartWork",
+  "channel": "webRemote:service-set-start-work",
+  "kind": "invoke",
+  "remote": "deny",
+  "pack": [
+   "serviceId",
+   "targets"
+  ]
+ },
+ {
+  "ns": "webRemote",
   "method": "relayClientRevoke",
   "channel": "webRemote:relay-client-revoke",
   "kind": "invoke",

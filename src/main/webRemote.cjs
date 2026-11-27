@@ -1478,6 +1478,24 @@ async function serviceRevoke(serviceId) {
   return { ok: true, relayRevoked };
 }
 
+/** Owner grant: set (or with [] revoke) where work a service opens auto-starts. Audited. */
+async function serviceSetStartWork(serviceId, targets) {
+  const store = getServiceStore();
+  if (!store.list().some((s) => s.serviceId === serviceId)) return { ok: false, error: 'no_such_service' };
+  let service;
+  try {
+    service = await store.setStartWork(serviceId, targets);
+  } catch (e) {
+    return { ok: false, error: e?.message || 'invalid_targets' };
+  }
+  const granted = service.startWork ? service.startWork.targets : [];
+  const detail = granted.length === 0
+    ? `ok:revoked:service=${auditToken(serviceId)}`
+    : `ok:granted:service=${auditToken(serviceId)}:targets=${granted.map((t) => String(t).replace(/[^\x20-\x7e]/g, '_').replace(/[,\s]/g, '_')).join(',').slice(0, 1000)}`;
+  await auditLog(new Date().toISOString(), 'service:set-start-work', undefined, undefined, detail, null);
+  return { ok: true, service: redactService(service) };
+}
+
 /**
  * Owner denied a pending pairing: drop it from the store and fail + tear down
  * any service client waiting on it, so a later hello for it is refused.
@@ -2153,6 +2171,10 @@ function registerRemoteHandlers() {
 
   ipcMain.handle('webRemote:service-revoke', validated(schemas.webRemoteServiceRevoke, async ({ serviceId }) => {
     return serviceRevoke(serviceId);
+  }));
+
+  ipcMain.handle('webRemote:service-set-start-work', validated(schemas.webRemoteServiceSetStartWork, async ({ serviceId, targets }) => {
+    return serviceSetStartWork(serviceId, targets);
   }));
 
   ipcMain.handle('webRemote:relay-client-revoke', validated(schemas.webRemoteRelayClientRevoke, async ({ clientId }) => {

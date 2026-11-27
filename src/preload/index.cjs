@@ -591,6 +591,8 @@ contextBridge.exposeInMainWorld('api', {
     servicePairCancel: (pairingId) => ipcRenderer.invoke('webRemote:service-pair-cancel', { pairingId }),
     /** Revoke a paired service locally and at the relay. */
     serviceRevoke: (serviceId) => ipcRenderer.invoke('webRemote:service-revoke', { serviceId }),
+    /** Owner grant: auto-start work this service opens in `targets` (cwds or '*'); [] revokes. */
+    serviceSetStartWork: (serviceId, targets) => ipcRenderer.invoke('webRemote:service-set-start-work', { serviceId, targets }),
     /** Revoke a relay client no local service owns (an orphan). */
     relayClientRevoke: (clientId) => ipcRenderer.invoke('webRemote:relay-client-revoke', { clientId }),
     /** Push event when revokeAll completes (main broadcasts webRemote:revoked-all). */

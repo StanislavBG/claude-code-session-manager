@@ -72,6 +72,71 @@ function formatLeft(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
+const baseName = (p: string) => p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p
+
+/**
+ * 'May start work it opens': the owner's per-service grant. Collapsed to one
+ * select (Off by default); a project list only when scoped. Every change saves.
+ */
+function StartWorkControl({
+  service, projects, busy, onSave,
+}: {
+  service: WebRemoteService
+  projects: string[]
+  busy: boolean
+  onSave: (serviceId: string, targets: string[]) => void
+}) {
+  const targets = service.startWork?.targets ?? []
+  const mode: 'off' | 'all' | 'selected' = targets.length === 0 ? 'off' : targets.includes('*') ? 'all' : 'selected'
+  const choices = useMemo(
+    () => Array.from(new Set([...projects, ...targets.filter((t) => t !== '*')])),
+    [projects, targets],
+  )
+  const id = `remote-service-start-work-${service.serviceId}`
+  return (
+    <div className="flex flex-col gap-1 mt-1 px-[18px]">
+      <label className="text-[12px] text-fg-dim" htmlFor={id}>May start work it opens</label>
+      <select
+        id={id}
+        data-testid="remote-service-start-work-mode"
+        disabled={busy}
+        value={mode}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v === 'off') onSave(service.serviceId, [])
+          else if (v === 'all') onSave(service.serviceId, ['*'])
+          else onSave(service.serviceId, choices.length > 0 ? [choices[0]] : [])
+        }}
+        className="bg-bg border border-line rounded-lg px-2 py-1 text-[12.5px] text-fg w-fit"
+      >
+        <option value="off">Off</option>
+        <option value="all">All projects</option>
+        <option value="selected">Selected projects</option>
+      </select>
+      {mode === 'selected' && choices.map((p) => (
+        <label key={p} title={p} className="flex items-center gap-1.5 text-[11.5px] text-fg-dim">
+          <input
+            type="checkbox"
+            data-testid="remote-service-start-work-project"
+            data-cwd={p}
+            disabled={busy}
+            checked={targets.includes(p)}
+            onChange={(e) => onSave(service.serviceId, e.target.checked ? [...targets, p] : targets.filter((x) => x !== p))}
+          />
+          {baseName(p)}
+        </label>
+      ))}
+      <div data-testid="remote-service-start-work-note" className="text-[11px] text-fg-faint">
+        {mode === 'off'
+          ? 'Work it opens waits for your approval.'
+          : mode === 'all'
+            ? 'Work it opens in any project starts without a second approval.'
+            : `Work it opens starts without a second approval in ${targets.length} project${targets.length === 1 ? '' : 's'}.`}
+      </div>
+    </div>
+  )
+}
+
 function PendingRow({
   pending, onConfirm, onDeny, busy,
 }: {
@@ -283,6 +348,22 @@ export function SettingsRemoteServices({
     }
   }
 
+  const handleSetStartWork = async (serviceId: string, targets: string[]) => {
+    setBusyId(serviceId)
+    try {
+      const r = await window.api.webRemote.serviceSetStartWork(serviceId, targets)
+      if (!r.ok) {
+        showToast('error', `Could not save the start-work grant: ${r.error}`)
+        return
+      }
+      await refresh()
+    } catch (e) {
+      showToast('error', `Could not save the start-work grant: ${errMsg(e)}`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const handleRevokeOrphan = async (clientId: string) => {
     setConfirmRevoke(null)
     setBusyId(clientId)
@@ -439,6 +520,7 @@ export function SettingsRemoteServices({
                   subtitle={`${s.homeCwd} · ${s.scope.length} of ${SERVICE_TOOLS.length} tools · paired${s.pairedVia === 'local' ? ' locally' : ''} ${new Date(s.pairedAt).toLocaleDateString()}`}
                   action={revokeAction(s.serviceId, 'remote-service-revoke', () => handleRevokeService(s.serviceId))}
                 />
+                <StartWorkControl service={s} projects={projects} busy={busyId === s.serviceId} onSave={handleSetStartWork} />
                 {s.projectRoot && (
                   <div data-testid={`remote-service-project-root-${s.serviceId}`} className="text-[12px] text-fg-faint mt-1 px-[18px]">
                     New projects go in <span className="font-mono">{s.projectRoot}</span>

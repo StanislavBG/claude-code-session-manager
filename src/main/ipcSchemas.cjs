@@ -1575,6 +1575,10 @@ const webRemoteServicePairCancel = z.object({
 const webRemoteServiceRevoke = z.object({
   serviceId: z.string().regex(WEB_REMOTE_UUID_RE),
 }).strict();
+const webRemoteServiceSetStartWork = z.object({
+  serviceId: z.string().regex(WEB_REMOTE_UUID_RE),
+  targets: z.array(z.string().min(1).max(4096)).max(200),
+}).strict();
 const webRemoteRelayClientRevoke = z.object({
   clientId: z.string().uuid(),
 }).strict();
@@ -1908,6 +1912,7 @@ module.exports = {
     webRemoteServiceConfirmSas,
     webRemoteServicePairCancel,
     webRemoteServiceRevoke,
+    webRemoteServiceSetStartWork,
     webRemoteRelayClientRevoke,
     sessionSubscribe,
     ptySpawn,

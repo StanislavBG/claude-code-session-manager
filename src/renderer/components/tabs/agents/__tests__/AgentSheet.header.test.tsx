@@ -62,7 +62,7 @@ describe('AgentSheet header summary', () => {
   it('saved Bare reads floor only', async () => {
     expect(badge(await mount(persona('bare', [])))).toBe('Bare · floor only')
   })
-  it('Unbound (tools *) reads every tool, and Grant all switches a Bare draft to it', async () => {
+  it('saved Unbound (tools *) reads every tool', async () => {
     expect(badge(await mount(persona('unbound', ['*'])))).toBe('Unbound · every tool')
   })
   it('Grant all on a Bare agent reads every tool, not 0 tools', async () => {

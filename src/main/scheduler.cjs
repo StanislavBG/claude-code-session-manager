@@ -69,7 +69,7 @@ const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/cl
 // as the authoritative guarantee.
 ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/scheduler/launchFailure.cjs');
-const { isProtectedClaudePath } = require('./lib/prd/prdSandboxWarnings.cjs');
+const { isProtectedClaudePath, sandboxWarnings } = require('./lib/prd/prdSandboxWarnings.cjs');
 const { sandboxLimitFromStreamJson, environmentLimitStamp, ENVIRONMENT_LIMIT_MESSAGE } = require('./lib/scheduler/sandboxEnvironmentLimit.cjs');
 const { decideVerifyDowngrade } = require('./lib/scheduler/refireCap.cjs');
 const { finalizeReasonFor } = require('./lib/scheduler/finalizeReason.cjs');
@@ -142,7 +142,6 @@ const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require(
 const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan, fixPlanRecordPath } = require('./lib/scheduler/fixPlanSlug.cjs');
 const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSinceRun.cjs');
 const { declaredPathsForPrd, issuedAtForPrd, extractDeclaredPaths } = require('./lib/prd/prdDeclaredPaths.cjs');
-const { sandboxWarnings } = require('./lib/prd/prdSandboxWarnings.cjs');
 const { extractSection: extractPrdSection } = require('./lib/scheduler/definitionOfDone.cjs');
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const jobLeftovers = require('./lib/scheduler/jobLeftovers.cjs');

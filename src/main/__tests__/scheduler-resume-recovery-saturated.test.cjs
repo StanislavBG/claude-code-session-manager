@@ -52,7 +52,7 @@ function attemptedCount(proj) {
   } catch { return 0; }
 }
 
-async function runPass(name, gate, expected) {
+async function runPass(name, gate) {
   const proj = makeProject(name);
   const slugs = ['a', 'b', 'c'].map((x) => `9401-${name}-${x}`);
   for (const slug of slugs) fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), PRD_BODY, 'utf8');
@@ -69,14 +69,9 @@ async function runPass(name, gate, expected) {
   queueStore.bustCwdCache();
   scheduler._setLoadGateForTests(gate);
   await scheduler.reverifyNeedsReview();
-  let n = 0;
-  for (let i = 0; i < 100; i += 1) {
-    n = attemptedCount(proj);
-    if (n >= expected) break;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  // Give a wrongly-launched extra row time to show up.
-  await new Promise((r) => setTimeout(r, 300));
+  // Deterministic: every launch the pass started (and any a settling launch's tick
+  // started) has settled; no wall-clock poll, no grace sleep.
+  await scheduler.whenIdle();
   return attemptedCount(proj);
 }
 
@@ -117,9 +112,9 @@ afterAll(async () => {
 });
 
 test('saturated CPU (0.95 busy): a pass starts exactly one resume recovery', async () => {
-  expect(await runPass('sat', gateWithCpu(0.95), 1)).toBe(1);
+  expect(await runPass('sat', gateWithCpu(0.95))).toBe(1);
 }, 60_000);
 
 test('idle CPU (0.13 busy): a pass starts all three resume recoveries', async () => {
-  expect(await runPass('idle', gateWithCpu(0.13), 3)).toBe(3);
+  expect(await runPass('idle', gateWithCpu(0.13))).toBe(3);
 }, 60_000);

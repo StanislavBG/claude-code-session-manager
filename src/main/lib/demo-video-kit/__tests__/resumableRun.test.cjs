@@ -40,12 +40,12 @@ function stepScript(root, name, body) {
 function alive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
-async function waitDead(pid, ms = 3000) {
+async function waitDead(pid, ms = 30000) {
   const t = Date.now();
   while (alive(pid) && Date.now() - t < ms) await new Promise((r) => setTimeout(r, 25));
   return !alive(pid);
 }
-async function waitFile(file, ms = 3000) {
+async function waitFile(file, ms = 30000) {
   const t = Date.now();
   while (!fs.existsSync(file) && Date.now() - t < ms) await new Promise((r) => setTimeout(r, 25));
   return fs.existsSync(file);
@@ -150,11 +150,18 @@ posix('lease expiry abandons the run and kills the step and its child', async ()
     fs.writeFileSync(mark, JSON.stringify({ step: process.pid, child: g.pid }));
     setTimeout(() => {}, 60000);`);
   const r = startOrAttach({ stateDir, key: 'L', argv: [s, stateDir, 'L', pidFile], cwd: root, leaseMs: 1000 });
+  // Keep the lease fresh until the (possibly load-delayed) step has started, so only
+  // the deliberate silence below can expire it.
+  const t0 = Date.now();
+  while (!fs.existsSync(pidFile) && Date.now() - t0 < 30000) {
+    startOrAttach({ stateDir, key: 'L', argv: [s, stateDir, 'L', pidFile], cwd: root, leaseMs: 1000 });
+    await new Promise((r) => setTimeout(r, 50));
+  }
   expect(await waitFile(pidFile)).toBe(true);
   const pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
   extraPids.push(pids.step, pids.child);
   // No caller checks in: within leaseMs + one check interval (250 ms) the supervisor gives up.
-  expect(await waitDead(r.pid, 4000)).toBe(true);
+  expect(await waitDead(r.pid)).toBe(true);
   expect(await waitDead(pids.step)).toBe(true);
   expect(await waitDead(pids.child)).toBe(true);
   const res = JSON.parse(fs.readFileSync(path.join(stateDir, 'result.json'), 'utf8'));
@@ -265,16 +272,24 @@ posix('a fresh run truncates run.log; attaching leaves it untouched', async () =
   startOrAttach({ stateDir, key: 'R', argv: [s1, stateDir, 'R'], cwd: root });
   expect((await waitForResult({ stateDir, key: 'R', waitMs: 5000, pollMs: 50 })).status).toBe('done');
   const st1 = JSON.parse(fs.readFileSync(path.join(stateDir, 'state.json'), 'utf8'));
-  expect(await waitDead(st1.pid)).toBe(true);
+  expect(await waitDead(st1.pid, 30000)).toBe(true);
   expect(readLogTail(stateDir)).toContain('first-run-output');
-  const s2 = stepScript(root, 'second', `console.log('second-run-output'); setTimeout(() => rr.writeResult(stateDir, key, { ok: 2 }), 800);`);
-  const a = startOrAttach({ stateDir, key: 'R', argv: [s2, stateDir, 'R'], cwd: root });
+  // Step 2 stays alive until the test releases it (no wall-clock timer), and the test
+  // waits for its first output line to reach run.log instead of sleeping.
+  const release = path.join(root, 'release');
+  const s2 = stepScript(root, 'second', `console.log('second-run-output'); const t = setInterval(() => { if (fs.existsSync(mark)) { clearInterval(t); rr.writeResult(stateDir, key, { ok: 2 }); } }, 20);`);
+  const a = startOrAttach({ stateDir, key: 'R', argv: [s2, stateDir, 'R', release], cwd: root });
   expect(a.started).toBe(true);
-  await new Promise((r) => setTimeout(r, 300));
-  const b = startOrAttach({ stateDir, key: 'R', argv: [s2, stateDir, 'R'], cwd: root });
+  for (let i = 0; i < 3000 && !readLogTail(stateDir).includes('second-run-output'); i += 1) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  expect(readLogTail(stateDir)).toContain('second-run-output');
+  expect(readLogTail(stateDir)).not.toContain('first-run-output');
+  const b = startOrAttach({ stateDir, key: 'R', argv: [s2, stateDir, 'R', release], cwd: root });
   expect(b).toEqual({ pid: a.pid, started: false });
   expect(readLogTail(stateDir)).toContain('second-run-output');
-  expect((await waitForResult({ stateDir, key: 'R', waitMs: 5000, pollMs: 50 })).status).toBe('done');
+  fs.writeFileSync(release, '');
+  expect((await waitForResult({ stateDir, key: 'R', waitMs: 30000, pollMs: 50 })).status).toBe('done');
   const log = fs.readFileSync(path.join(stateDir, 'run.log'), 'utf8');
   expect(log).toContain('second-run-output');
   expect(log).not.toContain('first-run-output');

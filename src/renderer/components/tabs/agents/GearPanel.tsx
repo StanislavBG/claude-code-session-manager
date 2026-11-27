@@ -67,7 +67,15 @@ const STATUS: Record<ArmoryMcpItem['status'], { dot: string; text: string }> = {
   'not-checked': { dot: 'bg-fg-faint', text: 'not checked' },
 }
 
-export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft>) => void }) {
+export function GearPanel({ obj, set, baseline, onRestore, projectName }: {
+  obj: Draft
+  set: (patch: Partial<Draft>) => void
+  /** Project mode only: the global draft to mark added/removed items against. */
+  baseline?: Draft
+  /** Project mode only: removes these keys from the overlay (the item goes back to the global list). */
+  onRestore?: (keys: Array<'tools' | 'mcpServers' | 'packs'>) => void
+  projectName?: string
+}) {
   const [armory, setArmory] = useState<Armory | null>(null)
   const [open, setOpen] = useState(false)
   const [powersOf, setPowersOf] = useState<string | null>(null)
@@ -89,6 +97,15 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
   }, [])
 
   const unbound = isUnbound(obj.tools)
+  const marking = !!baseline && !!onRestore
+  const baseTools = baseline?.tools ?? []
+  const baseBound = marking && !isUnbound(baseTools)
+  const baseServers = marking ? [...new Set([...(baseline?.mcpServers ?? []), ...serversOfTools(baseTools)])] : []
+  const basePacks = marking ? (baseline?.packs ?? []) : []
+  const restore = (keys: Array<'tools' | 'mcpServers' | 'packs'>) => onRestore?.(keys)
+  const restoreBtn = (testid: string, keys: Array<'tools' | 'mcpServers' | 'packs'>) => (
+    <button type="button" data-testid={testid} onClick={() => restore(keys)} className="text-[12px] text-accent hover:underline px-1">Restore</button>
+  )
   const floorIds = new Set((armory?.builtins ?? []).filter((b) => b.badges.includes('floor')).map((b) => b.id))
   const builtins: ArmoryItem[] = armory
     ? armory.builtins.filter((b) => !floorIds.has(b.id))
@@ -192,18 +209,28 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
         <div className="flex flex-wrap gap-1.5">
           {builtins.map((b) => {
             const on = unbound || obj.tools.includes(b.id)
+            const added = baseBound && on && !unbound && !baseTools.includes(b.id)
+            const removed = baseBound && !on && baseTools.includes(b.id)
+            if (removed) {
+              return (
+                <span key={b.id} data-tool={b.id} data-marker="removed" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[12px] font-mono border border-dashed border-rule bg-transparent text-fg-faint">
+                  <span className="line-through">{b.label}</span><span className="text-[10px]">− removed</span>{restoreBtn('agent-restore-tool', ['tools'])}
+                </span>
+              )
+            }
             return (
               <button
                 key={b.id}
                 type="button"
                 aria-pressed={on}
                 data-tool={b.id}
+                data-marker={added ? 'added' : undefined}
                 onClick={() => toggleTool(b.id)}
                 className={`px-2 py-0.5 rounded-md text-[12px] font-mono border ${
-                  on ? 'bg-bg text-fg border-rule' : 'bg-transparent text-fg-faint border-dashed border-rule'
+                  added ? 'bg-bg text-accent border-accent' : on ? 'bg-bg text-fg border-rule' : 'bg-transparent text-fg-faint border-dashed border-rule'
                 }`}
               >
-                {b.label}<Badges badges={b.badges} />
+                {added && '+'}{b.label}<Badges badges={b.badges} />
               </button>
             )
           })}
@@ -232,16 +259,26 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
 
       <Row testid="agent-mcp-row" title="MCP servers" sub="magic items" drop={dropProps('mcp')}>
         <div className="flex flex-col gap-2">
+          {baseServers.filter((id) => !servers.includes(id)).map((id) => (
+            <div key={`removed-${id}`} data-testid="agent-mcp-removed" data-server={id} data-marker="removed" className="rounded-[12px] border border-dashed border-rule bg-bg px-3 py-2 flex items-center gap-2 min-w-0 text-fg-faint">
+              <div className="min-w-0 flex-1">
+                <div title={id} className="font-mono text-[13px] font-semibold truncate line-through">{id}</div>
+                <div className="text-[11.5px]">− removed{projectName ? ` in ${projectName}` : ''}</div>
+              </div>
+              {restoreBtn('agent-restore-mcp', ['tools', 'mcpServers'])}
+            </div>
+          ))}
           {servers.map((id) => {
             const a = armoryServer(id)
+            const addedServer = marking && !baseServers.includes(id)
             const st = STATUS[a?.status ?? 'not-checked']
             const total = a?.tools.length ?? 0
             const have = unbound ? total : obj.tools.filter((t) => t.startsWith(MCP_PREFIX(id))).length
             return (
               <div key={id}>
-              <div data-testid="agent-mcp-item" data-server={id} className="rounded-[12px] border border-line bg-bg px-3 py-2 flex items-center gap-2 min-w-0">
+              <div data-testid="agent-mcp-item" data-server={id} data-marker={addedServer ? 'added' : undefined} className="rounded-[12px] border border-line bg-bg px-3 py-2 flex items-center gap-2 min-w-0">
                 <div className="min-w-0 flex-1">
-                  <div title={id} className="font-mono text-[13px] font-semibold text-fg truncate">{id}<Badges badges={a?.badges ?? []} /></div>
+                  <div title={id} className="font-mono text-[13px] font-semibold text-fg truncate">{addedServer && <span className="text-accent">+ </span>}{id}<Badges badges={a?.badges ?? []} /></div>
                   <div className="text-[11.5px] text-fg-dim flex items-center gap-1.5">
                     <span data-testid="agent-mcp-dot" className={`inline-block w-1.5 h-1.5 rounded-full ${st.dot}`} />
                     {st.text}{a ? ` · ${have} of ${total} powers` : ''}
@@ -271,12 +308,19 @@ export function GearPanel({ obj, set }: { obj: Draft; set: (patch: Partial<Draft
 
       <Row testid="agent-packs-row" title="Packs" sub="spellbooks" drop={dropProps('pack')}>
         <div className="flex flex-col gap-2">
+          {basePacks.filter((id) => !packs.includes(id)).map((id) => (
+            <div key={`removed-${id}`} data-testid="agent-pack-removed" data-pack={id} data-marker="removed" className="rounded-[12px] border border-dashed border-rule bg-bg px-3 py-2 flex items-center gap-2 text-fg-faint">
+              <div className="min-w-0 flex-1"><div className="font-mono text-[13px] font-semibold truncate line-through">{id}</div><div className="text-[11.5px]">− removed{projectName ? ` in ${projectName}` : ''}</div></div>
+              {restoreBtn('agent-restore-pack', ['packs'])}
+            </div>
+          ))}
           {packs.map((id) => {
             const p = armoryPack(id)
+            const addedPack = marking && !basePacks.includes(id)
             return (
-              <div key={id} data-testid="agent-pack-item" data-pack={id} className="rounded-[12px] border border-line bg-bg px-3 py-2 flex items-start gap-2">
+              <div key={id} data-testid="agent-pack-item" data-pack={id} data-marker={addedPack ? 'added' : undefined} className="rounded-[12px] border border-line bg-bg px-3 py-2 flex items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <div title={id} className="font-mono text-[13px] font-semibold text-fg truncate">{id}</div>
+                  <div title={id} className="font-mono text-[13px] font-semibold text-fg truncate">{addedPack && <span className="text-accent">+ </span>}{id}</div>
                   {p && <div className="text-[11.5px] text-fg-dim">{p.source ? `${p.source} · ` : ''}{p.skills.length} skills</div>}
                   {p && (
                     <div className="flex flex-wrap gap-1 mt-1">

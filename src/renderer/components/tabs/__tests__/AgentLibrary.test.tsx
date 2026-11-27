@@ -419,7 +419,7 @@ describe('AgentLibrary', () => {
     expect(el.textContent).toContain('agents carrying this tag')
   })
 
-  it('a persona with an overlay: no chip row; In project shows the picker and marks the overridden model', async () => {
+  it('a persona with an overlay: no chip row; In project shows the pill and marks the overridden model', async () => {
     installWindowApiMock([
       {
         ...PERSONAS[1],
@@ -429,10 +429,10 @@ describe('AgentLibrary', () => {
     ])
     const el = await mount()
     expect(el.querySelector('[data-testid="agent-override-chip"]')).toBeNull()
-    expect(el.querySelector('[data-testid="agent-project-select"]')).toBeNull()
+    expect(el.querySelector('[data-testid="agent-project-pill"]')).toBeNull()
     const inProject = Array.from(el.querySelectorAll('[data-testid="agent-scope-switch"] button')).find((b) => b.textContent === 'In project') as HTMLElement
     await act(async () => { inProject.click(); await Promise.resolve() })
-    expect(el.querySelector('[data-testid="agent-project-select"]')).toBeTruthy()
+    expect(el.querySelector('[data-testid="agent-project-pill"]')).toBeTruthy()
   })
 
   it('the body is edited in DocumentEditorPane (Document mode) and saved as the body, Revert discards it', async () => {

@@ -89,8 +89,15 @@ const FRAMES: Frame[] = [
   { name: 'project-override', testid: 'agent-roster', reference: '1h-project-override.png', setUp: async (page) => {
     await openSheet('builder')(page)
     await page.getByRole('button', { name: 'In project' }).click()
-    await page.getByTestId('agent-project-select').selectOption({ label: 'Self' })
+    await page.getByTestId('agent-project-pill').click()
+    await page.getByTestId('agent-project-option').filter({ hasText: 'Self' }).click()
     await page.getByTestId('agent-project-override').waitFor()
+    // 1h layout: 'In <project> ▾' pill, project badge on the avatar, overlay header path, no empty DETAILS card, Other-projects card.
+    if (!/In Self/.test((await page.getByTestId('agent-project-pill').textContent()) ?? '')) throw new Error("scope control must be the 'In Self ▾' pill")
+    await page.getByTestId('agent-project-badge').waitFor()
+    if (!/PROJECT OVERLAY.*\/Self\/\.claude\/agents\/builder\.md/.test((await page.getByTestId('agent-header-path').textContent()) ?? '')) throw new Error('header path must be the overlay path')
+    if (await page.getByTestId('agent-details').count()) throw new Error('no empty DETAILS card in project mode')
+    await page.getByTestId('agent-other-projects').waitFor()
   } },
 ]
 

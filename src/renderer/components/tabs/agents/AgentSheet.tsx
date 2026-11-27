@@ -15,7 +15,7 @@ import { Z } from '../../../lib/zLayers'
 import type { AgentPersona } from '../../../../preload/api'
 import {
   COLORS, COLOR_SWATCH, MoreMenu, RowLabel, ModelSelect, EffortSelect, RunsOnSelect,
-  toDraft, overlayOf, overlayEdit, overlayDiff, type OverlayKeys, type Draft, type OpenProject,
+  toDraft, overrideParts, overlayOf, overlayEdit, overlayDiff, type OverlayKeys, type Draft, type OpenProject,
 } from './AgentDetail'
 import { GearPanel } from './GearPanel'
 import { LoadoutFirstRun, showsFirstRun } from './LoadoutFirstRun'
@@ -40,14 +40,23 @@ const STATE_DOT: Record<LoadoutState, string> = { undecided: '#d3a23c', equipped
 const STATE_LABEL: Record<LoadoutState, string> = { undecided: 'Undecided', equipped: 'Equipped', bare: 'Bare', unbound: 'Unbound' }
 const EFFORT_PIPS = ['low', 'medium', 'high', 'xhigh', 'max']
 
-function Avatar({ name, color, size }: { name: string; color: string | null; size: number }) {
-  return (
+function Avatar({ name, color, size, badge }: { name: string; color: string | null; size: number; badge?: string }) {
+  const disc = (
     <span
       aria-hidden="true"
       className="inline-flex items-center justify-center rounded-full font-serif font-semibold text-white shrink-0"
       style={{ width: size, height: size, background: avatarColor(color), fontSize: Math.round(size * 0.45) }}
     >
       {(name[0] ?? '?').toUpperCase()}
+    </span>
+  )
+  if (!badge) return disc
+  return (
+    <span className="relative inline-flex shrink-0">
+      {disc}
+      <span data-testid="agent-project-badge" title={badge} className="absolute -right-1 -bottom-1 w-5 h-5 rounded-full bg-[#6f7d52] border-2 border-bg text-white text-[10px] font-bold inline-flex items-center justify-center">
+        {(badge[0] ?? '?').toUpperCase()}
+      </span>
     </span>
   )
 }
@@ -144,6 +153,37 @@ export function AgentWorkbench({ expanded, onToggle, list, personas, selectedNam
   )
 }
 
+/** The 'In <project> ▾' pill: a button opening a menu of the open projects. */
+function ProjectPill({ projects, selected, busy, onSelect }: { projects: OpenProject[]; selected: OpenProject | null; busy: boolean; onSelect: (cwd: string | null) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        data-testid="agent-project-pill"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={busy}
+        onClick={() => setOpen((o) => !o)}
+        className="px-2.5 py-1 text-[12px] rounded-full bg-bg text-fg font-medium shadow-sm border border-accent max-w-[200px] truncate flex items-center gap-1.5"
+      >
+        <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-[#6f7d52]" />
+        {selected ? `In ${selected.name}` : 'In project'} ▾
+      </button>
+      {open && (
+        <div role="menu" data-testid="agent-project-menu" className={`absolute ${Z.dialog} right-0 top-[34px] min-w-[180px] p-[5px] flex flex-col bg-bg-hi border border-line rounded-lg shadow-lg text-[13px] text-fg`}>
+          {projects.map((p) => (
+            <button key={p.cwd} type="button" role="menuitem" data-testid="agent-project-option" data-cwd={p.cwd} onClick={() => { setOpen(false); onSelect(p.cwd) }} className="text-left px-2.5 py-1.5 rounded hover:bg-bg">
+              {p.name}
+            </button>
+          ))}
+          {projects.length === 0 && <div className="px-2.5 py-1.5 text-fg-faint">No open projects</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---- the sheet ----------------------------------------------------------------------------------
 
 function AppliesToCard() {
@@ -214,6 +254,8 @@ export function AgentSheet({
   const projectView: Draft = { ...globalDraft, ...overlay }
   const view = inProject && selected ? projectView : obj
   const diffs = inProject && selected ? overlayDiff(globalDraft, overlay) : []
+  const otherOverrides = inProject && selected ? (saved?.overrideDetails ?? []).filter((d) => d.cwd !== selected.cwd && projects.some((p) => p.cwd === d.cwd)) : []
+  const globalOthers = inProject && selected ? projects.filter((p) => p.cwd !== selected.cwd && !otherOverrides.some((d) => d.cwd === p.cwd)).length : 0
   const edit = (patch: Partial<Draft>) => { if (selected && !fullBody && !busy) onSaveOverride(overlayEdit(overlay, patch)) }
   const reset = (keys: ReadonlyArray<keyof OverlayKeys>) => {
     const next = { ...overlay }
@@ -263,7 +305,7 @@ export function AgentSheet({
     <div data-testid="agent-sheet" onKeyDown={onKeyDown} className="flex-1 shrink-0 min-h-full flex flex-col">
       <div data-testid="agent-detail" className="flex-1 shrink-0 flex flex-col">
         <header data-testid="config-detail-header" className="shrink-0 px-9 pt-6 pb-4 flex items-start gap-4 border-b border-line">
-          <Avatar name={obj.name} color={obj.color || null} size={56} />
+          <Avatar name={obj.name} color={obj.color || null} size={56} badge={inProject && selected ? selected.name : undefined} />
           <div className="flex-1 min-w-0 flex flex-col gap-1">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-[22px] font-semibold text-fg font-mono truncate">{obj.name}</h1>
@@ -289,8 +331,10 @@ export function AgentSheet({
                 return <span key={t} className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${tone.bg} ${tone.text}`}>#{t}</span>
               })}
             </div>
-            <div className="text-[11px] text-fg-faint font-mono truncate">AGENT · USER · {compactPath(path, home)}</div>
-        <details data-testid="agent-details" open={isNew || undefined} hidden={inProject} className="group mt-1">
+            <div data-testid="agent-header-path" className="text-[11px] text-fg-faint font-mono truncate">
+              {inProject && selected ? `AGENT · PROJECT OVERLAY · ${compactPath(selected.cwd, home)}/.claude/agents/${obj.name}.md` : `AGENT · USER · ${compactPath(path, home)}`}
+            </div>
+        {!inProject && <details data-testid="agent-details" open={isNew || undefined} className="group mt-1">
           <summary className="cursor-pointer select-none flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">
             <span>edit name · colour · tags</span>
             <span className="normal-case tracking-normal font-normal font-mono text-fg-dim flex items-center gap-1.5">
@@ -357,7 +401,7 @@ export function AgentSheet({
               </div>
             </div>
           </div>
-        </details>
+        </details>}
           </div>
           <div className="shrink-0 flex items-center gap-2">
             <div role="group" aria-label="Scope" data-testid="agent-scope-switch" className="inline-flex items-center p-0.5 rounded bg-bg-hi border border-line">
@@ -365,18 +409,13 @@ export function AgentSheet({
                 const on = (label === 'In project') === inProject
                 if (label === 'In project' && on) {
                   return (
-                    <select
+                    <ProjectPill
                       key={label}
-                      data-testid="agent-project-select"
-                      aria-label="Project"
-                      value={selected?.cwd ?? ''}
-                      onChange={(e) => onSelect(e.target.value || null)}
-                      disabled={busy}
-                      className="px-2 py-1 text-[12px] rounded bg-bg text-fg font-medium shadow-sm border-0 max-w-[180px]"
-                    >
-                      <option value="">In project ▾</option>
-                      {projects.map((p) => <option key={p.cwd} value={p.cwd}>{p.name}</option>)}
-                    </select>
+                      projects={projects}
+                      selected={selected}
+                      busy={busy}
+                      onSelect={onSelect}
+                    />
                   )
                 }
                 return (
@@ -498,7 +537,7 @@ export function AgentSheet({
 
             {showsFirstRun(state === 'undecided' && !isNew && !!saved && !inProject, obj, saved?.tools ?? [], picking, choiceDismissed)
               ? <LoadoutFirstRun obj={obj} set={set} picking={picking} setPicking={setPicking} onDismiss={() => setChoiceDismissed(true)} />
-              : <GearPanel obj={view} set={editing} />}
+              : <GearPanel obj={view} set={editing} {...(inProject && selected ? { baseline: globalDraft, onRestore: reset, projectName: selected.name } : {})} />}
 
             <section data-testid="agent-personality" data-busy={busy ? 'true' : undefined} className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
               <div className="flex items-center gap-2">
@@ -538,6 +577,23 @@ export function AgentSheet({
               </section>
             )}
             <ConstraintsPanel obj={view} set={editing} />
+            {inProject && selected && (
+              <section data-testid="agent-other-projects" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Other open projects</div>
+                {otherOverrides.map((d) => (
+                  <div key={d.cwd} data-testid="agent-other-project" data-cwd={d.cwd} className="mt-2 flex items-center gap-2 text-[12.5px]">
+                    <span className="w-2 h-2 rounded-full bg-accent" />
+                    <strong className="text-fg">{projects.find((p) => p.cwd === d.cwd)?.name ?? d.project}</strong>
+                    <span className="flex-1 text-fg-dim">{overrideParts(d).join(', ') || 'overlay'}</span>
+                    <button type="button" data-testid="agent-other-project-view" onClick={() => onSelect(d.cwd)} className="text-accent hover:underline">View ›</button>
+                  </div>
+                ))}
+                <div className="mt-2 text-[12px] text-fg-faint">
+                  {otherOverrides.length === 0 ? 'No other open project overrides this agent.' : ''}
+                  {globalOthers > 0 ? `${globalOthers} more use the global sheet.` : ''}
+                </div>
+              </section>
+            )}
             <AppliesToCard />
           </div>
         </div>

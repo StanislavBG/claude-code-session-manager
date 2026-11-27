@@ -42,7 +42,7 @@ async function mount(details: Detail[], cwds: string[]) {
   ;(window as unknown as { api: unknown }).api = {
     agents: {
       listPersonas: vi.fn().mockResolvedValue([persona(details)]),
-      armory: vi.fn().mockResolvedValue({ builtins: [], bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], errors: [] }),
+      armory: vi.fn().mockResolvedValue({ builtins: ['Read', 'Grep', 'Edit'].map((id) => ({ id, label: id, badges: [] })), bundledSkills: [], mcpServers: [], packs: [], unpackedSkills: [], errors: [] }),
       savePersona, deletePersona: vi.fn(), removeOverride, onChanged: vi.fn(() => () => {}),
     },
     app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
@@ -68,12 +68,8 @@ const goInProject = async (el: HTMLElement) => {
   await click(b)
 }
 const choose = async (el: HTMLElement, cwd: string) => {
-  await act(async () => {
-    const s = q(el, 'agent-project-select') as HTMLSelectElement
-    s.value = cwd
-    s.dispatchEvent(new Event('change', { bubbles: true }))
-    await flush()
-  })
+  await click(q(el, 'agent-project-pill')!)
+  await click(el.querySelector(`[data-testid="agent-project-option"][data-cwd="${cwd}"]`) as HTMLElement)
 }
 const pickModel = async (el: HTMLElement, v: string) => {
   await act(async () => {
@@ -97,20 +93,25 @@ describe('AgentSheet In project mode', () => {
   it('Global | In project switches mode: picker lists open projects, none preselected, Save bar only in Global', async () => {
     const el = await mount([], ['/work/beta', '/work/alpha'])
     expect(q(el, 'agent-save-bar')).toBeTruthy()
-    expect(q(el, 'agent-project-select')).toBeNull()
+    expect(q(el, 'agent-project-pill')).toBeNull()
     await goInProject(el)
-    const sel = q(el, 'agent-project-select') as HTMLSelectElement
-    expect(Array.from(sel.options).map((o) => [o.value, o.textContent])).toEqual([['', 'In project ▾'], ['/work/alpha', 'alpha'], ['/work/beta', 'beta']])
-    expect(sel.value).toBe('')
+    expect(q(el, 'agent-project-pill')!.textContent).toContain('In project')
+    await click(q(el, 'agent-project-pill')!)
+    expect(Array.from(el.querySelectorAll('[data-testid="agent-project-option"]')).map((o) => [o.getAttribute('data-cwd'), o.textContent])).toEqual([['/work/alpha', 'alpha'], ['/work/beta', 'beta']])
+    await click(q(el, 'agent-project-pill')!)
     expect(q(el, 'project-override-unselected')).toBeTruthy()
     expect(q(el, 'agent-save-bar')).toBeNull()
     await choose(el, '/work/beta')
     expect(q(el, 'agent-project-override')!.textContent).toContain('beta overlay')
     expect(q(el, 'agent-project-bar')!.textContent).toContain('/work/beta/.claude/agents/dev-lead.md')
+    expect(q(el, 'agent-header-path')!.textContent).toContain('PROJECT OVERLAY · /work/beta/.claude/agents/dev-lead.md')
+    expect(q(el, 'agent-project-badge')).toBeTruthy()
+    expect(q(el, 'agent-details')).toBeNull()
+    expect(q(el, 'agent-project-pill')!.textContent).toContain('In beta')
     const global = Array.from(el.querySelectorAll('[data-testid="agent-scope-switch"] button')).find((x) => x.textContent === 'Global') as HTMLElement
     await click(global)
     expect(q(el, 'agent-save-bar')).toBeTruthy()
-    expect(q(el, 'agent-project-select')).toBeNull()
+    expect(q(el, 'agent-project-pill')).toBeNull()
   })
 
   it('marks overridden sections and shows the merged model', async () => {
@@ -152,6 +153,24 @@ describe('AgentSheet In project mode', () => {
     expect(savePersona).not.toHaveBeenCalled()
     await click(q(el, 'agent-reset-all')!)
     expect(removeOverride).toHaveBeenLastCalledWith({ name: 'dev-lead', projectCwd: '/work/alpha' })
+  })
+
+  it('gear rows mark added/removed vs global; Restore removes that key; Other open projects lists the rest', async () => {
+    const el = await mount([
+      detail('/work/alpha', ['tools'], { tools: 'Read, Edit' }),
+      detail('/work/beta', ['model'], { model: 'opus' }),
+    ], ['/work/alpha', '/work/beta', '/work/gamma'])
+    await goInProject(el)
+    await choose(el, '/work/alpha')
+    const grep = el.querySelector('[data-tool="Grep"]') as HTMLElement
+    expect(grep.getAttribute('data-marker')).toBe('removed')
+    expect(el.querySelector('[data-tool="Edit"]')!.getAttribute('data-marker')).toBe('added')
+    expect(el.querySelector('[data-tool="Read"]')!.getAttribute('data-marker')).toBeNull()
+    const others = el.querySelectorAll('[data-testid="agent-other-project"]')
+    expect(others).toHaveLength(1)
+    expect(q(el, 'agent-other-projects')!.textContent).toContain('1 more use the global sheet')
+    await click(q(el, 'agent-restore-tool')!)
+    expect(removeOverride).toHaveBeenCalledWith({ name: 'dev-lead', projectCwd: '/work/alpha' })
   })
 
   it('a full-body overlay is flagged and never written', async () => {

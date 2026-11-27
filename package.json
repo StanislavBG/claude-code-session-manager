@@ -1,6 +1,6 @@
 {
   "name": "claude-code-session-manager",
-  "version": "0.143.0",
+  "version": "0.144.0",
   "description": "Free desktop app for Claude Code: run many sessions, each in its own git worktree; queue work that runs headless within your usage limits; agents drive it through an MCP server and skills.",
   "type": "module",
   "main": "src/main/index.cjs",

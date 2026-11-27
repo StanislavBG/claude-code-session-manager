@@ -87,7 +87,10 @@ function StartWorkControl({
   onSave: (serviceId: string, targets: string[]) => void
 }) {
   const targets = service.startWork?.targets ?? []
-  const mode: 'off' | 'all' | 'selected' = targets.length === 0 ? 'off' : targets.includes('*') ? 'all' : 'selected'
+  // 'Selected projects' chosen but nothing ticked yet: local, never saved.
+  const [pendingSelected, setPendingSelected] = useState(false)
+  const savedMode: 'off' | 'all' | 'selected' = targets.length === 0 ? 'off' : targets.includes('*') ? 'all' : 'selected'
+  const mode = pendingSelected && savedMode !== 'all' ? 'selected' : savedMode
   const choices = useMemo(
     () => Array.from(new Set([...projects, ...targets.filter((t) => t !== '*')])),
     [projects, targets],
@@ -103,9 +106,9 @@ function StartWorkControl({
         value={mode}
         onChange={(e) => {
           const v = e.target.value
-          if (v === 'off') onSave(service.serviceId, [])
-          else if (v === 'all') onSave(service.serviceId, ['*'])
-          else onSave(service.serviceId, choices.length > 0 ? [choices[0]] : [])
+          if (v === 'off') { setPendingSelected(false); onSave(service.serviceId, []) }
+          else if (v === 'all') { setPendingSelected(false); onSave(service.serviceId, ['*']) }
+          else if (savedMode !== 'selected') setPendingSelected(true)
         }}
         className="bg-bg border border-line rounded-lg px-2 py-1 text-[12.5px] text-fg w-fit"
       >
@@ -121,7 +124,11 @@ function StartWorkControl({
             data-cwd={p}
             disabled={busy}
             checked={targets.includes(p)}
-            onChange={(e) => onSave(service.serviceId, e.target.checked ? [...targets, p] : targets.filter((x) => x !== p))}
+            onChange={(e) => {
+              const next = e.target.checked ? [...targets, p] : targets.filter((x) => x !== p)
+              if (next.length === 0) setPendingSelected(false)
+              onSave(service.serviceId, next)
+            }}
           />
           {baseName(p)}
         </label>
@@ -131,7 +138,11 @@ function StartWorkControl({
           ? 'Work it opens waits for your approval.'
           : mode === 'all'
             ? 'Work it opens in any project starts without a second approval.'
-            : `Work it opens starts without a second approval in ${targets.length} project${targets.length === 1 ? '' : 's'}.`}
+            : targets.length === 0
+              ? choices.length === 0
+                ? 'There are no projects to pick yet.'
+                : 'Tick at least one project; until then nothing is granted.'
+              : `Work it opens starts without a second approval in ${targets.length} project${targets.length === 1 ? '' : 's'}.`}
       </div>
     </div>
   )

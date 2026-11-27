@@ -335,6 +335,40 @@ describe('SettingsRemoteServices', () => {
       expect(api.serviceSetStartWork).toHaveBeenCalledWith('svc-1', ['/home/u/Self', '/home/u/Other'])
     })
 
+    it('Selected projects saves nothing until a project is ticked', async () => {
+      withGrant(null)
+      await mount()
+      await setMode('selected')
+      expect(api.serviceSetStartWork).not.toHaveBeenCalled()
+      expect((q('remote-service-start-work-mode') as HTMLSelectElement).value).toBe('selected')
+      expect(qa('remote-service-start-work-project').length).toBeGreaterThan(0)
+      expect(q('remote-service-start-work-note')!.textContent).toContain('Tick at least one project')
+      await click(container!.querySelector('[data-cwd="/home/u/Other"]') as HTMLElement)
+      expect(api.serviceSetStartWork).toHaveBeenCalledWith('svc-1', ['/home/u/Other'])
+    })
+
+    it('Selected projects with no known projects explains and stays selected', async () => {
+      withGrant(null)
+      useSessions.setState({ tabs: [] as never })
+      await mount()
+      await setMode('selected')
+      expect(api.serviceSetStartWork).not.toHaveBeenCalled()
+      expect((q('remote-service-start-work-mode') as HTMLSelectElement).value).toBe('selected')
+      expect(q('remote-service-start-work-note')!.textContent).toContain('no projects to pick')
+    })
+
+    it('unticking the last project revokes and reads Off', async () => {
+      withGrant(['/home/u/Self'])
+      await mount()
+      api.serviceSetStartWork.mockImplementationOnce(async () => {
+        withGrant(null)
+        return { ok: true, service }
+      })
+      await click(container!.querySelector('[data-cwd="/home/u/Self"]') as HTMLElement)
+      expect(api.serviceSetStartWork).toHaveBeenCalledWith('svc-1', [])
+      expect((q('remote-service-start-work-mode') as HTMLSelectElement).value).toBe('off')
+    })
+
     it('turns off to revoke', async () => {
       withGrant(['*'])
       await mount()

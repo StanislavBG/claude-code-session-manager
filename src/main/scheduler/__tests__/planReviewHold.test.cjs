@@ -8,7 +8,7 @@ const { reviewerModelFor } = hold;
 
 const row = (slug, extra = {}) => ({ slug, status: 'pending', cwd: '/p', dependsOn: [], ...extra });
 const validator = (deps, extra = {}) => row('90-validate', {
-  agentType: 'validator', planReview: 'required', dependsOn: deps, createdAt: '2026-01-01T00:00:00Z', ...extra,
+  agentType: 'validator', planReview: 'required', dependsOn: deps, queuedAt: '2026-01-01T00:00:00Z', ...extra,
 });
 const NOW = Date.parse('2026-01-01T01:00:00Z');
 const HOUR = 3600 * 1000;
@@ -56,6 +56,23 @@ describe('planReviewHold rules', () => {
     expect(r.needsReview).toEqual([]);
     const old = hold.computePlanReviewHolds(plan3(), {}, { now, holdMs: 4 * HOUR });
     expect(old.expired).toEqual(['90-validate']);
+  });
+  it('queuedAt older than holdMs (no createdAt, no review) is expired', () => {
+    const r = hold.computePlanReviewHolds(plan3(), {}, { now: NOW + 5 * HOUR, holdMs: 4 * HOUR });
+    expect(plan3()[3].createdAt).toBeUndefined();
+    expect(r.expired).toEqual(['90-validate']);
+  });
+  it('queuedAt within holdMs is not expired', () => {
+    const r = hold.computePlanReviewHolds(plan3(), {}, { now: NOW + 3 * HOUR, holdMs: 4 * HOUR });
+    expect(r.expired).toEqual([]);
+  });
+  it('planReviewHeldAt alone older than holdMs is expired', () => {
+    const rows = [row('1-a'), row('2-b'), row('3-c'),
+      validator(['a', 'b', 'c'], { queuedAt: undefined, planReviewHeldAt: '2026-01-01T00:00:00Z' })];
+    const r = hold.computePlanReviewHolds(rows, {}, { now: NOW + 5 * HOUR, holdMs: 4 * HOUR });
+    expect(r.expired).toEqual(['90-validate']);
+    const fresh = hold.computePlanReviewHolds(rows, {}, { now: NOW + HOUR, holdMs: 4 * HOUR });
+    expect(fresh.expired).toEqual([]);
   });
   it('ignores rows from another cwd', () => {
     const rows = [row('1-a'), row('2-b'), row('3-c', { cwd: '/other' }), validator(['a', 'b', 'c'])];

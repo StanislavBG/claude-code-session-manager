@@ -9,6 +9,8 @@
  *
  * Record fields read (all optional): `release` (non-null object, as planReviewStore.recordPlanRelease writes it = released),
  * `firstReviewAt` / `reviews[0].at` (hold start when a review exists).
+ * Hold-start fields, in order: review record, then validator row `queuedAt`
+ * (stamped at enqueue), `planReviewHeldAt`, `createdAt`.
  */
 
 const { bareSlug } = require('../lib/prd/depSlugResolve.cjs');
@@ -78,11 +80,15 @@ function isReleased(record) {
 }
 
 function holdStartMs(validateRow, record) {
-  const first = record?.firstReviewAt ?? record?.reviews?.[0]?.at;
-  const t = Date.parse(first ?? '');
-  if (Number.isFinite(t)) return t;
-  const c = Date.parse(validateRow.createdAt ?? '');
-  return Number.isFinite(c) ? c : null;
+  const candidates = [
+    record?.firstReviewAt, record?.reviews?.[0]?.at,
+    validateRow?.queuedAt, validateRow?.planReviewHeldAt, validateRow?.createdAt,
+  ];
+  for (const c of candidates) {
+    const t = Date.parse(c ?? '');
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
 }
 
 /**

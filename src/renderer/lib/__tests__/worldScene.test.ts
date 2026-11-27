@@ -5,6 +5,8 @@ import {
   drawWorld,
   groupLabel,
   layoutGroups,
+  layoutRoomActors,
+  layoutRooms,
   layoutWorld,
   spriteSpec,
 } from '../worldScene'
@@ -165,5 +167,73 @@ describe('drawWorld', () => {
     expect(texts).toContain('dev-lead ×30')
     expect(texts).toContain(groupLabel('architect', 3))
     expect(texts).toHaveLength(3)
+  })
+})
+
+const mkRooms = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    key: `p${i}`,
+    label: `Proj${i}`,
+    roster: i % 3 === 0 ? [] : [{ agentType: 'architect', count: 1 }, { agentType: 'dev-lead', count: i * 4 }],
+  }))
+
+describe('layoutRooms', () => {
+  it('handles 0 rooms and zero size', () => {
+    expect(layoutRooms([], 600, 400)).toEqual([])
+    expect(() => layoutRoomActors(layoutRooms(mkRooms(3), 0, 0), mkRooms(3))).not.toThrow()
+  })
+  it('1 room fills the area', () => {
+    const [r] = layoutRooms(mkRooms(1), 600, 400, 40)
+    expect(r.w).toBeGreaterThan(580)
+    expect(r.y).toBeGreaterThanOrEqual(40)
+    expect(r.h).toBeGreaterThan(340)
+  })
+  it.each([1, 8, 12])('%i rooms tile without overlap, below the inset, with contained actors', (n) => {
+    const input = mkRooms(n)
+    const rooms = layoutRooms(input, 1592, 1040, 50)
+    expect(rooms).toHaveLength(n)
+    for (let i = 0; i < n; i++) {
+      const a = rooms[i]
+      expect(a.w).toBeGreaterThan(0)
+      expect(a.h).toBeGreaterThan(0)
+      expect(a.y).toBeGreaterThanOrEqual(50)
+      expect(a.y + a.h).toBeLessThanOrEqual(1040)
+      expect(a.agents).toBe(input[i].roster.reduce((s, e) => s + e.count, 0))
+      for (let j = i + 1; j < n; j++) {
+        const b = rooms[j]
+        expect(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h).toBe(false)
+      }
+    }
+    const actors = layoutRoomActors(rooms, input)
+    const expected = input.reduce((s, r) => s + r.roster.reduce((t, e) => t + Math.min(e.count, MAX_DRAWN_PER_TYPE), 0), 0)
+    expect(actors).toHaveLength(expected)
+  })
+  it('keeps actors inside tiny rooms', () => {
+    const input = mkRooms(12)
+    const rooms = layoutRooms(input, 60, 40)
+    const actors = layoutRoomActors(rooms, input)
+    // every actor lies in some room rect
+    for (const a of actors) {
+      expect(rooms.some((r) => a.x >= r.x && a.x <= r.x + r.w && a.y >= r.y && a.y <= r.y + r.h)).toBe(true)
+    }
+  })
+})
+
+describe('drawWorld with rooms', () => {
+  it('strokes boundaries and labels rooms, idle and groups', () => {
+    const { ctx, calls } = mockCtx()
+    const input = [
+      { key: 'b', label: 'Bilko', roster: [{ agentType: 'architect', count: 2 }] },
+      { key: 's', label: 'Self', roster: [] },
+    ]
+    const rooms = layoutRooms(input, 600, 400)
+    drawWorld(ctx, layoutRoomActors(rooms, input), [], { width: 600, height: 400, timeMs: 0, dpr: 1 }, rooms, input)
+    const texts = calls.filter((c) => c.name === 'fillText').map((c) => c.args[0])
+    expect(texts).toContain('Bilko · 2')
+    expect(texts).toContain('Self · 0')
+    expect(texts).toContain('idle')
+    expect(texts).toContain(groupLabel('architect', 2))
+    expect(calls.filter((c) => c.name === 'roundRect')).toHaveLength(2)
+    expect(calls.filter((c) => c.name === 'stroke')).toHaveLength(2)
   })
 })

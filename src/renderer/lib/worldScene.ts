@@ -16,7 +16,9 @@ const PAD = 6
 export interface RosterEntry { agentType: string; count: number }
 export interface WorldActor { agentType: string; x: number; y: number; phase: number }
 export interface WorldGroup { agentType: string; count: number; x: number; y: number; w: number; h: number }
-export interface WorldTheme { ground: string; groundAlt: string; label: string }
+export interface WorldTheme { ground: string; groundAlt: string; label: string; roomLine?: string }
+export interface RoomInput { key: string; label: string; roster: RosterEntry[] }
+export interface WorldRoom { key: string; label: string; agents: number; x: number; y: number; w: number; h: number }
 export interface SpriteSpec {
   palette: { body: string; accent: string; outline: string }
   /** 8 rows of 8 chars: '.' empty, 'b' body, 'a' accent, 'o' outline. */
@@ -31,7 +33,7 @@ export interface DrawOpts {
   cache?: SpriteCache
 }
 
-export const DEFAULT_THEME: WorldTheme = { ground: '#5d7a4a', groundAlt: '#557243', label: '#ffffff' }
+export const DEFAULT_THEME: WorldTheme = { ground: '#5d7a4a', groundAlt: '#557243', label: '#ffffff', roomLine: 'rgba(255, 255, 255, 0.55)' }
 
 export const groupLabel = (agentType: string, count: number): string => `${agentType} ×${count}`
 
@@ -54,6 +56,60 @@ export function layoutGroups(roster: RosterEntry[], width: number, height: numbe
     w: cw,
     h: ch,
   }))
+}
+
+const ROOM_GAP = 8
+const ROOM_TITLE_H = 18
+
+export const roomLabel = (label: string, agents: number): string => `${label} · ${agents}`
+
+/** Near-square grid of room boxes below `insetTop`, separated by ROOM_GAP. */
+export function layoutRooms(rooms: RoomInput[], width: number, height: number, insetTop = 0): WorldRoom[] {
+  if (rooms.length === 0) return []
+  const W = Math.max(0, width)
+  const H = Math.max(0, height)
+  const inset = Math.min(Math.max(0, insetTop), H)
+  const cols = Math.ceil(Math.sqrt(rooms.length))
+  const rows = Math.ceil(rooms.length / cols)
+  const cw = W / cols
+  const ch = (H - inset) / rows
+  const gx = Math.min(ROOM_GAP, cw / 4)
+  const gy = Math.min(ROOM_GAP, ch / 4)
+  return rooms.map((r, i) => ({
+    key: r.key,
+    label: r.label,
+    agents: r.roster.reduce((n, e) => n + Math.max(0, e.count), 0),
+    x: (i % cols) * cw + gx / 2,
+    y: inset + Math.floor(i / cols) * ch + gy / 2,
+    w: Math.max(0, cw - gx),
+    h: Math.max(0, ch - gy),
+  }))
+}
+
+/** Places each room's agents (grouped by agentType) inside its box, below the title row. */
+export function layoutRoomActors(rooms: WorldRoom[], input: RoomInput[]): WorldActor[] {
+  const byKey = new Map(input.map((r) => [r.key, r]))
+  const out: WorldActor[] = []
+  for (const room of rooms) {
+    const src = byKey.get(room.key)
+    if (!src) continue
+    const title = Math.min(ROOM_TITLE_H, room.h)
+    for (const a of layoutWorld(src.roster, room.w, room.h - title)) {
+      out.push({
+        agentType: a.agentType,
+        x: clamp(room.x + a.x, room.x, room.x + room.w),
+        y: clamp(room.y + title + a.y, room.y, room.y + room.h),
+        phase: a.phase,
+      })
+    }
+  }
+  return out
+}
+
+/** Group rects for a room's roster, in canvas coordinates (for per-type labels). */
+function roomGroups(room: WorldRoom, roster: RosterEntry[] | undefined): WorldGroup[] {
+  const title = Math.min(ROOM_TITLE_H, room.h)
+  return layoutGroups(roster ?? [], room.w, room.h - title).map((g) => ({ ...g, x: g.x + room.x, y: g.y + room.y + title }))
 }
 
 export function layoutWorld(roster: RosterEntry[], width: number, height: number, insetTop = 0): WorldActor[] {
@@ -183,6 +239,8 @@ export function drawWorld(
   actors: WorldActor[],
   groups: WorldGroup[],
   opts: DrawOpts,
+  rooms?: WorldRoom[],
+  roomInput?: RoomInput[],
 ): void {
   const { width, height, timeMs, dpr } = opts
   const theme = opts.theme ?? DEFAULT_THEME
@@ -197,6 +255,34 @@ export function drawWorld(
   ctx.fillStyle = theme.label
   ctx.textBaseline = 'middle'
   ctx.font = '12px sans-serif'
+  if (rooms) {
+    const byKey = new Map((roomInput ?? []).map((r) => [r.key, r]))
+    for (const r of rooms) {
+      ctx.strokeStyle = theme.roomLine ?? DEFAULT_THEME.roomLine ?? theme.label
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(r.x, r.y, r.w, r.h, 6)
+      else ctx.rect(r.x, r.y, r.w, r.h)
+      ctx.stroke()
+      ctx.fillStyle = theme.label
+      ctx.textAlign = 'left'
+      ctx.fillText(roomLabel(r.label, r.agents), r.x + PAD, r.y + ROOM_TITLE_H / 2 + 1)
+      ctx.textAlign = 'center'
+      if (r.agents === 0) {
+        ctx.fillText('idle', r.x + r.w / 2, r.y + r.h / 2)
+        continue
+      }
+      for (const g of roomGroups(r, byKey.get(r.key)?.roster)) {
+        ctx.fillText(groupLabel(g.agentType, g.count), g.x + g.w / 2, g.y + LABEL_H / 2 + 2)
+      }
+    }
+    const size = SPRITE_PX * SPRITE_SCALE
+    for (const a of actors) {
+      const bob = Math.round(Math.sin(timeMs / 400 + a.phase * Math.PI * 2))
+      ctx.drawImage(cache.sprite(a.agentType, dpr) as CanvasImageSource, Math.round(a.x - size / 2), Math.round(a.y - size / 2 + bob), size, size)
+    }
+    return
+  }
   if (actors.length === 0 && groups.length === 0) {
     ctx.textAlign = 'center'
     ctx.fillText('No one is out adventuring', width / 2, height / 2)

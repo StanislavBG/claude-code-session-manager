@@ -651,6 +651,10 @@ test('readEpicFixes: a cache hit refreshes position so eviction is least-recentl
     spy.mockClear();
     readEpicFixes(cwd, 'e-lA');
     expect(spy.mock.calls.filter((c) => String(c[0]).includes('e-lA')).length).toBe(0);
+    // B was the least recently used, so it was evicted: both its files are re-read.
+    spy.mockClear();
+    readEpicFixes(cwd, 'e-lB');
+    expect(spy.mock.calls.filter((c) => String(c[0]).includes('e-lB')).length).toBe(2);
   } finally {
     spy.mockRestore();
     _setFixesCapsForTests();

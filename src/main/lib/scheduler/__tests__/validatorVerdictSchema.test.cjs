@@ -150,3 +150,18 @@ describe('verdictRowsFromStructured', () => {
     assert.deepEqual(verdictRowsFromStructured({ schedulerVerdict: 'X', verdicts: [] }), []);
   });
 });
+
+describe('optional lessons field', () => {
+  it('is optional: verdicts without it still validate', () => {
+    assert.equal(parseValidatorVerdict(run(verified())).ok, true);
+    assert.equal(VALIDATOR_VERDICT_SCHEMA.required.includes('lessons'), false);
+  });
+  it('accepts up to 3 strings of at most 200 chars', () => {
+    assert.equal(parseValidatorVerdict({ ...run(verified()), lessons: ['a', 'b'.repeat(200)] }).ok, true);
+  });
+  it('rejects more than 3, a long one, or a non-string', () => {
+    assert.equal(parseValidatorVerdict({ ...run(verified()), lessons: ['a', 'b', 'c', 'd'] }).ok, false);
+    assert.equal(parseValidatorVerdict({ ...run(verified()), lessons: ['x'.repeat(201)] }).ok, false);
+    assert.equal(parseValidatorVerdict({ ...run(verified()), lessons: [1] }).ok, false);
+  });
+});

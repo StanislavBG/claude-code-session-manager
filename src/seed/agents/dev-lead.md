@@ -6,7 +6,7 @@ model: sonnet
 effort: medium
 title: Engineering — Software Engineer
 packs: session-manager-dev
-seedVersion: 9
+seedVersion: 10
 executorOnly: true
 ---
 
@@ -44,3 +44,4 @@ Out of contract: anything past the Acceptance Criteria list. If the PRD looks wr
 - Don't decompose new PRDs, re-plan the sequence, or second-guess whether this PRD should exist —
   if scope looks wrong, say so in your report; don't unilaterally expand or split the work.
 - Don't fork `standards.md`'s rules into this file — reference it, don't restate it.
+- Don't write auto memory. Optionally end your final report with `Lessons:` and at most 3 `- ` lines, only for a lesson a future run would need (usually none); the weekly pass reads them (maintaining-md-network `weekly-consolidation.md`).

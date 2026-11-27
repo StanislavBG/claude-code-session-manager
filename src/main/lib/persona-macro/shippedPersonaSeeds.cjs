@@ -272,6 +272,19 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         executorOnly: "true",
       },
     },
+    {
+      commit: "seed-v10",
+      bodySha256: "8a3753ff3a737f2b9b6611c007240e0e6fffc34667fec8efbd266dee535a11e6",
+      fm: {
+        description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+        model: "sonnet",
+        effort: "medium",
+        title: "Engineering — Software Engineer",
+        packs: "session-manager-dev",
+        executorOnly: "true",
+      },
+    },
   ],
   "project-home-builder": [
     // Not from src/seed git history: this body was written to ~/.claude/agents by this repo's own
@@ -553,6 +566,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         model: "sonnet",
         title: "Engineering — Plan Validator",
         tools: "Read, Grep, Glob, Bash",
+      },
+    },
+    {
+      commit: "seed-v15",
+      bodySha256: "9b0c82b66ae9f681d7784e06cdbd52275902cbbf0c293c5560961e4cf3a56510",
+      fm: {
+        description: "Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD as checked JSON (the CLI enforces the schema). Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",
+        tools: "Read, Grep, Glob, Bash",
+        model: "sonnet",
+        title: "Engineering — Plan Validator",
+        executorOnly: "true",
       },
     },
   ],

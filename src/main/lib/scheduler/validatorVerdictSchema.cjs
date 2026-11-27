@@ -26,7 +26,7 @@ const { HTTP_RETRY_ATTEMPTS, HTTP_RETRY_DELAY_MS } = require('./criteriaChecks.c
 /** @typedef {{ id: string, met: boolean, evidence: string, missKind?: MissKind }} Criterion */
 /** @typedef {{ severity: Severity, text: string, file?: string, missKind?: MissKind }} Finding */
 /** @typedef {{ prd: string, verdict: 'VERIFIED'|'REFUTED', reason: string, criteria: Criterion[], findings: Finding[] }} VerdictEntry */
-/** @typedef {{ schedulerVerdict: 'PASS'|'FAIL', failReason?: string, verdicts: VerdictEntry[] }} ValidatorVerdict */
+/** @typedef {{ schedulerVerdict: 'PASS'|'FAIL', failReason?: string, lessons?: string[], verdicts: VerdictEntry[] }} ValidatorVerdict */
 /** @typedef {{ slug: string, verdict: 'verified'|'refuted', reason: string, missKinds: MissKind[] }} VerdictRow */
 /** @typedef {{ ids: string[], failedIds?: string[] }} ExpectedCriteria */
 /** @typedef {Record<string, ExpectedCriteria> | Map<string, ExpectedCriteria>} ExpectedMap */
@@ -68,6 +68,12 @@ const VALIDATOR_VERDICT_SCHEMA = {
       description: 'PASS when the validator run itself completed; FAIL when it could not judge the plan.',
     },
     failReason: { type: 'string', description: 'Why the run is FAIL.' },
+    lessons: {
+      type: 'array',
+      maxItems: 3,
+      description: 'Optional: at most 3 lessons a future run would need; usually omitted.',
+      items: { type: 'string', maxLength: 200 },
+    },
     verdicts: {
       type: 'array',
       items: {
@@ -261,13 +267,17 @@ function checkExpectedCriteria(entry, exp, where) {
 function parseValidatorVerdict(value, opts = {}) {
   try {
     if (!isPlainObject(value)) return { ok: false, error: 'verdict: not an object' };
-    const keyErr = checkKeys(value, ['schedulerVerdict', 'verdicts'], ['schedulerVerdict', 'failReason', 'verdicts'], 'verdict');
+    const keyErr = checkKeys(value, ['schedulerVerdict', 'verdicts'], ['schedulerVerdict', 'failReason', 'lessons', 'verdicts'], 'verdict');
     if (keyErr) return { ok: false, error: keyErr };
     if (value.schedulerVerdict !== 'PASS' && value.schedulerVerdict !== 'FAIL') {
       return { ok: false, error: 'schedulerVerdict: not PASS or FAIL' };
     }
     if (value.failReason !== undefined && typeof value.failReason !== 'string') {
       return { ok: false, error: 'failReason: not a string' };
+    }
+    if (value.lessons !== undefined) {
+      if (!Array.isArray(value.lessons) || value.lessons.length > 3) return { ok: false, error: 'lessons: not an array of at most 3' };
+      if (value.lessons.some((l) => typeof l !== 'string' || l.length > 200)) return { ok: false, error: 'lessons: each must be a string of at most 200 chars' };
     }
     if (!Array.isArray(value.verdicts)) return { ok: false, error: 'verdicts: not an array' };
     const expected = opts && (opts.expected instanceof Map || isPlainObject(opts.expected)) ? opts.expected : null;

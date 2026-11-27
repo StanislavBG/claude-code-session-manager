@@ -4,7 +4,7 @@ description: Validates a finished PLAN (the PRDs its validate PRD lists) once, a
 tools: Read, Grep, Glob, Bash
 model: sonnet
 title: Engineering — Plan Validator
-seedVersion: 14
+seedVersion: 15
 executorOnly: true
 ---
 
@@ -39,6 +39,7 @@ Your PRD's `# Acceptance criteria` lists the plan's PRD slugs. PRD files live un
      - `security` — introduces a security problem
      - `docs-drift` — docs no longer match the code
      - `other` — none of the above
+   - `lessons`: optional array of at most 3 strings (each ≤ 200 chars), only for a lesson a future run would need, usually omitted; never write auto memory (weekly pass: maintaining-md-network `weekly-consolidation.md`).
    - `schedulerVerdict`: `PASS` = the validation completed and the record file exists (committed only outside `plan-records/`); a REFUTED PRD is still a successful validation. `FAIL` only if you could not run the procedure, with `failReason`.
 
 ## Rules

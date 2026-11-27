@@ -6,6 +6,7 @@ import { TagLibrary } from './TagLibrary'
 import { AgentRoster, loadoutOf, loadoutSummary, LOADOUT_DOT } from './agents/AgentRoster'
 import { BLANK_DRAFT, overrideParts, toDraft, type Draft, type OpenProject, type OverlayKeys } from './agents/AgentDetail'
 import { AgentSheet, AgentWorkbench, useAgentsListExpanded } from './agents/AgentSheet'
+import { PersonaUpgradeNotice } from './agents/PersonaUpgradeNotice'
 import { toast } from '../../state/toast'
 import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
 import { toKnownTags, toPersonaSaveInput } from '../../lib/personaSavePayload'
@@ -385,6 +386,7 @@ function AgentLibraryComponent() {
                   trailing={
                     <span className="flex items-center gap-1.5">
                       {isDirty && <span className="text-[10px] font-semibold text-accent">unsaved</span>}
+                      {p.upgrade && <span data-testid={`agent-row-upgrade-${p.name}`}><Badge tone="accent">update</Badge></span>}
                       {!isDirty && p.overridingProjects.length > 0 && (
                         <span title={overrideSummary(p)}>
                           <Badge tone="dim">{p.overridingProjects.length} override{p.overridingProjects.length > 1 ? 's' : ''}</Badge>
@@ -444,7 +446,9 @@ function AgentLibraryComponent() {
         onPick={pick}
         detail={
           obj ? (
-            <AgentSheet
+            <>
+              {saved?.upgrade && !isNew && <PersonaUpgradeNotice persona={saved} onDone={() => load(saved.name)} />}
+              <AgentSheet
               obj={obj}
               set={set}
               saved={saved}
@@ -462,7 +466,8 @@ function AgentLibraryComponent() {
               selected={overrideProject}
               onSelect={setOverrideCwd}
               onSaveOverride={saveOverride}
-            />
+              />
+            </>
           ) : (
             <EmptyState title="select an agent" />
           )

@@ -631,6 +631,8 @@ export interface AgentPersona {
   title?: string | null;
   /** Bundled-persona version stamp (seedAgentPersonas.cjs). Null for a persona that was never seeded, or has no stamp. */
   seedVersion?: number | null;
+  /** Set when a newer bundled version exists that was not applied (edited file or unseen). Null/absent otherwise. */
+  upgrade?: { installedVersion: number; bundledVersion: number; edited: boolean; bundledBody: string } | null;
   /** `executorOnly: true` frontmatter — persona only executes a scoped PRD; New Epic warns when it is picked as Actor. */
   executorOnly?: boolean;
   path: string;
@@ -3169,6 +3171,10 @@ export interface SessionManagerAPI {
     listPersonas: () => Promise<AgentPersona[]>;
     savePersona: (payload: AgentPersonaSaveInput) => Promise<{ ok: boolean; path: string }>;
     deletePersona: (payload: { name: string }) => Promise<{ ok: boolean }>;
+    /** Replaces the installed persona with the bundled one (backing the old file up). */
+    takeBundledPersona: (p: { name: string }) => Promise<{ backupPath: string; seedVersion: number }>;
+    /** Hides the upgrade notice for this bundled version. */
+    dismissPersonaUpgrade: (p: { name: string; bundledVersion: number }) => Promise<{ ok: true }>;
     /** Drops the overlay of the OPEN project at `projectCwd` (an `overrideDetails[].cwd`). */
     removeOverride: (payload: { name: string; projectCwd: string }) => Promise<{ ok: boolean }>;
     /** Raw persona `.md` text for the New Epic AIM composer (epicIntake.ts's `agentBody`),

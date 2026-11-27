@@ -56,6 +56,7 @@ describe('ConstraintsPanel', () => {
   it('shows risk marks, banned chips and settings counts with no inputs', async () => {
     await mount()
     expect(q('[data-risk-mark="public"]').textContent).toContain('PUBLIC')
+    expect(q('[data-risk-mark="public"] [data-badge="risky"]').className).not.toContain('honey')
     expect(q('[data-risk-mark="irreversible"]').textContent).toContain('IRREVERSIBLE')
     expect(q('[data-banned="Task"]')).toBeTruthy()
     expect(q('[data-banned="Bash"]')).toBeNull()

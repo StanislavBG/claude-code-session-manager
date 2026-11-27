@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Armory, ToolRiskMark } from '../../../../preload/api'
 import type { Draft } from './AgentDetail'
+import { RiskBadge } from './RiskBadge'
 
 /**
  * The Constraints card of the agent sheet (frame 1b). Only the sandbox environment is editable (it
@@ -100,7 +101,7 @@ export function ConstraintsPanel({ obj, set }: { obj: Draft; set: (patch: Partia
           <ul className="flex flex-col gap-1">
             {markEntries.map(([rule, mark]) => (
               <li key={rule} data-risk-mark={mark} className="flex items-center gap-2 text-[12px]">
-                <span className="px-1.5 rounded text-[9.5px] font-semibold tracking-wide bg-honey/20 text-honey-dark">{RISK_LABEL[mark]}</span>
+                <RiskBadge mark={mark}>{RISK_LABEL[mark]}</RiskBadge>
                 <span className="font-mono text-fg-dim truncate">{rule}</span>
               </li>
             ))}

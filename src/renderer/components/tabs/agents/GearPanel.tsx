@@ -3,6 +3,7 @@ import { useToast } from '../../../state/toast'
 import type { Armory, ArmoryItem, ArmoryMcpItem, ArmoryPackItem } from '../../../../preload/api'
 import { TOOLS, type Draft } from './AgentDetail'
 import { McpPowers } from './McpPowers'
+import { RiskBadge } from './RiskBadge'
 import { ArmoryDrawer, type ArmoryKind, type KindTab } from './ArmoryDrawer'
 
 /**
@@ -33,7 +34,7 @@ function SubLabel({ children }: { children: ReactNode }) {
 function Badges({ badges }: { badges: ArmoryItem['badges'] }) {
   return (
     <>
-      {badges.includes('risky') && <span data-badge="risky" className="ml-1 px-1 rounded text-[9.5px] uppercase tracking-wide bg-accent/15 text-accent-dark">risky</span>}
+      {badges.includes('risky') && <RiskBadge className="ml-1">risky</RiskBadge>}
       {badges.includes('banned') && <span data-badge="banned" className="ml-1 px-1 rounded text-[9.5px] uppercase tracking-wide bg-red-500/15 text-red-700">banned</span>}
     </>
   )

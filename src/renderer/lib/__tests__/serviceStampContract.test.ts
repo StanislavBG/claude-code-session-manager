@@ -18,8 +18,22 @@ const req = createRequire(import.meta.url)
 const config = req('../../../main/config.cjs')
 const { openFeedbackSession } = req('../../../main/lib/feedback-remote/crossProjectFeedback.cjs')
 
-/** The renderer's `requestedBy: 'service'` autoApprove variant — keep in step with promptSessions.ts. */
-const RENDERER_SERVICE_STAMP_KEYS = ['fromClaudeSessionId', 'requestedBy', 'serviceId', 'serviceName', 'verifiedAt']
+type ServiceStamp = Extract<NonNullable<NonNullable<PromptSession['source']>['autoApprove']>, { requestedBy: 'service' }>
+
+/** The renderer's `requestedBy: 'service'` autoApprove variant, tied to promptSessions.ts at compile time. */
+const RENDERER_SERVICE_STAMP_KEYS = [
+  'fromClaudeSessionId',
+  'requestedBy',
+  'serviceId',
+  'serviceName',
+  'verifiedAt',
+] as const satisfies readonly (keyof ServiceStamp)[]
+
+// Exhaustiveness both ways: a key missing from the list or an extra one fails `npm run typecheck`.
+type Listed = (typeof RENDERER_SERVICE_STAMP_KEYS)[number]
+type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+const _stampKeysExhaustive: Equal<keyof ServiceStamp, Listed> = true
+void _stampKeysExhaustive
 
 const tmpDirs: string[] = []
 afterEach(() => {
@@ -79,7 +93,7 @@ describe('service autoApprove stamp contract (main → renderer)', () => {
 
   it('stamp key set equals the renderer-expected key list (a rename fails here)', async () => {
     const { stamp } = await captureServiceStamp()
-    expect(Object.keys(stamp).sort()).toEqual(RENDERER_SERVICE_STAMP_KEYS)
+    expect(Object.keys(stamp).sort()).toEqual([...RENDERER_SERVICE_STAMP_KEYS].sort())
     expect(stamp.serviceName).toBe('Kiln')
     expect(stamp.fromClaudeSessionId).toBeNull()
   })

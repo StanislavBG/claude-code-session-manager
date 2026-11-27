@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const { parseLog } = require('../runVerify.cjs');
+const { parseLog, commitMessageSubjects } = require('../runVerify.cjs');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-verify-output-shas-'));
 afterAll(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* */ } });
@@ -75,6 +75,12 @@ test('clusters not ending in m and long options containing m yield no subject', 
   assert.deepEqual(run('F', 'git commit -a -F "fix: a thing here"', out).transcriptCommitOutputShas, []);
   assert.deepEqual(run('amend', 'git commit --amend "fix: a thing here"', out).transcriptCommitOutputShas, []);
   assert.deepEqual(run('noverify', 'git commit --no-verify "fix: a thing here"', out).transcriptCommitOutputShas, []);
+});
+
+test('clusters where a value-taking letter precedes m (-Cm, -Fm) yield no subject', () => {
+  assert.deepEqual(commitMessageSubjects('git commit -Cm "x subj here"'), []);
+  assert.deepEqual(commitMessageSubjects('git commit -Fm "x subj here"'), []);
+  assert.deepEqual(commitMessageSubjects('git commit -am "x subj here"'), ['x subj here']);
 });
 
 test('non-commit command is ignored', () => {

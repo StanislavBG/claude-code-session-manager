@@ -207,10 +207,15 @@ const GIT_COMMIT_CMD_RE = /\bgit\s+(?:-C\s+\S+\s+)?commit\b/;
 const COMMIT_SUMMARY_RE = /^\[[^\]\s]+(?: \(root-commit\))? ([0-9a-f]{7,40})\]/i;
 const SHA_SUBJECT_RE = /^([0-9a-f]{7,40}) (.+)$/i;
 
-const COMMIT_MESSAGE_ARG_RE = /(?:^|\s)(?:-[a-zA-Z]*m|--message)(?:=|\s+|(?=["']))(?:"?\$\(cat <<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\s*\1\s*\)"?|"((?:[^"\\]|\\.)*)"|'([^']*)')/g;
+const COMMIT_MESSAGE_ARG_RE = /(?:^|\s)(?:-[abd-su-zABDEG-Z]*m|--message)(?:=|\s+|(?=["']))(?:"?\$\(cat <<-?\s*['"]?(\w+)['"]?\n([\s\S]*?)\n\s*\1\s*\)"?|"((?:[^"\\]|\\.)*)"|'([^']*)')/g;
 
 /**
- * First lines (trimmed) of every -m / --message argument in a git command.
+ * First lines (trimmed) of every commit-message argument in a git command.
+ * Accepted forms: `-m` / `--message` with a space or `=` before the value;
+ * short-flag clusters ending in m (e.g. `-am`, `-qam`), excluding clusters with a
+ * value-taking letter (C, c, F, t) before the m, so `-Cm` is not a message flag;
+ * a value attached to the flag (`-m"subj"`, `-m'subj'`); and `$(cat <<EOF ... EOF)`
+ * heredoc values (first non-empty line).
  * @param {string} command
  * @returns {string[]}
  */

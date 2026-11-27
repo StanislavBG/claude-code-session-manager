@@ -69,6 +69,7 @@ const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/cl
 // as the authoritative guarantee.
 ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/scheduler/launchFailure.cjs');
+const { isProtectedClaudePath } = require('./lib/prd/prdSandboxWarnings.cjs');
 const { sandboxLimitFromStreamJson, environmentLimitStamp, ENVIRONMENT_LIMIT_MESSAGE } = require('./lib/scheduler/sandboxEnvironmentLimit.cjs');
 const { decideVerifyDowngrade } = require('./lib/scheduler/refireCap.cjs');
 const { finalizeReasonFor } = require('./lib/scheduler/finalizeReason.cjs');
@@ -2663,6 +2664,27 @@ async function reconcilePass(state) {
     if (entry.isFixPlan) {
       const parent = healTargetForFix(slug, state.jobs);
       entry.investigationDepth = parent ? (parent.investigationDepth ?? 1) + 1 : 2;
+    }
+    // A scheduler-authored fix plan whose # Files names a protected .claude path can never pass: the job
+    // sandbox refuses every write there. Minted parked (born directly, like quarantine — not a transition)
+    // with an environment limit so reviewLadder never auto-fixes it.
+    if (entry.isFixPlan && Array.isArray(p.files)) {
+      const protectedFiles = p.files.filter(isProtectedClaudePath);
+      if (protectedFiles.length > 0) {
+        const joined = protectedFiles.join(', ');
+        entry.status = 'needs_review';
+        entry.environmentLimit = { kind: 'claude-dir-write', evidence: `${joined} in # Files` };
+        entry.error = ENVIRONMENT_LIMIT_MESSAGE;
+        entry.statusHistory = [{
+          from: null,
+          to: 'needs_review',
+          reason: `fix plan lists protected path ${joined}; the job sandbox refuses writes there — architect-inline work`,
+          source: 'reconcile',
+          at: new Date().toISOString(),
+        }];
+        console.warn(`[scheduler] reconcile: parking fix plan ${slug} — # Files lists protected .claude path(s) ${joined}`);
+        appendAuditEvent('fix_plan_sandbox_refused', { slug, cwd: p.cwd, path: p.path, files: protectedFiles });
+      }
     }
     // Provenance gate (PRD-authoring lockdown): a PRD discovered with no
     // `createdVia` stamp was never written through scheduler_create_prd/

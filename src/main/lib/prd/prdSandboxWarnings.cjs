@@ -46,4 +46,4 @@ function sandboxWarnings(input) {
   ];
 }
 
-module.exports = { sandboxWarnings };
+module.exports = { sandboxWarnings, isProtectedClaudePath };

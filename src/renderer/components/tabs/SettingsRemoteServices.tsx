@@ -89,6 +89,11 @@ function StartWorkControl({
   const targets = service.startWork?.targets ?? []
   // 'Selected projects' chosen but nothing ticked yet: local, never saved.
   const [pendingSelected, setPendingSelected] = useState(false)
+  // Once a selection is saved the pending flag has done its job; clearing it lets a later revoke read Off.
+  const hasTargets = targets.length > 0
+  useEffect(() => {
+    if (hasTargets) setPendingSelected(false)
+  }, [hasTargets])
   const savedMode: 'off' | 'all' | 'selected' = targets.length === 0 ? 'off' : targets.includes('*') ? 'all' : 'selected'
   const mode = pendingSelected && savedMode !== 'all' ? 'selected' : savedMode
   const choices = useMemo(

@@ -347,6 +347,26 @@ describe('SettingsRemoteServices', () => {
       expect(api.serviceSetStartWork).toHaveBeenCalledWith('svc-1', ['/home/u/Other'])
     })
 
+    it('a grant revoked elsewhere after Selected was ticked reads Off, not pending', async () => {
+      withGrant(null)
+      await mount()
+      await setMode('selected')
+      api.serviceSetStartWork.mockImplementationOnce(async () => {
+        withGrant(['/home/u/Other'])
+        return { ok: true, service }
+      })
+      await click(container!.querySelector('[data-cwd="/home/u/Other"]') as HTMLElement)
+      expect((q('remote-service-start-work-mode') as HTMLSelectElement).value).toBe('selected')
+      // Revoked elsewhere; the still-mounted control re-reads the list.
+      withGrant(null)
+      await act(async () => {
+        root!.render(createElement(SettingsRemoteServices, { enabled: true, hasDevice: true, refreshKey: 'k2' }))
+        await flush()
+      })
+      expect((q('remote-service-start-work-mode') as HTMLSelectElement).value).toBe('off')
+      expect(q('remote-service-start-work-note')!.textContent).toContain('waits for your approval')
+    })
+
     it('Selected projects with no known projects explains and stays selected', async () => {
       withGrant(null)
       useSessions.setState({ tabs: [] as never })

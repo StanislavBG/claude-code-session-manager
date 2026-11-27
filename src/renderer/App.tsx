@@ -8,6 +8,7 @@ import { WatchersPopover } from './components/WatchersPopover'
 import { Workbench } from './components/workbench/Workbench'
 import { RecordingStatus } from './components/RecordingStatus'
 import { TelemetryNoticeBanner } from './components/TelemetryNotice'
+import { ConsultationNotice } from './components/ConsultationNotice'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { SimpleShell } from './components/SimpleShell'
@@ -418,7 +419,7 @@ export function App() {
       })
     })
 
-    // Menu → Help → Book a Free Hour with Bilko: same helper as the Feedback panel link.
+    // Menu → Help → Book a Free Consultation: same helper as the Feedback panel link.
     const offFreeHour = window.api.app.onOpenFreeHour(() => openFreeHour())
 
     // Menu → Restart Terminal in Active Tab: kill active tab's PTY, respawn with fresh session.
@@ -774,6 +775,7 @@ export function App() {
           )}
         </div>
       </div>
+      <ConsultationNotice />
       <AlmanacFooter onNavigate={navigate} />
       <StartProjectDialog
         open={startProjectOpen}

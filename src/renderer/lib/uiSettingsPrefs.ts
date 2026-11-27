@@ -4,7 +4,8 @@
  * appearance theme/font size (`lib/terminalSettings.ts`), the Editor scene's
  * prefs (`state/editorPrefs.ts`), the History screen's analytics/budget
  * prefs (`lib/historyAnalyticsPrefs.ts`), and the Files sidebar's hidden-file
- * toggle (`components/layout/FileTree.tsx`) — deliberately global rather than
+ * toggle (`components/layout/FileTree.tsx`), and the consultation strip's
+ * dismissed-version (`components/ConsultationNotice.tsx`) — deliberately global rather than
  * per-project, since it's a personal viewing preference, not project data
  * (see `session-manager-operations/ui-prefs/README.md` for the per-project
  * counterpart). One file, five independent owners:
@@ -41,6 +42,8 @@ export interface UiSettingsPrefs {
   projectsFileTreeCollapsed?: boolean
   /** AgentSheet.tsx — the Agents sheet's 316 px list column is expanded (absent/false = the 64 px avatar rail). */
   agentsListExpanded?: boolean
+  /** ConsultationNotice.tsx — the app version for which the consultation strip was dismissed. */
+  consultationNoticeDismissedVersion?: string
 }
 
 export const UI_SETTINGS_PREFS_FILE = '~/.claude/session-manager/ui-settings-prefs.json'

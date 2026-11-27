@@ -25,7 +25,8 @@ export function serversOfTools(tools: readonly string[]): string[] {
   return [...s]
 }
 
-const isUnbound = (tools: readonly string[]) => tools.length === 0 || tools.includes('*')
+/** Every tool granted: an explicit Unbound loadout (or a '*' entry) or an Undecided draft (which runs with every tool). Never inferred from an empty tools list. */
+const allGranted = (d: Pick<Draft, 'tools' | 'loadout'>) => d.loadout === 'unbound' || d.loadout === 'undecided' || d.tools.includes('*')
 
 function SubLabel({ children }: { children: ReactNode }) {
   return <div className="font-serif italic text-[12px] text-fg-faint font-normal">{children}</div>
@@ -101,10 +102,12 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName, onOpenCh
     return () => { live = false; off?.() }
   }, [])
 
-  const unbound = isUnbound(obj.tools)
+  const unbound = allGranted(obj)
+  const undecided = obj.loadout === 'undecided' && !obj.tools.includes('*')
+  const bare = !unbound && obj.loadout === 'bare'
   const marking = !!baseline && !!onRestore
   const baseTools = baseline?.tools ?? []
-  const baseBound = marking && !isUnbound(baseTools)
+  const baseBound = marking && !allGranted(baseline!)
   const baseServers = marking ? [...new Set([...(baseline?.mcpServers ?? []), ...serversOfTools(baseTools)])] : []
   const basePacks = marking ? (baseline?.packs ?? []) : []
   const restore = (keys: Array<'tools' | 'mcpServers' | 'packs'>) => onRestore?.(keys)
@@ -119,7 +122,7 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName, onOpenCh
 
   const toggleTool = (id: string) => {
     if (unbound) {
-      set({ tools: [...builtins.map((b) => b.id).filter((x) => x !== id), ...obj.tools.filter((t) => t.startsWith('mcp__'))] })
+      set({ loadout: 'equipped', tools: [...builtins.map((b) => b.id).filter((x) => x !== id), ...obj.tools.filter((t) => t.startsWith('mcp__'))] })
       return
     }
     set({ tools: obj.tools.includes(id) ? obj.tools.filter((x) => x !== id) : [...obj.tools, id] })
@@ -131,7 +134,7 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName, onOpenCh
 
   const equipServer = (s: ArmoryMcpItem) => {
     const next = unbound ? obj.tools : [...new Set([...obj.tools, ...s.tools.map((t) => t.id)])]
-    set({ tools: next, mcpServers: [...servers, s.id] })
+    set({ tools: next, mcpServers: [...servers, s.id], ...(unbound ? { loadout: obj.loadout } : {}) })
   }
   const removeServer = (id: string) => {
     const base = unbound ? [...builtins.map((b) => b.id), ...floor.map((f) => f.id)] : obj.tools
@@ -251,11 +254,14 @@ export function GearPanel({ obj, set, baseline, onRestore, projectName, onOpenCh
         )}
         <div data-testid="agent-tools-note" className="text-[11px] text-fg-faint mt-1 leading-snug">
           {unbound ? (
-            'All tools — no tools: line, so every tool (MCP included) is granted. Click one to restrict.'
+            undecided
+              ? 'Undecided — no loadout chosen, so it runs with every tool (MCP included). Click one to restrict.'
+              : 'All tools — every tool (MCP included) is granted. Click one to restrict.'
           ) : (
             <>
+              {bare && <span data-testid="agent-tools-bare">Bare — floor only. </span>}
               {obj.tools.filter((t) => !t.startsWith('mcp__')).length} of {builtins.length + floor.length} built-ins granted. Anything not filled is refused at call time.{' '}
-              <button type="button" data-testid="agent-tools-all" onClick={() => set({ tools: [] })} className="underline text-fg-dim hover:text-fg">
+              <button type="button" data-testid="agent-tools-all" onClick={() => set({ loadout: 'unbound', tools: ['*'] })} className="underline text-fg-dim hover:text-fg">
                 Grant all tools
               </button>
             </>

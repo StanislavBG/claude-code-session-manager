@@ -31,6 +31,8 @@ vi.mock('../agents/AgentSheet', () => ({
       createElement('button', { key: 'ov', 'data-testid': 'g-overlay', onClick: () => p.onSaveOverride({ tools: [] }) }),
       createElement('button', { key: 'ovs', 'data-testid': 'g-overlay-servers', onClick: () => p.onSaveOverride({ mcpServers: [] }) }),
       createElement('button', { key: 'ovp', 'data-testid': 'g-overlay-packs', onClick: () => p.onSaveOverride({ packs: [] }) }),
+      createElement('button', { key: 'd', 'data-testid': 'g-desc', onClick: () => p.set({ description: 'edited' }) }),
+      createElement('button', { key: 'm', 'data-testid': 'g-model', onClick: () => p.set({ model: 'opus' }) }),
       createElement('button', { key: 'gn', 'data-testid': 'g-none', onClick: () => p.set({ tools: [] }) }),
     ]),
 }))
@@ -41,9 +43,17 @@ const PERSONA: AgentPersona = {
   overridingProjects: [], overrideDetails: [],
 }
 
+const withPersona = async (extra: Record<string, unknown>) => {
+  api.agents.listPersonas.mockResolvedValue([{ ...PERSONA, ...extra }])
+  act(() => root?.unmount()); container?.remove()
+  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
+  await act(async () => { root!.render(createElement(AgentLibrary)); await Promise.resolve(); await Promise.resolve() })
+  await act(async () => { container!.querySelector<HTMLElement>('[data-testid="agent-card"]')?.click(); await Promise.resolve() })
+}
+
 let container: HTMLDivElement | null = null
 let root: Root | null = null
-let api: { agents: { savePersona: ReturnType<typeof vi.fn> } }
+let api: { agents: { savePersona: ReturnType<typeof vi.fn>; listPersonas: ReturnType<typeof vi.fn> } }
 
 const click = async (id: string) => {
   await act(async () => { container!.querySelector<HTMLElement>(`[data-testid="${id}"]`)!.click(); await Promise.resolve() })
@@ -86,6 +96,18 @@ describe('AgentLibrary global save sends gear', () => {
   it('Go bare -> Save sends loadout bare', async () => {
     await click('g-bare'); await click('g-save')
     expect(api.agents.savePersona).toHaveBeenCalledWith(expect.objectContaining({ loadout: 'bare', tools: [] }))
+  })
+  it('saved Bare + description edit -> Save sends loadout bare, tools []', async () => {
+    await withPersona({ tools: [], loadout: 'bare' })
+    await click('g-desc'); await click('g-save')
+    const sent = api.agents.savePersona.mock.calls[0][0]
+    expect(sent.loadout).toBe('bare'); expect(sent.tools).toEqual([]); expect(sent.description).toBe('edited')
+  })
+  it('saved Undecided + model edit -> Save sends no loadout and no tools', async () => {
+    await withPersona({ tools: [] })
+    await click('g-model'); await click('g-save')
+    const sent = api.agents.savePersona.mock.calls[0][0]
+    expect(sent.model).toBe('opus'); expect('loadout' in sent).toBe(false); expect(sent.tools == null || sent.tools.length === 0).toBe(true)
   })
   it('Revert restores the gear fields', async () => {
     await click('g-pack')

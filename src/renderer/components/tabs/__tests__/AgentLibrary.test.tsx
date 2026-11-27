@@ -318,7 +318,9 @@ describe('AgentLibrary', () => {
   })
 
   it('tools render allowed filled and the rest dashed', async () => {
+    installWindowApiMock([{ ...PERSONAS[0], loadout: 'equipped' }, ...PERSONAS.slice(1)])
     const el = await mount()
+    await act(async () => { (el.querySelector('[data-agent-row="builder"] [data-testid="config-list-row"]') as HTMLElement).click(); await Promise.resolve() })
     const tool = (t: string) => el.querySelector(`[data-testid="agent-tools-row"] [data-tool="${t}"]`) as HTMLElement
     expect(tool('Read').getAttribute('aria-pressed')).toBe('true')
     expect(tool('Read').className).not.toContain('border-dashed')

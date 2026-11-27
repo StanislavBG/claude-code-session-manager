@@ -76,4 +76,24 @@ describe('personaToolScopeArgs strict capabilities', () => {
     assert.equal(r.refusal.code, 'capability_unknown');
     assert.ok(r.args.includes('--strict-mcp-config'));
   });
+  // Probe 2026-11-27 (CLI 2.1.330): the --agents tools array scopes MCP tools,
+  // so a declared server whose tools it never names is loaded but invisible.
+  it('a declared server is granted whole in the scoped agent tools', () => {
+    const agentTools = (args) => JSON.parse(args[args.indexOf('--agents') + 1])['sm-headless-scoped'].tools;
+    const r = personaToolScopeArgs(buildPersonaToolScope(['Read', 'Bash']), {
+      mcpServers: known, declaredServers: ['session-manager-scheduler'],
+    });
+    assert.equal(r.refusal, null);
+    assert.ok(agentTools(r.args).includes('mcp__session-manager-scheduler'));
+    assert.deepEqual(mcpConfigOf(r.args), { 'session-manager-scheduler': entry });
+    // A server named by a single tool stays narrowed to that tool.
+    const narrow = personaToolScopeArgs(buildPersonaToolScope(['Read', 'mcp__blender__render']), {
+      mcpServers: known, declaredServers: ['blender'],
+    });
+    assert.ok(!agentTools(narrow.args).includes('mcp__blender'));
+    assert.ok(agentTools(narrow.args).includes('mcp__blender__render'));
+    // An unknown declared server is refused, never granted.
+    const bad = personaToolScopeArgs(buildPersonaToolScope(['Read']), { mcpServers: known, declaredServers: ['mystery'] });
+    assert.ok(!agentTools(bad.args).includes('mcp__mystery'));
+  });
 });

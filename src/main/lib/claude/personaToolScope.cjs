@@ -89,14 +89,6 @@ const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 function personaToolScopeArgs(scope, { mcpServers, declaredServers = [], packs = [], knownPacks = [] } = {}) {
   /** @type {string[]} */
   const args = [];
-  if (scope) {
-    const def = {
-      description: 'Headless run with a scheduler-enforced tool scope.',
-      prompt: 'Tool scope is enforced by the scheduler.',
-      tools: scope.tools,
-    };
-    args.push('--agents', JSON.stringify({ [HEADLESS_SCOPE_AGENT_NAME]: def }), '--agent', HEADLESS_SCOPE_AGENT_NAME);
-  }
   /** @type {null|{ code: 'capability_unknown', name: string }} */
   let refusal = null;
   const refuse = (name) => { if (!refusal) refusal = { code: 'capability_unknown', name }; };
@@ -122,6 +114,25 @@ function personaToolScopeArgs(scope, { mcpServers, declaredServers = [], packs =
   const knownPackSet = new Set(Array.isArray(knownPacks) ? knownPacks.map(String) : []);
   for (const p of Array.isArray(packs) ? packs : []) {
     if (!knownPackSet.has(String(p))) refuse(String(p));
+  }
+  if (scope) {
+    // The --agents tools array scopes MCP tools too (probe 2026-11-27, CLI
+    // 2.1.330): a loaded server whose tools the array never names is invisible,
+    // even to ToolSearch. A server the persona DECLARES (mcpServers:) and names
+    // no single tool of is granted whole via the server-level `mcp__<server>`.
+    const tools = [...scope.tools];
+    for (const d of Array.isArray(declaredServers) ? declaredServers : []) {
+      const n = String(d).trim();
+      if (!n || !hasOwn(picked, n) || mcpTools.some((t) => mcpServerOf(t) === n)) continue;
+      const whole = `mcp__${n}`;
+      if (!tools.includes(whole)) tools.push(whole);
+    }
+    const def = {
+      description: 'Headless run with a scheduler-enforced tool scope.',
+      prompt: 'Tool scope is enforced by the scheduler.',
+      tools,
+    };
+    args.push('--agents', JSON.stringify({ [HEADLESS_SCOPE_AGENT_NAME]: def }), '--agent', HEADLESS_SCOPE_AGENT_NAME);
   }
   // --mcp-config is variadic: it is followed immediately by --strict-mcp-config.
   // With no server, no --mcp-config at all — strict mode alone boots none.

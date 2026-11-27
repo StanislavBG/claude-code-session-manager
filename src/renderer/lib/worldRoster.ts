@@ -13,7 +13,7 @@ type EpicWithAgent = EpicLite & { agentType?: string }
 
 const UNKNOWN = 'unknown'
 
-function resolveAgentType(
+export function resolveAgentType(
   owner: string,
   jobs: JobWithAgent[],
   chats: Record<string, ChatSignalLite>,

@@ -2671,6 +2671,7 @@ async function reconcilePass(state) {
       const protectedFiles = p.files.filter(isProtectedClaudePath);
       if (protectedFiles.length > 0) {
         const joined = protectedFiles.join(', ');
+        const bornAt = new Date().toISOString();
         entry.status = 'needs_review';
         entry.environmentLimit = { kind: 'claude-dir-write', evidence: `${joined} in # Files` };
         entry.error = ENVIRONMENT_LIMIT_MESSAGE;
@@ -2679,8 +2680,9 @@ async function reconcilePass(state) {
           to: 'needs_review',
           reason: `fix plan lists protected path ${joined}; the job sandbox refuses writes there — architect-inline work`,
           source: 'reconcile',
-          at: new Date().toISOString(),
+          at: bornAt,
         }];
+        entry.reviewNotice = buildReviewNotice({ job: entry, report: null, epicId: entry.sourcePromptId ?? null, now: bornAt });
         console.warn(`[scheduler] reconcile: parking fix plan ${slug} — # Files lists protected .claude path(s) ${joined}`);
         appendAuditEvent('fix_plan_sandbox_refused', { slug, cwd: p.cwd, path: p.path, files: protectedFiles });
       }

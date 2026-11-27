@@ -174,6 +174,30 @@ test('a needs_review row under the default 240-minute hold is left alone', async
 
 // --- no resend ---
 
+test('a parked-at-pickup row (stored notice) is sent once after the hold, and not again', async () => {
+  const bornAt = new Date(NOW - 250 * MIN_MS).toISOString();
+  const job = {
+    slug: '9-fix-protected', cwd: PROJECT_CWD, status: 'needs_review', isFixPlan: true,
+    environmentLimit: { kind: 'claude-dir-write', evidence: '.claude/x in # Files' },
+    error: 'env limit',
+    statusHistory: [{ from: null, to: 'needs_review', source: 'reconcile', at: bornAt }],
+    reviewNotice: {
+      summary: '9-fix-protected stopped (environment_limit:claude-dir-write)', reportPath: null,
+      cause: 'environment_limit:claude-dir-write', epicId: 'epic-1', firstParkedAt: bornAt, sentAt: null,
+    },
+  };
+  mockQueueStore([job]);
+  const appendResponseEvent = vi.fn().mockResolvedValue(true);
+
+  await scheduler.flushDueReviewNotices({ appendResponseEvent, now: NOW });
+  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+  expect(job.reviewNotice.sentAt).toBe(new Date(NOW).toISOString());
+
+  await scheduler.flushDueReviewNotices({ appendResponseEvent, now: NOW + 60_000 });
+  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+});
+
+
 test('a second flush does not resend an already-sent notice', async () => {
   const job = parkedJob({ status: 'skipped', needsReviewAutoResolvedSkip: true });
   mockQueueStore([job]);

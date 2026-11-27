@@ -51,6 +51,7 @@ describe('reconcile parks fix plans that list protected .claude paths', () => {
     expect(row.statusHistory[0]).toMatchObject({ from: null, to: 'needs_review', source: 'reconcile' });
     expect(row.statusHistory[0].reason).toContain('.claude/agents/x.md');
     expect(row.error).toBeTruthy();
+    expect(row.reviewNotice).toMatchObject({ sentAt: null, firstParkedAt: row.statusHistory[0].at });
     expect(selectAutoFixTargets([row], { fixSlugExists: () => false })).toEqual([]);
   });
 

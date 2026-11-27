@@ -197,7 +197,8 @@ const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResol
 const { transitionJob, emitJobEvent, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduler/scheduleJobSchema.cjs');
-const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
+const auditLogModule = require('./lib/telemetry/auditLog.cjs');
+const { appendAuditEvent } = auditLogModule;
 const heldSchedulerTurns = require('./lib/scheduler/heldSchedulerTurns.cjs');
 const autoStartedSession = require('./lib/feedback-remote/autoStartedSession.cjs');
 const preflightCheck = require('./lib/scheduler/preflightCheck.cjs');
@@ -8324,7 +8325,7 @@ async function applyPlanReviewHolds(state, deps = {}) {
       const files = await readPrdFiles(cwd, epicId, slugs);
       return new Map([...files].map(([k, v]) => [k, v.text]));
     });
-    const audit = deps.audit || ((k, d) => { try { appendAuditEvent(k, d); } catch { /* audit never breaks dispatch */ } });
+    const audit = deps.audit || ((k, d) => { try { auditLogModule.appendAuditEvent(k, d); } catch { /* audit never breaks dispatch */ } });
     const readEpicGoal = deps.readEpicGoal || ((cwd, epicId) => {
       try {
         const sessions = readActiveIndex(cwd).sessions;

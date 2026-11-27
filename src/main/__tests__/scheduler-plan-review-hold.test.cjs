@@ -87,6 +87,30 @@ describe('applyPlanReviewHolds', () => {
   });
 });
 
+describe('create refused audit (default audit dep)', () => {
+  it('writes plan_review_create_refused through appendAuditEvent when deps.audit is absent', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-plan-review-'));
+    const auditLog = require('../lib/telemetry/auditLog.cjs');
+    const spy = vi.spyOn(auditLog, 'appendAuditEvent').mockImplementation(() => {});
+    try {
+      fs.mkdirSync(path.join(root, 'session-manager-operations'), { recursive: true });
+      const d = deps({ createPrd: vi.fn(async () => ({ ok: false, error: 'refused' })) });
+      delete d.audit;
+      delete d.readReview;
+      const realStore = require('../lib/scheduler/planReviewStore.cjs');
+      d.markCreateRefused = (c, e, s, r) => realStore.markCreateRefused(c, e, s, r);
+      const state = { jobs: mk().map((r) => ({ ...r, cwd: root })) };
+      await sched.applyPlanReviewHolds(state, d);
+      const calls = spy.mock.calls.filter((c) => c[0] === 'plan_review_create_refused');
+      expect(calls).toHaveLength(1);
+      expect(calls[0][1]).toMatchObject({ validateSlug: '90-validate', round: 1, error: 'refused' });
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('create refused audit', () => {
   it('audits once per (validateSlug, round) across ticks, again on a new round', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-plan-review-'));

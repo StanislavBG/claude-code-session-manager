@@ -84,4 +84,4 @@ When pressed with Mode 'Weekly consolidation', first look for the newest pending
 
 ## Steering file
 
-Optional: session-manager-operations/md-network/steering.md. A human writes it and tracks it in git; it says what the owner thinks matters and does not. Read it as a plain file. No code reads it through `opsPath()`, so it needs no `opsOwnership.cjs` entry and no ops AGENTS.md owners row (it has no owning writer; the folder is human-authored). If code ever reads it through `opsPath()`, add the entry and the row then.
+Optional: session-manager-operations/md-network/steering.md. A human writes it and tracks it in git; it says what the owner thinks matters and does not. The app reads it through `opsPath()`; it is declared `tracked` in `GIT_CLASS` with an ops AGENTS.md row. It has no owning writer (human-authored), so it gets no `OWNERS` entry.

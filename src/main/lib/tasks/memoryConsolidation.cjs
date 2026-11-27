@@ -214,8 +214,10 @@ function defaultDeps() {
     listTranscripts: (/** @type {any} */ o) => require('./weeklyConsolidationInputs.cjs').listProjectTranscripts(o),
     collectLessons: (/** @type {any} */ o) => require('./weeklyConsolidationInputs.cjs').collectLessons(o),
     steeringPath: (/** @type {string} */ cwd) => {
-      const p = opsPath(cwd, 'md-network', 'steering.md');
-      try { return fs.existsSync(p) ? p : null; } catch { return null; }
+      try {
+        const p = opsPath(cwd, 'md-network', 'steering.md');
+        return fs.existsSync(p) ? p : null;
+      } catch { return null; }
     },
   };
 }
@@ -386,5 +388,6 @@ module.exports = {
   NO_DELETE_RULE,
   READ_ONLY_TOOLS,
   NOT_RUN_STATUSES,
+  defaultDeps,
   _resetForTests,
 };

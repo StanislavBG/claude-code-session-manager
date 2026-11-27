@@ -3,6 +3,7 @@
   "entries": [
     { "file": "src/main/lib/mcpToolsProbe.cjs", "match": "this.status = status;", "reason": "Error subclass constructor: probe failure kind ('failed' | 'needs-auth'), not a job/Epic/Task" },
     { "file": "src/main/lib/epic/artifactAdminRoutes.cjs", "match": "this.status = status;", "reason": "RouteError (Error subclass) constructor: HTTP status code of an admin-route failure, not a job/Epic/Task" },
+    { "file": "src/main/scheduler.cjs", "match": "entry.status = 'needs_review';", "reason": "initial status of a brand-new fix-plan queue row minted parked at reconcile (no prior status to transition from); statusHistory is stamped inline right below" },
     { "file": "src/main/scheduler.cjs", "match": "entry.status = 'quarantined';", "reason": "initial status of a brand-new queue row minted at reconcile (no prior status to transition from); statusHistory is stamped inline right below" },
     { "file": "src/main/scheduler.cjs", "match": "entry.status = liveStatusBySlug.get(entry.slug) ?? null;", "reason": "listPrdsInternal: freshly-synthesized PRD-listing display row, no queue.json mutation" },
     { "file": "src/main/scheduler.cjs", "match": "entry.status = entry.archivedStatus;", "reason": "listPrdsInternal: freshly-synthesized PRD-listing display row, no queue.json mutation" },

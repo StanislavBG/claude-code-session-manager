@@ -214,8 +214,8 @@ test('a poke during a recompute schedules exactly one more; pokes debounce per E
     return { state: 'open', status: 'active', blocked: null };
   });
   emitter.pokeEpicState(cwd, EPIC);
-  await new Promise((r) => setTimeout(r, 10));
-  expect(spy).toHaveBeenCalledTimes(1);
+  // First recompute reads the Epic log from disk (real I/O) before getEpicRecord: wait for it, not a fixed sleep.
+  await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1), { timeout: 10_000 });
   emitter.pokeEpicState(cwd, EPIC);
   emitter.pokeEpicState(cwd, EPIC);
   await new Promise((r) => setTimeout(r, 10));

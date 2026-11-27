@@ -72,6 +72,7 @@ test('confirmPending with relayClientId creates the service and consumes the pen
     pairedAt: clock,
     lastSeenAt: clock,
     pairedVia: 'window',
+    startWork: null,
   });
   expect(store.listPending()).toEqual([]);
   expect(store.findByPubKey(PUBKEY)).toMatchObject({ serviceId: svc.serviceId });
@@ -274,4 +275,44 @@ test('a legacy record without pairedVia reads as window', async () => {
   fs.writeFileSync(filePath, JSON.stringify(raw));
   const fresh = createServicePairings({ filePath, now: () => clock });
   expect(fresh.list()[0].pairedVia).toBe('window');
+});
+
+// ── startWork grant ─────────────────────────────────────────────────────────
+
+async function pairedService() {
+  await store.createPending(GOOD);
+  const pendingId = store.listPending()[0].pairingId;
+  return store.confirmPending(pendingId, PUBKEY, { relayClientId: RELAY_ID });
+}
+
+test('startWork is off by default and setStartWork sets, persists and clears it', async () => {
+  const svc = await pairedService();
+  expect(svc.startWork).toBeNull();
+  const set = await store.setStartWork(svc.serviceId, [`${SITE}/`, '*', SITE]);
+  expect(set.startWork).toEqual({ targets: [SITE, '*'] });
+  expect(store.list()[0].startWork).toEqual({ targets: [SITE, '*'] });
+  expect(readFile().services[0].startWork).toEqual({ targets: [SITE, '*'] });
+  const cleared = await store.setStartWork(svc.serviceId, []);
+  expect(cleared.startWork).toBeNull();
+  expect(readFile().services[0].startWork).toBeUndefined();
+});
+
+test('setStartWork rejects an invalid target and an unknown service', async () => {
+  const svc = await pairedService();
+  await expect(store.setStartWork(svc.serviceId, ['relative/path'])).rejects.toThrow(/absolute/);
+  await expect(store.setStartWork(svc.serviceId, [42])).rejects.toThrow();
+  await expect(store.setStartWork(svc.serviceId, 'x')).rejects.toThrow();
+  await expect(store.setStartWork('nope', [SITE])).rejects.toThrow(/no paired service/);
+  expect(store.list()[0].startWork).toBeNull();
+});
+
+test('a record saved before startWork existed reads as off', async () => {
+  const svc = await pairedService();
+  const raw = readFile();
+  delete raw.services[0].startWork;
+  fs.writeFileSync(filePath, JSON.stringify(raw));
+  const reloaded = createServicePairings({ filePath, now: () => clock });
+  expect(reloaded.list()[0].serviceId).toBe(svc.serviceId);
+  expect(reloaded.list()[0].startWork).toBeNull();
+  expect(readFile().version).toBe(1);
 });

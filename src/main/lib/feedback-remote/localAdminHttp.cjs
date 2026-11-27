@@ -239,7 +239,7 @@ function createAdminHttp() {
    * serialized and streamed to the handler like an HTTP request body.
    * Resolves { status, json } (json null when the handler wrote non-JSON).
    */
-  async function invoke(method, routePath, { body, query } = {}) {
+  async function invoke(method, routePath, { body, query, trustedService } = {}) {
     const urlObj = new URL(routePath, 'http://127.0.0.1');
     if (query) {
       const params = query instanceof URLSearchParams ? query : new URLSearchParams(
@@ -249,6 +249,10 @@ function createAdminHttp() {
     }
     const payload = body === undefined ? '' : JSON.stringify(body);
     const req = createInMemoryRequest(String(method).toUpperCase(), `${urlObj.pathname}${urlObj.search}`, payload);
+    // Trusted-channel service identity: a Symbol key no HTTP request can carry.
+    if (trustedService && typeof trustedService.serviceId === 'string') {
+      req[Symbol.for('sm.trustedService')] = { serviceId: trustedService.serviceId };
+    }
     const res = createResponseShim();
     try {
       await dispatch(req, res);

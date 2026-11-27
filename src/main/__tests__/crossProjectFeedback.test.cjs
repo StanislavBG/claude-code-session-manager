@@ -1188,3 +1188,66 @@ test('a recordExternalRef that fails twice still returns success with externalRe
   expect(readActiveIndex(to).sessions[r.epicId]).toBeTruthy();
   expect(warns.some((w) => /recordExternalRef/.test(w) && /disk full/.test(w))).toBe(true);
 });
+
+// ---------------------------------------------------------------------------
+// Service start-work grant (third auto-start ground)
+// ---------------------------------------------------------------------------
+
+function svcDeps(service, audits = []) {
+  return {
+    trustedServiceId: 'svc-1',
+    findService: () => service,
+    notifyRenderer: () => {},
+    appendAudit: (kind, row) => audits.push({ kind, ...row }),
+  };
+}
+
+test('service grant covering toCwd + autoStart + bug/feature opens auto-approved, stamped, audited', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const audits = [];
+  const service = { serviceId: 'svc-1', name: 'Kiln', startWork: { targets: [to] } };
+  for (const tag of ['bug', 'feature']) {
+    const r = await openFeedbackSession(payload(to, from, { autoStart: true, tag, title: 'Service start ' + tag, plan: ['Step one'] }), svcDeps(service, audits));
+    expect(r.error).toBeUndefined();
+    expect(r.status).toBe('auto-approved');
+    expect(r.note).toContain('auto-approved by the Kiln service grant');
+    const src = readActiveIndex(to).sessions[r.epicId].source;
+    expect(src.autoApprove).toMatchObject({ requestedBy: 'service', serviceId: 'svc-1', serviceName: 'Kiln' });
+    expect(src.startedBy).toEqual({ kind: 'service', serviceId: 'svc-1', name: 'Kiln' });
+    const row = audits.find((a) => a.epicId === r.epicId);
+    expect(row).toMatchObject({ serviceId: 'svc-1', serviceName: 'Kiln', cwd: to, autoStartGranted: true });
+  }
+});
+
+test('a "*" grant covers any target', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const r = await openFeedbackSession(payload(to, from, { autoStart: true, tag: 'bug' }),
+    svcDeps({ serviceId: 'svc-1', name: 'Kiln', startWork: { targets: ['*'] } }));
+  expect(r.status).toBe('auto-approved');
+});
+
+test('service call lands proposed with the reason: no grant, other target, no autoStart, wrong tag, revoked', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const other = await mkProject();
+  const granted = { serviceId: 'svc-1', name: 'Kiln', startWork: { targets: [to] } };
+  const cases = [
+    [{ serviceId: 'svc-1', name: 'Kiln', startWork: null }, { autoStart: true, tag: 'bug' }, /no start-work grant/],
+    [{ ...granted, startWork: { targets: [other] } }, { autoStart: true, tag: 'bug' }, /does not cover/],
+    [granted, { tag: 'bug' }, /autoStart was not requested/],
+    [granted, { autoStart: true, tag: 'discussion' }, /bug and feature work only/],
+    [null, { autoStart: true, tag: 'bug' }, /no longer paired/],
+  ];
+  for (const [service, extra, re] of cases) {
+    const audits = [];
+    const r = await openFeedbackSession(payload(to, from, extra), svcDeps(service, audits));
+    expect(r.ok).toBe(true);
+    expect(r.status).toBe('proposed');
+    expect(r.note).toMatch(re);
+    const src = readActiveIndex(to).sessions[r.epicId].source;
+    expect(src.autoApprove).toBeUndefined();
+    expect(src.startedBy).toBeUndefined();
+  }
+});

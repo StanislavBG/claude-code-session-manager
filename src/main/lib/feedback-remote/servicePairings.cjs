@@ -121,6 +121,33 @@ function validateExternalRef(externalRef) {
 }
 
 const PAIRED_VIA = ['window', 'local'];
+const START_WORK_ALL = '*';
+const MAX_START_WORK_TARGETS = 200;
+
+/** Owner grant targets: absolute cwds (resolved) or '*'. Throws on anything else. */
+function validateStartWorkTargets(targets) {
+  if (!Array.isArray(targets) || targets.length > MAX_START_WORK_TARGETS) {
+    throw new Error(`targets must be a list of at most ${MAX_START_WORK_TARGETS} project paths or '*'`);
+  }
+  const out = [];
+  for (const t of targets) {
+    let n;
+    if (t === START_WORK_ALL) n = START_WORK_ALL;
+    else if (typeof t === 'string' && t.length > 0 && path.isAbsolute(t) && !t.includes('\0')) n = path.resolve(t);
+    else throw new Error(`target must be an absolute project path or '*': ${String(t)}`);
+    if (!out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+/** The stored startWork { targets } read back leniently: absent/invalid = off (null). */
+function startWorkOf(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.targets)) return null;
+  try {
+    const targets = validateStartWorkTargets(raw.targets);
+    return targets.length ? { targets } : null;
+  } catch { return null; }
+}
 
 function publicService(s) {
   return {
@@ -134,6 +161,7 @@ function publicService(s) {
     pairedAt: s.pairedAt,
     lastSeenAt: s.lastSeenAt,
     pairedVia: s.pairedVia === 'local' ? 'local' : 'window',
+    startWork: startWorkOf(s.startWork),
   };
 }
 
@@ -168,6 +196,13 @@ function normalizeLoaded(raw) {
       }))
     : [];
   return { version: STORE_VERSION, pending, services };
+}
+
+/** True iff the service's startWork grant covers `toCwd` ('*' or its resolved cwd). */
+function startWorkAllows(service, toCwd) {
+  const grant = startWorkOf(service && service.startWork);
+  if (!grant || typeof toCwd !== 'string' || !path.isAbsolute(toCwd)) return false;
+  return grant.targets.includes(START_WORK_ALL) || grant.targets.includes(path.resolve(toCwd));
 }
 
 /**
@@ -334,6 +369,18 @@ function createServicePairings({ filePath, now } = {}) {
       return !!svc && svc.opened.some((o) => o && o.epicId === epicId && o.cwd === want);
     },
 
+    /** Owner grant: auto-start work this service opens in `targets` (cwds or '*'). [] removes it. */
+    setStartWork(serviceId, targets) {
+      let list;
+      try { list = validateStartWorkTargets(targets); } catch (e) { return Promise.reject(e); }
+      return mutate((s) => {
+        const svc = s.services.find((x) => x.serviceId === serviceId);
+        if (!svc) throw new Error('no paired service with that id');
+        if (list.length === 0) delete svc.startWork; else svc.startWork = { targets: list };
+        return publicService(svc);
+      });
+    },
+
     touchLastSeen(serviceId) {
       return mutate((s) => {
         const svc = s.services.find((x) => x.serviceId === serviceId);
@@ -347,6 +394,7 @@ function createServicePairings({ filePath, now } = {}) {
 
 module.exports = {
   createServicePairings,
+  startWorkAllows,
   SERVICE_TOOL_NAMES,
   PENDING_TTL_MS,
   MAX_OPENED,

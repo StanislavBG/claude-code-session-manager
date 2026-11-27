@@ -86,6 +86,7 @@ const {
   MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
 } = require('../epic/epicMint.cjs');
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
+const { buildServiceStartedBy } = require('../epic/scriptStartedBy.cjs');
 const { normalizeExternalRef } = require('../epic/externalRef.cjs');
 const { recordExternalRef, findEpicByExternalRef, withExternalRefLock } = require('../epic/externalRefIndex.cjs');
 const { OPS_ROOT_DIR, opsPath } = require('../opsOwnership.cjs');
@@ -583,7 +584,31 @@ function verifyAutoStart(v, originClaudeSessionId) {
 }
 
 const MAX_MACRO_AUTO_STARTS = 5;
+/** Request-object key the in-process invoke() sets for a paired service call. */
+const TRUSTED_SERVICE = Symbol.for('sm.trustedService');
 const AUTO_START_TAGS = Object.freeze(['bug', 'feature']);
+
+/**
+ * verifyServiceAutoStart(v, service) → { granted: true, ground:'service', serviceId, serviceName }
+ *   | { granted: false, reason }
+ * `service` is the paired-service record RE-READ from the store at decision time
+ * (null when revoked). Its identity never comes from the request body.
+ */
+function verifyServiceAutoStart(v, service) {
+  if (!service) return { granted: false, reason: 'the paired service is no longer paired' };
+  const { startWorkAllows } = require('./servicePairings.cjs');
+  if (!v.autoStart) return { granted: false, reason: 'autoStart was not requested' };
+  if (!service.startWork || !service.startWork.targets || service.startWork.targets.length === 0) {
+    return { granted: false, reason: `the ${service.name} service has no start-work grant` };
+  }
+  if (!startWorkAllows(service, v.toCwd)) {
+    return { granted: false, reason: `the ${service.name} service's start-work grant does not cover ${path.basename(v.toCwd)}` };
+  }
+  if (!AUTO_START_TAGS.includes(v.tag)) {
+    return { granted: false, reason: `service auto-start covers bug and feature work only (tag was ${v.tag})` };
+  }
+  return { granted: true, ground: 'service', serviceId: service.serviceId, serviceName: service.name };
+}
 
 // Grants per sender Epic id. In memory, so a restart resets it — accepted
 // because each press of a macro is a human act.
@@ -739,11 +764,25 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
     typeof input.originClaudeSessionId === 'string' && input.originClaudeSessionId
       ? input.originClaudeSessionId
       : null;
-  const macroAuto = await verifyMacroAutoStart(v, originClaudeSessionId, deps);
-  let auto = macroAuto && macroAuto.granted ? macroAuto : verifyAutoStart(v, originClaudeSessionId);
-  // A macro denial is the more specific reason when verifyAutoStart (no
-  // autoStart flag) would only say "not requested".
-  if (!auto.granted && macroAuto && !macroAuto.granted) auto = macroAuto;
+  // A call from a paired service (identity set only by the in-process invoke
+  // channel, never the body) is judged on the service ground alone: a service
+  // has no chat to quote and no macro.
+  const trustedServiceId = typeof deps.trustedServiceId === 'string' && deps.trustedServiceId ? deps.trustedServiceId : null;
+  let serviceAuto = null;
+  let macroAuto = null;
+  let auto;
+  if (trustedServiceId) {
+    let service = null;
+    try { service = deps.findService ? deps.findService(trustedServiceId) : null; } catch { service = null; }
+    serviceAuto = verifyServiceAutoStart(v, service);
+    auto = serviceAuto;
+  } else {
+    macroAuto = await verifyMacroAutoStart(v, originClaudeSessionId, deps);
+    auto = macroAuto && macroAuto.granted ? macroAuto : verifyAutoStart(v, originClaudeSessionId);
+    // A macro denial is the more specific reason when verifyAutoStart (no
+    // autoStart flag) would only say "not requested".
+    if (!auto.granted && macroAuto && !macroAuto.granted) auto = macroAuto;
+  }
   const isMacro = auto.granted && auto.ground === 'macro';
   // Reserve at grant time (re-checked after the verify's await so concurrent
   // sends cannot overshoot the cap); released below if the mint throws.
@@ -756,6 +795,7 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
     }
   }
   const macroGranted = auto.granted && auto.ground === 'macro';
+  const serviceGranted = auto.granted && auto.ground === 'service';
   const verifiedAt = new Date().toISOString();
 
   // The MCP client can't know its own Epic id — it only inherits the claude
@@ -809,7 +849,15 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
         ...(replyTo ? { replyTo } : {}),
         ...(auto.granted
           ? {
-              autoApprove: macroGranted
+              autoApprove: serviceGranted
+                ? {
+                    requestedBy: 'service',
+                    serviceId: auto.serviceId,
+                    serviceName: auto.serviceName,
+                    verifiedAt,
+                    fromClaudeSessionId: null,
+                  }
+                : macroGranted
                 ? {
                     requestedBy: 'macro',
                     macroId: auto.macroId,
@@ -825,6 +873,7 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
                   },
             }
           : {}),
+        ...(serviceGranted ? { startedBy: buildServiceStartedBy({ serviceId: auto.serviceId, name: auto.serviceName }) } : {}),
         proposal: {
           motivation: v.motivation,
           originAsk,
@@ -853,7 +902,10 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
     title: v.title,
     series: v.series,
     autoStartGranted: auto.granted,
-    autoStartReason: auto.granted ? (macroGranted ? `macro grant ${auto.macroId}` : 'verified human request') : auto.reason,
+    autoStartReason: auto.granted
+      ? (serviceGranted ? `service grant ${auto.serviceId}` : macroGranted ? `macro grant ${auto.macroId}` : 'verified human request')
+      : auto.reason,
+    ...(serviceGranted ? { serviceId: auto.serviceId, serviceName: auto.serviceName } : {}),
   });
 
   if (auto.granted) {
@@ -872,7 +924,9 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
         + (v.series ? ` [${seriesLine(v.series)}]` : '')
         + '. '
         + (auto.granted
-          ? (macroGranted
+          ? (serviceGranted
+            ? `It was auto-approved by the ${auto.serviceName} service grant and is starting in that project.`
+            : macroGranted
             ? `It was auto-approved by the "${auto.macroLabel}" macro (${auto.macroId}) and is starting in that project.`
             : 'It was auto-approved at the human\'s explicit request and is starting in that project.')
           : 'It will not run until a human in that project approves it.'),
@@ -890,7 +944,7 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
     tag: v.tag,
     ...(v.externalRef ? { externalRef: v.externalRef } : {}),
     status: auto.granted ? 'auto-approved' : 'proposed',
-    ...(v.autoStart || macroAuto ? { autoStart: auto.granted ? { granted: true } : { granted: false, reason: auto.reason } } : {}),
+    ...(v.autoStart || macroAuto || serviceAuto ? { autoStart: auto.granted ? { granted: true } : { granted: false, reason: auto.reason } } : {}),
     receiptOnOriginEpic,
     // True only when source.replyTo was stamped — the MCP note keys its
     // feedback_reply promise off this, never off the delivery alone.
@@ -899,7 +953,13 @@ async function mintFeedbackSession(v, input, deps, { mint, appendReceipt, notify
     replyMode: v.replyMode,
     // Say plainly what did NOT happen, same posture as create-prd's
     // `enqueued: false` — never let a caller report this as "work started".
-    note: (macroGranted
+    note: (serviceGranted
+      ? `Delivered auto-approved by the ${auto.serviceName} service grant (set by the owner for this project): `
+        + 'the session is starting in the receiving project. '
+      : serviceAuto && !auto.granted
+      ? `Delivered as a PROPOSED session (not auto-approved: ${auto.reason}). Nothing runs and no `
+        + 'tokens are spent until a human in that project presses Approve & start. '
+      : macroGranted
       ? `Auto-approved by the "${auto.macroLabel}" macro (${auto.macroId}), which the human launched this session `
         + 'from and which allows auto-start in this project: the session is starting in the receiving project. '
       : auto.granted
@@ -1241,7 +1301,7 @@ async function resolveCwdFromTranscriptDir(dir) {
 
 /** Registers both routes on the injected loopback admin transport. Mirrors
  *  prdCreate.cjs's registerAdminRoute — auth is the transport's job. */
-function registerAdminRoute(adminHttp) {
+function registerAdminRoute(adminHttp, { getServiceStore } = {}) {
   adminHttp.registerRoute('POST', '/admin/feedback/open-session', async (req, res) => {
     const raw = await readBody(req);
     let parsed;
@@ -1251,7 +1311,17 @@ function registerAdminRoute(adminHttp) {
       sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
       return;
     }
-    const result = await openFeedbackSession(parsed);
+    // Service identity: only the in-process invoke() sets this symbol on the
+    // request; an HTTP request cannot, and the body is never consulted.
+    const trusted = req[TRUSTED_SERVICE];
+    const trustedServiceId = trusted && typeof trusted.serviceId === 'string' ? trusted.serviceId : null;
+    const lookup = getServiceStore || (() => require('../../webRemote.cjs').getServiceStore());
+    const result = await openFeedbackSession(
+      parsed,
+      trustedServiceId
+        ? { trustedServiceId, findService: (id) => lookup().list().find((x) => x.serviceId === id) || null }
+        : {},
+    );
     if (!result.ok) {
       sendJson(res, result.status ?? 400, { ok: false, error: result.error });
       return;
@@ -1279,6 +1349,8 @@ module.exports = {
   MAX_REFERENCES,
   MAX_MACRO_AUTO_STARTS,
   verifyMacroAutoStart,
+  verifyServiceAutoStart,
+  TRUSTED_SERVICE,
   quoteNamesTarget,
   PROJECTS_DIR,
   resolveProjectsDir,

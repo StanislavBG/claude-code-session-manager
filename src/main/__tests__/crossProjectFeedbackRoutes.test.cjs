@@ -170,3 +170,27 @@ test('both routes are behind the transport\'s bearer auth', async () => {
   expect((await request({ method: 'GET', path: '/admin/feedback/targets', auth: false })).status).toBe(401);
   expect((await request({ method: 'POST', path: '/admin/feedback/open-session', body: {}, auth: false })).status).toBe(401);
 });
+
+test('a service id in the HTTP body gets no service ground; only invoke()\'s trusted channel does', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const body = { toCwd: to, fromCwd: from, title: 'Svc', body: 'b', motivation: 'm', acceptanceCriteria: ['a'], tag: 'bug', autoStart: true };
+  const spoof = await request({
+    method: 'POST',
+    path: '/admin/feedback/open-session',
+    body: { ...body, serviceId: 'svc-1', service: { serviceId: 'svc-1', startWork: { targets: ['*'] } }, trustedService: { serviceId: 'svc-1' } },
+  });
+  expect(spoof.status).toBe(200);
+  expect(spoof.json.status).toBe('proposed');
+
+  const local = createAdminHttp();
+  const service = { serviceId: 'svc-1', name: 'Kiln', startWork: { targets: [to] } };
+  crossProjectFeedback.registerAdminRoute(local, { getServiceStore: () => ({ list: () => [service] }) });
+  const viaInvoke = await local.invoke('POST', '/admin/feedback/open-session', { body, trustedService: { serviceId: 'svc-1' } });
+  expect(viaInvoke.json.status).toBe('auto-approved');
+  const noChannel = await local.invoke('POST', '/admin/feedback/open-session', { body: { ...body, serviceId: 'svc-1' } });
+  expect(noChannel.json.status).toBe('proposed');
+  service.startWork = null; // revoke: takes effect at once
+  const revoked = await local.invoke('POST', '/admin/feedback/open-session', { body, trustedService: { serviceId: 'svc-1' } });
+  expect(revoked.json.status).toBe('proposed');
+});

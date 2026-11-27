@@ -2,7 +2,8 @@
 
 /**
  * scriptStartedBy.cjs — how a script-started Epic records who started it.
- * EpicSource.startedBy = { kind: 'script', route, caller?, fromCwd?, fromEpicId? };
+ * EpicSource.startedBy = { kind: 'script', route, caller?, fromCwd?, fromEpicId? }
+ * | { kind: 'service', serviceId, name } (a paired service under an owner grant);
  * absent for every human press. 'new-epic-ui' stays the mint authority
  * (epicMint.cjs); startedBy sits next to it. The stored shape is lenient
  * (promptSessionSchema.cjs); this is the strict entry-point validator.
@@ -17,13 +18,27 @@ const CallerSchema = z.object({
   attempt: z.number().int().min(0).optional(),
 }).strict();
 
-const StartedBySchema = z.object({
+const ScriptStartedBySchema = z.object({
   kind: z.literal('script'),
   route: z.string().min(1).max(200),
   caller: CallerSchema.optional(),
   fromCwd: z.string().max(4096).optional(),
   fromEpicId: z.string().max(200).optional(),
 }).strict();
+
+/** A paired service started it under an owner startWork grant. */
+const ServiceStartedBySchema = z.object({
+  kind: z.literal('service'),
+  serviceId: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+}).strict();
+
+const StartedBySchema = z.discriminatedUnion('kind', [ScriptStartedBySchema, ServiceStartedBySchema]);
+
+/** @param {{ serviceId: string, name: string }} args */
+function buildServiceStartedBy({ serviceId, name }) {
+  return ServiceStartedBySchema.parse({ kind: 'service', serviceId, name });
+}
 
 /**
  * Build a StartedBySchema-valid object, omitting absent/empty keys.
@@ -40,7 +55,7 @@ function buildStartedBy({ route, caller, fromCwd, fromEpicId } = {}) {
   }
   if (typeof fromCwd === 'string' && fromCwd) out.fromCwd = fromCwd;
   if (typeof fromEpicId === 'string' && fromEpicId) out.fromEpicId = fromEpicId;
-  return StartedBySchema.parse(out);
+  return ScriptStartedBySchema.parse(out);
 }
 
 /**
@@ -68,4 +83,4 @@ async function startedByFromRequest({ route, caller, socket } = {}, deps = {}) {
   return buildStartedBy({ route, caller, fromCwd, fromEpicId });
 }
 
-module.exports = { CallerSchema, StartedBySchema, buildStartedBy, startedByFromRequest };
+module.exports = { CallerSchema, StartedBySchema, ScriptStartedBySchema, ServiceStartedBySchema, buildStartedBy, buildServiceStartedBy, startedByFromRequest };

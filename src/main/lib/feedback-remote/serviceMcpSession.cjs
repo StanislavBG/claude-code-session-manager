@@ -90,8 +90,10 @@ function isOk(answer) {
   return answer.status >= 200 && answer.status < 300 && answer.json?.ok === true;
 }
 
-async function callInvoke(invoke, req) {
-  const answer = await invoke(req.method, req.path, { body: req.body, query: req.query });
+async function callInvoke(invoke, req, trustedService) {
+  const opts = { body: req.body, query: req.query };
+  if (trustedService) opts.trustedService = trustedService;
+  const answer = await invoke(req.method, req.path, opts);
   return { status: Number(answer?.status) || 500, json: answer?.json ?? null };
 }
 
@@ -132,7 +134,8 @@ async function runTool(tool, args, { service, invoke, store }) {
         };
       }
       if (pinned.replyMode === undefined || pinned.replyMode === null) pinned.replyMode = 'event';
-      const answer = await callInvoke(invoke, tool.toRequest(pinned));
+      // The service id rides the invoke option (in-process only), never the body.
+      const answer = await callInvoke(invoke, tool.toRequest(pinned), { serviceId: service.serviceId });
       const ledgerError = await recordEpic(store, service, answer, pinned.toCwd, pinned.externalRef);
       return { answer, result: isOk(answer) ? 'ok' : `error:${answer.status}`, ledgerError };
     }

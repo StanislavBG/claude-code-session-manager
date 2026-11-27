@@ -382,3 +382,11 @@ test('project_create outside scope answers -32001 and tools/list hides it', asyn
   const listed = await run({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, { scope });
   expect(listed.response.result.tools.map((t) => t.name)).not.toContain('project_create');
 });
+
+test('feedback_open_session passes the service id on the invoke option, never in the body', async () => {
+  const { invoke, calls } = makeInvoke(() => ({ status: 200, json: { ok: true, epicId: 'e1' } }));
+  const store = makeStore();
+  await handleServiceMcp(call('feedback_open_session', { toCwd: '/x/y', title: 't', body: 'b', serviceId: 'evil' }), { service: makeService(), invoke, store });
+  expect(calls[0].trustedService).toEqual({ serviceId: 'svc-1' });
+  expect(JSON.stringify(calls[0].body)).not.toContain('svc-1');
+});

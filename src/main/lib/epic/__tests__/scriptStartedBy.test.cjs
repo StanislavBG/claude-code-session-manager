@@ -64,3 +64,12 @@ describe('startedByFromRequest', () => {
     expect(out).toEqual({ kind: 'script', route });
   });
 });
+
+test('service startedBy is built strictly and accepted by StartedBySchema', () => {
+  const { buildServiceStartedBy } = require('../scriptStartedBy.cjs');
+  const s = buildServiceStartedBy({ serviceId: 'svc-1', name: 'Kiln' });
+  expect(s).toEqual({ kind: 'service', serviceId: 'svc-1', name: 'Kiln' });
+  expect(StartedBySchema.safeParse(s).success).toBe(true);
+  expect(StartedBySchema.safeParse({ ...s, extra: 1 }).success).toBe(false);
+  expect(() => buildServiceStartedBy({ serviceId: '', name: 'Kiln' })).toThrow();
+});

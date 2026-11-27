@@ -186,7 +186,7 @@ Never pass `parallelGroup`; it is ignored. The API writes the frontmatter, `# Fi
 ### gate and files rules
 
 The syntax rules for `gate` and `files` are in PRD_AUTHORING.md §6, and the API enforces them: it
-refuses a bad gate or path and returns warnings — read them and fix the input. Two rules only you
+refuses a bad gate or path and returns warnings — read them and fix the input. Three rules only you
 can apply, because they depend on the repo at authoring time:
 
 1. Before queueing, run each gate command once at the current HEAD in the main checkout. If it
@@ -198,6 +198,9 @@ can apply, because they depend on the repo at authoring time:
    criterion; keep them out of PRDs at authoring time (PRD_AUTHORING.md §14, No human-only gates).
    Live-run steps that need gitignored state follow PRD_AUTHORING.md §7 (absolute main-checkout
    paths, artifact-only).
+3. Never list a path under `.claude/agents`, `commands`, `skills`, `hooks` or `settings*.json` in
+   `files`: the job sandbox refuses every write there, so the architect makes that edit inline
+   in the Epic chat (PRD_AUTHORING.md#job-sandbox-limits).
 
 ### What a headless run cannot do
 

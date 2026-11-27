@@ -7441,6 +7441,7 @@ ${logTail}
    the scheduler's commit guard and post-run verifier read git state from this path, and a
    non-repo cwd parks even a fully green, committed run in \`needs_review\`.
    List each file under \`# Files\` as \`- <repo-relative path>\` with nothing else on the line; put any note about a file in the Implementation notes, never on its path line.
+   The job sandbox refuses every write under \`.claude/agents\`, \`.claude/commands\`, \`.claude/skills\`, \`.claude/hooks\` and \`.claude/settings*.json\` (Edit and Write too), so the fix plan must NEVER list such a path in \`# Files\`. If the only fix is there, write no fix plan and report that the edit is architect-inline work in the Epic chat (see PRD_AUTHORING.md #job-sandbox-limits).
 6. The PRD body MUST be self-contained — \`claude -p\` runs it on a fresh Sonnet session with NO conversation context. Include:
    - Root-cause analysis (what went wrong and why)
    - Concrete fix steps (specific files / commands / edits)

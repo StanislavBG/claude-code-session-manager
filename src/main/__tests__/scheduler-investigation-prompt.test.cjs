@@ -233,3 +233,12 @@ test('prompt states the # Files format: one bare repo-relative path per line, no
   const prompt = buildInvestigationPrompt(makeArgs());
   assert.ok(prompt.includes("List each file under `# Files` as `- <repo-relative path>` with nothing else on the line; put any note about a file in the Implementation notes, never on its path line."));
 });
+
+test('prompt forbids listing sandbox-protected .claude paths in # Files', () => {
+  const prompt = buildInvestigationPrompt(makeArgs());
+  assert.match(prompt, /\.claude\/agents/);
+  assert.match(prompt, /\.claude\/skills/);
+  assert.match(prompt, /\.claude\/settings\*\.json/);
+  assert.match(prompt, /must NEVER list such a path/);
+  assert.match(prompt, /architect-inline work in the Epic chat/);
+});

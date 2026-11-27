@@ -1,0 +1,1 @@
+- [Demo project test command](demo_test_command.md) — run unit tests with `npm test --silent`

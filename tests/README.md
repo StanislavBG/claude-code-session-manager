@@ -144,3 +144,5 @@ Raising the ceiling requires deleting or merging an existing spec first.
 
 - `web-remote/relay/tests` — the relay is its own package with its own deps; run from there.
 - `web/remote-app` — its own package and `playwright.config.ts`; excluded from the root Playwright run.
+
+- [weekly-consolidation fixtures](fixtures/weekly-consolidation/README.md) — synthetic transcript sets for the Weekly consolidation pass.

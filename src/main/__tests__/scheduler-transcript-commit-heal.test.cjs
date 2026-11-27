@@ -54,12 +54,16 @@ function makeRepo(name, ownAt) {
   return { dir, sha: gitIn(dir, ['rev-parse', 'HEAD']) };
 }
 
-function commitLog(runId, slug, sha) {
+function commitLog(runId, slug, sha, shape = 'summary') {
   const short = sha.slice(0, 7);
-  const cmd = 'git add feature.txt && git commit -m "feat: own work for the prd"';
+  const oneline = shape === 'oneline';
+  const cmd = oneline
+    ? 'git add feature.txt && git commit -q -m "feat: own work for the prd" -m "Co-Authored-By: Test <t@t>" && git log --oneline -1'
+    : 'git add feature.txt && git commit -m "feat: own work for the prd"';
+  const out = oneline ? `${short} feat: own work for the prd` : `[main ${short}] feat: own work for the prd\n 1 file changed`;
   writeRunLog(runId, slug, [
     JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: cmd } }] } }),
-    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: `[main ${short}] feat: own work for the prd\n 1 file changed` }] } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: out }] } }),
     JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done\nSCHEDULER_VERDICT: PASS' }),
   ]);
   return path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId, `${slug}.log`);
@@ -91,7 +95,7 @@ test('ownTranscriptCommitOnHead is null outside the window, for a non-ancestor, 
   expect(await ownTranscriptCommitOnHead(undefined)).toBeNull();
 });
 
-async function reverifyCase(name, ownAt) {
+async function reverifyCase(name, ownAt, shape = 'summary') {
   const { dir, sha } = makeRepo(name, ownAt);
   registerActiveProject(dir, `proj-${name}-slug`);
   const slug = `4908-transcript-heal-${name}`;
@@ -99,7 +103,7 @@ async function reverifyCase(name, ownAt) {
   fs.mkdirSync(prdDir, { recursive: true });
   fs.writeFileSync(path.join(prdDir, `${slug}.md`), `---\ntitle: t\ncwd: ${dir}\n---\n\n# Goal\n\nship it\n`);
   const runId = `run-${name}`;
-  commitLog(runId, slug, sha);
+  commitLog(runId, slug, sha, shape);
   const queuePath = writeProjectQueue(dir, [{
     slug, status: 'needs_review', cwd: dir, runId,
     startedAt: startedAt.toISOString(), finishedAt: finishedAt.toISOString(),
@@ -111,6 +115,13 @@ async function reverifyCase(name, ownAt) {
 
 test('reverifyNeedsReview completes a pass_no_commit row from its own transcript commit', async () => {
   const { row, sha } = await reverifyCase('heal', new Date(startedAt.getTime() + 60_000));
+  expect(row.status).toBe('completed');
+  expect(row.landedCommit).toBe(sha);
+  expect(row.landedCommitSource).toBe('transcript-output');
+}, 60_000);
+
+test('reverifyNeedsReview completes a row whose log is the 1458 git log --oneline shape', async () => {
+  const { row, sha } = await reverifyCase('oneline', new Date(startedAt.getTime() + 60_000), 'oneline');
   expect(row.status).toBe('completed');
   expect(row.landedCommit).toBe(sha);
   expect(row.landedCommitSource).toBe('transcript-output');

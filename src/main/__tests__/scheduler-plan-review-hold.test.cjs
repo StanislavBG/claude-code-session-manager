@@ -87,6 +87,65 @@ describe('applyPlanReviewHolds', () => {
   });
 });
 
+describe('create refused audit', () => {
+  it('audits once per (validateSlug, round) across ticks, again on a new round', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-plan-review-'));
+    try {
+      fs.mkdirSync(path.join(root, 'session-manager-operations'), { recursive: true });
+      const rows = () => mk().map((r) => ({ ...r, cwd: root }));
+      const d = deps({
+        readReview: undefined,
+        createPrd: vi.fn(async () => ({ ok: false, error: 'refused' })),
+      });
+      delete d.readReview;
+      d.audit = vi.fn();
+      const realStore = require('../lib/scheduler/planReviewStore.cjs');
+      d.markCreateRefused = (c, e, s, r) => realStore.markCreateRefused(c, e, s, r);
+      const state = { jobs: rows() };
+      await sched.applyPlanReviewHolds(state, d);
+      await sched.applyPlanReviewHolds(state, d);
+      const count = () => d.audit.mock.calls.filter((c) => c[0] === 'plan_review_create_refused').length;
+      expect(d.createPrd).toHaveBeenCalledTimes(2);
+      expect(count()).toBe(1);
+      // round 2 requested
+      const rec = realStore.readPlanReview(root, EPIC, '90-validate');
+      expect(rec.createRefusedLogged).toEqual([1]);
+      await realStore.savePlanReviewResult({ cwd: root, epicId: EPIC, validateSlug: '90-validate', round: 1, reviewer: 'r', runId: 'x', model: 'm', review: {} });
+      const p = realStore.planReviewPath(root, EPIC, '90-validate');
+      const cur = JSON.parse(fs.readFileSync(p, 'utf8'));
+      cur.rereviewRequested = true;
+      fs.writeFileSync(p, JSON.stringify(cur));
+      await sched.applyPlanReviewHolds(state, d);
+      await sched.applyPlanReviewHolds(state, d);
+      expect(count()).toBe(2);
+      expect(realStore.readPlanReview(root, EPIC, '90-validate').createRefusedLogged).toEqual([1, 2]);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('default readEpicGoal without a title', () => {
+  it('uses the first goalText paragraph plus the objective', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-plan-review-'));
+    try {
+      const ops = path.join(root, 'session-manager-operations');
+      fs.mkdirSync(path.join(ops, 'prompt-sessions'), { recursive: true });
+      fs.writeFileSync(path.join(ops, 'prompt-sessions', 'active-index.json'), JSON.stringify({
+        sessions: { [EPIC]: { id: EPIC, goalText: 'FIRST-PARA line\n\nSECOND-PARA', openingPrompt: 'OBJ-MARKER' } },
+      }));
+      return (async () => {
+        const state = { jobs: mk().map((r) => ({ ...r, cwd: root })) };
+        const d = deps({ readEpicGoal: undefined, readReview: () => null, markCreateRefused: async () => true });
+        delete d.readEpicGoal;
+        await sched.applyPlanReviewHolds(state, d);
+        const notes = d.createPrd.mock.calls[0][0].implementationNotes;
+        expect(notes).toContain('FIRST-PARA line');
+        expect(notes).not.toContain('SECOND-PARA');
+        expect(notes).toContain('OBJ-MARKER');
+      })().finally(() => fs.rmSync(root, { recursive: true, force: true }));
+    } catch (e) { fs.rmSync(root, { recursive: true, force: true }); throw e; }
+  });
+});
+
 describe('known wait', () => {
   const heldRows = () => mk().map((r) => (['1-a', '2-b', '3-c'].includes(r.slug) ? { ...r, heldReason: 'held: plan-review — waiting' } : r));
 

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
-  planReviewPath, readPlanReview, savePlanReviewResult, recordPlanRelease, readPlanReviewFiles,
+  planReviewPath, readPlanReview, savePlanReviewResult, recordPlanRelease, readPlanReviewFiles, markCreateRefused,
 } = require('../planReviewStore.cjs');
 
 let cwd;
@@ -87,5 +87,24 @@ describe('planReviewStore', () => {
     fs.writeFileSync(file, '{not json');
     assert.equal(readPlanReview(cwd, base.epicId, base.validateSlug), null);
     assert.deepEqual(readPlanReviewFiles(cwd, base.epicId), []);
+  });
+
+  it('markCreateRefused is once per round and preserves the record', async () => {
+    await save(1);
+    assert.equal(await markCreateRefused(cwd, base.epicId, base.validateSlug, 1), true);
+    assert.equal(await markCreateRefused(cwd, base.epicId, base.validateSlug, 1), false);
+    assert.equal(await markCreateRefused(cwd, base.epicId, base.validateSlug, 2), true);
+    const rec = readPlanReview(cwd, base.epicId, base.validateSlug);
+    assert.deepEqual(rec.createRefusedLogged, [1, 2]);
+    assert.equal(rec.reviews.length, 1);
+    await save(2);
+    assert.deepEqual(readPlanReview(cwd, base.epicId, base.validateSlug).createRefusedLogged, [1, 2]);
+  });
+
+  it('markCreateRefused creates a record when none exists', async () => {
+    assert.equal(await markCreateRefused(cwd, base.epicId, base.validateSlug, 1), true);
+    const rec = readPlanReview(cwd, base.epicId, base.validateSlug);
+    assert.equal(rec.release, null);
+    assert.deepEqual(rec.reviews, []);
   });
 });

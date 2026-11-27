@@ -108,6 +108,27 @@ async function recordPlanRelease({
   return record;
 }
 
+/**
+ * Mark that the review-PRD create was refused (and audited) for `round`.
+ * Merge-preserving. Returns true the first time per round, false after.
+ */
+async function markCreateRefused(cwd, epicId, validateSlug, round) {
+  assertSafe(epicId, validateSlug);
+  const prior = readPlanReview(cwd, epicId, validateSlug);
+  const logged = prior && Array.isArray(prior.createRefusedLogged) ? prior.createRefusedLogged : [];
+  if (logged.includes(round)) return false;
+  await writeRecord(cwd, {
+    ...(prior || {}),
+    validateSlug,
+    epicId,
+    round: prior && Number.isFinite(prior.round) ? prior.round : 0,
+    reviews: prior && Array.isArray(prior.reviews) ? prior.reviews : [],
+    release: prior && prior.release ? prior.release : null,
+    createRefusedLogged: [...logged, round],
+  });
+  return true;
+}
+
 /** Every readable record in an Epic's folder; [] for unsafe id/missing folder. */
 function readPlanReviewFiles(cwd, epicId) {
   if (typeof epicId !== 'string' || !EPIC_ID_RE.test(epicId)) return [];
@@ -124,5 +145,5 @@ function readPlanReviewFiles(cwd, epicId) {
 }
 
 module.exports = {
-  planReviewPath, readPlanReview, savePlanReviewResult, recordPlanRelease, readPlanReviewFiles,
+  planReviewPath, readPlanReview, savePlanReviewResult, recordPlanRelease, readPlanReviewFiles, markCreateRefused,
 };

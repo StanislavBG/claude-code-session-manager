@@ -108,12 +108,20 @@ so it stays small and every Session means the same thing by "Feature" or "Bug."<
 
 <h2>The Agents tab — roster and character sheet</h2>
 
-<p>The <strong>Agents</strong> tab lists every agent as a character. On the left is the roster, with a
-<strong>Filter agents</strong> box, a <strong>Global</strong> / <strong>In project</strong> scope
-switch, and a button to collapse or expand the list. Pick an agent and its sheet opens on the right: its
-name, description, <strong>Stats</strong> (model and effort), and where it is used (<strong>Epic
-chat</strong>, <strong>Scheduler jobs</strong>, <strong>Tasks</strong>). Edits show <strong>No unsaved
-changes</strong> or a Save prompt (Ctrl S), and <strong>Delete</strong> removes the agent.</p>
+<p>The <strong>Agents</strong> tab opens on the roster: a grid of character cards, one per agent, with a
+<strong>Filter agents</strong> box, state chips (All, Undecided, Equipped, Bare, Unbound) and a
+<strong>+ New</strong> button. Open an agent and its sheet appears next to a collapsible agent rail on
+the left; the <strong>«</strong> / <strong>»</strong> button expands the rail into the full list or
+folds it to a column of avatars.</p>
+
+<p>The sheet header shows the agent's name, its loadout state and a <strong>Global</strong> /
+<strong>In project</strong> scope switch. Choosing <strong>In project</strong> opens a project menu;
+once a project is picked, the pill reads <strong>In &lt;project&gt;</strong>. Below the header the sheet
+has two columns. The centre column holds the description, <strong>Stats</strong> (model and effort)
+and <strong>Gear</strong>. The right column holds <strong>Constraints</strong> and <strong>This loadout
+applies to</strong>, where the agent is used (<strong>Epic chat</strong>, <strong>Scheduler
+jobs</strong>, <strong>Tasks</strong>). Edits show <strong>No unsaved changes</strong> or a Save prompt
+(Ctrl S), and <strong>Delete</strong> removes the agent.</p>
 
 <h2>Bundled agents and app updates</h2>
 
@@ -144,11 +152,12 @@ Claude Code for that project or for you. A server that holds a secret in its set
 to a job, and the scheduler warns you when you queue a plan whose agent names a server the job
 could not load. Changing a plan's agent re-pins the job to the new agent.</p>
 
-<p>The sheet has two panels. <strong>Gear</strong> holds the loadout: <strong>Built-in tools</strong>,
-<strong>MCP servers</strong> and <strong>Packs</strong>, plus the buttons <strong>Choose a
-loadout</strong>, <strong>Go bare</strong>, <strong>Go unbound</strong> and <strong>Open the
-Armory</strong>. <strong>Constraints</strong> shows what limits the agent: <strong>Always
-granted</strong>, <strong>Banned in unattended runs</strong>, <strong>Risk marks</strong> (READ,
+<p>The sheet has two panels. <strong>Gear</strong>, in the centre column, holds the loadout:
+<strong>Built-in tools</strong> with the <strong>Always granted</strong> floor, <strong>MCP
+servers</strong> and <strong>Packs</strong>, plus the buttons <strong>Choose a loadout</strong>,
+<strong>Go bare</strong>, <strong>Go unbound</strong> and <strong>Open Armory</strong>.
+<strong>Constraints</strong>, in the right column, shows what limits the agent:
+<strong>Banned in unattended runs</strong>, <strong>Risk marks</strong> (READ,
 WRITE, MONEY, PUBLIC, IRREVERSIBLE) and the <strong>Sandbox environment</strong>.</p>
 
 <h2>The Armory</h2>
@@ -162,9 +171,9 @@ equipped MCP server, open its <strong>Powers</strong> to tick the individual too
 <h2>First run and project overrides</h2>
 
 <p>An agent that is still Undecided shows <strong>Needs a decision first</strong>, and the sheet offers
-<strong>Choose a loadout</strong> (or <strong>Not now</strong>). A loadout is global by default. Choose
-a project under <strong>This loadout applies to</strong> to give the agent a different loadout for
-that project only; project edits save as you make them, it reads <strong>Same as global.</strong>
+<strong>Choose a loadout</strong> (or <strong>Not now</strong>). A loadout is global by default. Pick
+a project from the <strong>In project</strong> pill in the header to give the agent a different loadout
+for that project only; project edits save as you make them, it reads <strong>Same as global.</strong>
 until you change it, and <strong>Reset to global</strong> drops the override.</p>
 
 <p>Changes apply to new sessions. The agent's gear applies to the chat too, so you can ask questions

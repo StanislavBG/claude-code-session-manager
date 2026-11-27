@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { listOpenEpicRecords, getEpicRecord, findEpicProject, readEpicFixes } = require('../epicOutsideRead.cjs');
+const { listOpenEpicRecords, getEpicRecord, findEpicProject, readEpicFixes, _setFixesCapsForTests, _fixesCacheSizeForTests } = require('../epicOutsideRead.cjs');
 const { recordExternalRef } = require('../externalRefIndex.cjs');
 
 const tmpDirs = [];
@@ -604,5 +604,30 @@ test('readEpicFixes: caches per file by stat, re-reads a touched file, drops del
     expect(prdReads()).toBeLessThanOrEqual(2000);
   } finally {
     spy.mockRestore();
+  }
+});
+
+test('readEpicFixes: one combined NN-sorted list keeps the highest NNs; cache stays bounded across Epics', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const mk = (epic, sub, name, n) => {
+    const d = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epic, sub);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, name), `---\nfixes: ${JSON.stringify([{ prd: `${n}-a`, missKind: 'spec-gap', reason: 'g' }])}\n---\n`);
+  };
+  try {
+    _setFixesCapsForTests(3, 4);
+    mk('e-cap', 'prds-archived', '1-old.md', 1);
+    mk('e-cap', 'prds-archived', '2-old.md', 2);
+    mk('e-cap', 'prds', '10-new.md', 10);
+    mk('e-cap', 'prds', '11-new.md', 11);
+    mk('e-cap', 'prds', '12-new.md', 12);
+    expect(readEpicFixes(cwd, 'e-cap').map((f) => f.prd)).toEqual(['10-a', '11-a', '12-a']);
+    for (const e of ['e-c1', 'e-c2', 'e-c3']) {
+      for (let i = 1; i <= 3; i++) mk(e, 'prds', `${i}-x.md`, i);
+      readEpicFixes(cwd, e);
+      expect(_fixesCacheSizeForTests()).toBeLessThanOrEqual(4);
+    }
+  } finally {
+    _setFixesCapsForTests();
   }
 });

@@ -218,7 +218,18 @@ function startedByOf(raw) {
   return r.success ? r.data : null;
 }
 
-const MAX_FIX_FILES = 2000;
+let MAX_FIX_FILES = 2000;
+let MAX_FIX_CACHE = 5000;
+/** Test seam: override the per-call file cap and the total cache bound. */
+function _setFixesCapsForTests(files, cache) {
+  MAX_FIX_FILES = files == null ? 2000 : files;
+  MAX_FIX_CACHE = cache == null ? 5000 : cache;
+}
+/** Leading PRD number of a file name; -1 when it has none. */
+function prdNN(name) {
+  const m = /^(\d+)/.exec(name);
+  return m ? Number(m[1]) : -1;
+}
 /** abs path -> { mtimeMs, size, fixes } — a repeat read re-parses only files whose stat changed. */
 const fixesCache = new Map();
 
@@ -232,8 +243,10 @@ function readEpicFixes(cwd, epicId) {
     for (const sub of ['prds', 'prds-archived']) {
       let names;
       try { names = fs.readdirSync(path.join(base, sub)); } catch { continue; }
-      for (const n of names.filter((x) => x.endsWith('.md')).sort()) files.push(path.join(base, sub, n));
+      for (const n of names) if (n.endsWith('.md')) files.push({ n, p: path.join(base, sub, n) });
     }
+    files.sort((x, y) => prdNN(x.n) - prdNN(y.n) || (x.n < y.n ? -1 : x.n > y.n ? 1 : x.p < y.p ? -1 : x.p > y.p ? 1 : 0));
+    files = files.map((f) => f.p);
     if (files.length > MAX_FIX_FILES) files = files.slice(-MAX_FIX_FILES);
     const seen = new Set(files);
     for (const file of files) {
@@ -245,6 +258,7 @@ function readEpicFixes(cwd, epicId) {
           const list = typeof fm.fixes === 'string' ? parseFixes(fm.fixes) : null;
           hit = { mtimeMs: st.mtimeMs, size: st.size, fixes: (list || []).map((f) => ({ prd: f.prd, missKind: f.missKind })) };
           fixesCache.set(file, hit);
+          while (fixesCache.size > MAX_FIX_CACHE) fixesCache.delete(fixesCache.keys().next().value);
         }
         for (const f of hit.fixes) out.push({ prd: f.prd, missKind: f.missKind });
       } catch { fixesCache.delete(file); /* skip unreadable or deleted PRD */ }
@@ -475,4 +489,4 @@ async function listOpenEpicRecords(cwd, opts = {}) {
   }
 }
 
-module.exports = { readEpicFixes, readVerdictFiles, listOpenEpicRecords, getEpicRecord, findEpicProject };
+module.exports = { readEpicFixes, _setFixesCapsForTests, _fixesCacheSizeForTests: () => fixesCache.size, get MAX_FIX_FILES() { return MAX_FIX_FILES; }, get MAX_FIX_CACHE() { return MAX_FIX_CACHE; }, readVerdictFiles, listOpenEpicRecords, getEpicRecord, findEpicProject };

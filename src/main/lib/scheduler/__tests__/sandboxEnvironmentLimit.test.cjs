@@ -169,3 +169,13 @@ test('claude-dir-write: benign line naming .claude then sandbox is not a limit',
   expect(detectSandboxEnvironmentLimit('sandbox profile lists .claude and more')).toBeNull();
   expect(detectSandboxEnvironmentLimit('sandbox: write to .claude/skills denied')?.kind).toBe('claude-dir-write');
 });
+
+test('claude-dir-write: error word before sandbox and .claude/', () => {
+  expect(detectSandboxEnvironmentLimit('EPERM: operation refused by sandbox, path .claude/skills/x')?.kind).toBe('claude-dir-write');
+});
+test('claude-dir-write: error word after the path', () => {
+  expect(detectSandboxEnvironmentLimit('sandbox policy for .claude/hooks/a.sh: write denied')?.kind).toBe('claude-dir-write');
+});
+test('claude-dir-write: plain "block" does not match', () => {
+  expect(detectSandboxEnvironmentLimit('sandbox config block lists .claude/skills')).toBeNull();
+});

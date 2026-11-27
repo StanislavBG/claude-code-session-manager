@@ -285,7 +285,7 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   const sha = (id) => crypto.createHash('sha256').update(JSON.stringify(BUILTIN_MACROS.find((m) => m.id === id))).digest('hex');
   expect(sha('builtin-project-home')).toBe('86684a527edca103fb7ae9612d412b86d5d4f546b122e6cc900fa9e6d2492113');
   expect(sha('builtin-demo-video')).toBe('320452c89bad47dab159680a4d3c877018cbe26c6de64ecaab891d3a945e46d3');
-  expect(sha('builtin-review-md-network')).toBe('418edb3291360ed3e49462246daf140607c0bb53e53a6cf5854d1e024033bced');
+  expect(sha('builtin-review-md-network')).toBe('bd1db93109f81463704d5bae0656a25219a97fda73a22ca264e8a6018422ecbf');
 
   const b = BUILTIN_MACROS.find((m) => m.id === 'builtin-review-md-network');
   expect(b).toBeTruthy();
@@ -295,16 +295,18 @@ test('builtin-review-md-network is a job-less project-home macro with scope + mo
   expect(b.tag).toBe('discussion');
   expect(b.surface).toBe('project-home');
   expect(b.projects).toEqual(['*']);
-  expect(b.builtinVersion).toBe(1);
-  expect(b.priorPrompts).toEqual([]);
+  expect(b.builtinVersion).toBe(2);
+  expect(b.priorPrompts).toEqual([
+    "Use the session-manager-dev:maintaining-md-network skill to review this project's markdown network. Scope: {{scope}}. Mode: {{mode}}.",
+  ]);
   expect(b.supersedes).toEqual(['review-md-network-d38ffd']);
   expect('job' in b).toBe(false);
   expect(b.inputs).toEqual([
     { name: 'scope', label: 'Scope', default: 'the whole project', required: true },
-    { name: 'mode', label: 'Mode', options: ['Full review', 'Drift check'], default: 'Full review', required: true },
+    { name: 'mode', label: 'Mode', options: ['Full review', 'Drift check', 'Weekly consolidation'], default: 'Full review', required: true },
   ]);
   expect(b.prompt).toBe(
-    "Use the session-manager-dev:maintaining-md-network skill to review this project's markdown network. Scope: {{scope}}. Mode: {{mode}}.",
+    "Use the session-manager-dev:maintaining-md-network skill to review this project's markdown network. Scope: {{scope}}. Mode: {{mode}}. Modes: Full review, Drift check, Weekly consolidation.",
   );
 
   const stamp = '2026-01-01T00:00:00.000Z';

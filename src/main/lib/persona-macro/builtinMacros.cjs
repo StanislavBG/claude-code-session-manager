@@ -82,21 +82,23 @@ const BUILTIN_MACROS = Object.freeze([
     tag: 'discussion',
     surface: 'project-home',
     projects: ['*'],
-    builtinVersion: 1,
+    builtinVersion: 2,
     inputs: Object.freeze([
       Object.freeze({ name: 'scope', label: 'Scope', default: 'the whole project', required: true }),
       Object.freeze({
         name: 'mode',
         label: 'Mode',
-        options: Object.freeze(['Full review', 'Drift check']),
+        options: Object.freeze(['Full review', 'Drift check', 'Weekly consolidation']),
         default: 'Full review',
         required: true,
       }),
     ]),
     supersedes: Object.freeze(['review-md-network-d38ffd']),
-    priorPrompts: Object.freeze([]),
-    prompt:
+    priorPrompts: Object.freeze([
       "Use the session-manager-dev:maintaining-md-network skill to review this project's markdown network. Scope: {{scope}}. Mode: {{mode}}.",
+    ]),
+    prompt:
+      "Use the session-manager-dev:maintaining-md-network skill to review this project's markdown network. Scope: {{scope}}. Mode: {{mode}}. Modes: Full review, Drift check, Weekly consolidation.",
   }),
   Object.freeze({
     id: 'builtin-competitor-matrix',

@@ -12711,6 +12711,42 @@ async function attributeLandedCommits(job, pathCommits, cwd) {
 }
 
 /**
+ * Resolve a commit this job's own transcript names that actually landed on HEAD
+ * during its run. Rule: the transcript SHA resolves to a commit, is an ancestor
+ * of HEAD, and its committer date is within [startedAt, finishedAt + 60s].
+ * Fails closed per candidate and never throws.
+ *
+ * @param {{cwd?: string, logPath?: string, startedAt?: string, finishedAt?: string}} [opts]
+ * @returns {Promise<string|null>}
+ */
+async function ownTranscriptCommitOnHead({ cwd, logPath, startedAt, finishedAt } = {}) {
+  try {
+    if (!cwd || !logPath) return null;
+    const start = Date.parse(startedAt);
+    const end = Date.parse(finishedAt);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    const parsed = parseLog(logPath);
+    const candidates = [...new Set([
+      ...(parsed.transcriptCommitShas || []),
+      ...(parsed.transcriptCommitOutputShas || []),
+    ])];
+    for (const cand of candidates) {
+      try {
+        if (typeof cand !== 'string' || !/^[0-9a-f]{4,64}$/i.test(cand)) continue;
+        const full = String(await execGitAt(cwd, ['rev-parse', '--verify', `${cand}^{commit}`])).trim();
+        if (!/^[0-9a-f]{40,64}$/i.test(full)) continue;
+        await execGitAt(cwd, ['merge-base', '--is-ancestor', full, 'HEAD']);
+        const cIso = String(await execGitAt(cwd, ['show', '-s', '--format=%cI', full])).trim();
+        const ct = Date.parse(cIso);
+        if (!Number.isFinite(ct) || ct < start || ct > end + 60_000) continue;
+        return full;
+      } catch { /* this candidate fails closed */ }
+    }
+  } catch { /* never throws */ }
+  return null;
+}
+
+/**
  * Widened evidence check (PRD 1102, narrowed to per-job attribution by a
  * later PRD): does at least one commit ATTRIBUTABLE TO THIS JOB land AFTER
  * its run window and touch a path the PRD itself declares? Scoped to the
@@ -12740,33 +12776,6 @@ async function attributeLandedCommits(job, pathCommits, cwd) {
  *
  * @returns {Promise<{commits: string[], paths: string[], detectedAt: string, rule: string} | null>}
  */
-async function ownTranscriptCommitOnHead({ cwd, logPath, startedAt, finishedAt } = {}) {
-  try {
-    if (!cwd || !logPath) return null;
-    const start = Date.parse(startedAt);
-    const end = Date.parse(finishedAt);
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-    const parsed = parseLog(logPath);
-    const candidates = [...new Set([
-      ...(parsed.transcriptCommitShas || []),
-      ...(parsed.transcriptCommitOutputShas || []),
-    ])];
-    for (const cand of candidates) {
-      try {
-        if (typeof cand !== 'string' || !/^[0-9a-f]{4,64}$/i.test(cand)) continue;
-        const full = String(await execGitAt(cwd, ['rev-parse', '--verify', `${cand}^{commit}`])).trim();
-        if (!/^[0-9a-f]{40,64}$/i.test(full)) continue;
-        await execGitAt(cwd, ['merge-base', '--is-ancestor', full, 'HEAD']);
-        const cIso = String(await execGitAt(cwd, ['show', '-s', '--format=%cI', full])).trim();
-        const ct = Date.parse(cIso);
-        if (!Number.isFinite(ct) || ct < start || ct > end + 60_000) continue;
-        return full;
-      } catch { /* this candidate fails closed */ }
-    }
-  } catch { /* never throws */ }
-  return null;
-}
-
 async function computeLooksDone(job, fetchedCwds) {
   // An explicit executor FAIL is authoritative: the run said the work is not
   // done, so its own commits (often just a record of the blocker) are never

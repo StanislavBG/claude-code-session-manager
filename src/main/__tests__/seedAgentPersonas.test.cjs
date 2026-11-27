@@ -765,3 +765,17 @@ test('demo-video-builder: voice precedence is Voice line, then SM_VOICE_ID, then
   const kit = at('3. No persona');
   expect(voiceLine < env && env < persona && persona < kit).toBe(true);
 });
+
+test('boot upgrade backs up a non-utf8 installed file byte-for-byte', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const bytes = Buffer.concat([Buffer.from(installedDevLead(['model: fable'])), Buffer.from([0xff, 0x0a])]);
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), bytes);
+  const { personaBodyHash, backupPathFor } = require('../seedAgentPersonas.cjs');
+  const seeds = { 'dev-lead': [{ commit: 'fake0000', bodySha256: personaBodyHash(bytes.toString('utf8')), fm: { model: 'fable' } }] };
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: seeds });
+
+  const backup = backupPathFor('dev-lead', bytes);
+  expect(fs.existsSync(backup)).toBe(true);
+  expect(fs.readFileSync(backup).equals(bytes)).toBe(true);
+});

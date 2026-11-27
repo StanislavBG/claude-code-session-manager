@@ -58,6 +58,7 @@ async function dismissPersonaUpgrade(name, bundledVersion) {
   const file = dismissalsPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   await writeTextAtomic(file, JSON.stringify({ ...readDismissals(), [name]: bundledVersion }, null, 2));
+  return { ok: true };
 }
 
 /** Take the bundled version: back up the installed file, keep the user's changed frontmatter lines. */
@@ -65,17 +66,18 @@ async function takeBundledPersona(name, { shippedSeeds = SHIPPED_PERSONA_SEEDS, 
   if (!PERSONAS.includes(name)) throw new Error(`not a bundled persona: ${name}`);
   const destPath = path.join(destDir, `${name}.md`);
   if (!fs.existsSync(destPath)) throw new Error(`${name}.md is not installed`);
-  const installedText = fs.readFileSync(destPath, 'utf8');
+  const installedBytes = fs.readFileSync(destPath);
+  const installedText = installedBytes.toString('utf8');
   const bundledText = fs.readFileSync(path.join(srcDir, `${name}.md`), 'utf8');
   const seedVersion = readSeedVersion(bundledText);
   if (readSeedVersion(installedText) >= seedVersion) throw new Error(`${name}.md is not behind the bundled version`);
 
   validateWrite(validatePath(destPath)); // before any write, so a doomed write leaves no orphan backup
 
-  const backupPath = backupPathFor(name, installedText);
+  const backupPath = backupPathFor(name, installedBytes);
   if (!fs.existsSync(backupPath)) {
     fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-    await writeTextAtomic(backupPath, installedText);
+    await writeTextAtomic(backupPath, installedBytes);
   }
 
   const { fm } = splitFrontmatter(normalizeNewlines(bundledText));

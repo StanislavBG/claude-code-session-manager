@@ -80,3 +80,16 @@ test('name outside PERSONAS refused; malformed dismissals read as {}', async () 
   fs.writeFileSync(path.join(p, 'persona-upgrade-dismissals.json'), '{bad');
   expect(mod.readDismissals()).toEqual({});
 });
+
+test('dismissPersonaUpgrade resolves { ok: true }', async () => {
+  await expect(mod.dismissPersonaUpgrade('architect', 3)).resolves.toEqual({ ok: true });
+});
+
+test('take-new backs up the installed file byte-for-byte, even when it is not valid utf8', async () => {
+  const old = Buffer.concat([Buffer.from(persona(2, 'sonnet', 'MY BODY')), Buffer.from([0xff, 0x0a])]);
+  fs.writeFileSync(installedPath(), old);
+  const { backupPath } = await mod.takeBundledPersona('architect', { shippedSeeds: {}, srcDir });
+  expect(Buffer.compare(fs.readFileSync(backupPath), old)).toBe(0);
+  expect(fs.readFileSync(backupPath).equals(old)).toBe(true);
+  expect(backupPath).toBe(require('../../../seedAgentPersonas.cjs').backupPathFor('architect', old));
+});

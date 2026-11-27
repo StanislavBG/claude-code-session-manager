@@ -310,7 +310,8 @@ async function upgradeStalePersonas({ logger = console, writeLog = () => {}, shi
     if (!fs.existsSync(destPath)) continue; // nothing installed yet — the first-seed pass below owns this name
     try {
       const bundledText = fs.readFileSync(path.join(srcDir, `${name}.md`), 'utf8');
-      const installedText = fs.readFileSync(destPath, 'utf8');
+      const installedBytes = fs.readFileSync(destPath);
+      const installedText = installedBytes.toString('utf8');
       const bundledVersion = readSeedVersion(bundledText);
       const installedVersion = readSeedVersion(installedText);
       if (installedVersion >= bundledVersion) continue; // same or newer — never touched
@@ -336,10 +337,10 @@ async function upgradeStalePersonas({ logger = console, writeLog = () => {}, shi
       // catch below on failure.
       validateWrite(validatePath(destPath));
 
-      const backupPath = backupPathFor(name, installedText);
+      const backupPath = backupPathFor(name, installedBytes);
       if (!fs.existsSync(backupPath)) {
         fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-        await writeTextAtomic(backupPath, installedText);
+        await writeTextAtomic(backupPath, installedBytes);
       } // same content already backed up by an earlier attempt — never write a second copy
 
       const nextText = buildUpgradedPersona(bundledText, installedText, matches);

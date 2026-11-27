@@ -144,6 +144,8 @@ const GIT_CLASS = Object.freeze({
   HUMAN_LEARN: 'tracked',
   manual: 'tracked',
   reviews: 'tracked',
+  // Human-written steering for the weekly MD consolidation; code only reads it.
+  'md-network': 'tracked',
 });
 
 /**

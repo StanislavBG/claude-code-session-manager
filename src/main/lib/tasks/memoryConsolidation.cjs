@@ -28,7 +28,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
-const { OPS_ROOT_DIR } = require('../opsOwnership.cjs');
+const { opsPath } = require('../opsOwnership.cjs');
 
 const PIPELINE = 'memory-consolidation';
 const MISSION_ID = 'memory-consolidation';
@@ -48,7 +48,6 @@ const READ_ONLY_TOOLS = Object.freeze(['Read', 'Grep', 'Glob', SUBAGENT_TOOL]);
 const TASK_TIMEOUT_SEC = 3600;
 const FIRST_RUN_WINDOW_MS = WEEK_MS;
 const PRIOR_RUN_LOOKBACK_MS = 90 * DAY_MS;
-const STEERING_REL = path.join(OPS_ROOT_DIR, 'md-network', 'steering.md');
 const WEEKLY_DOC = 'plugins/session-manager-dev/skills/maintaining-md-network/weekly-consolidation.md';
 
 const LESSON_LINE_MAX = 200;
@@ -57,11 +56,16 @@ const LESSONS_END = 'LESSONS_DATA>>>';
 
 /** One Lessons line as quoted data: no PROPOSAL/LESSONS markers, one line, capped. */
 function sanitizeLessonLine(line) {
-  return String(line == null ? '' : line)
-    .split(PROPOSAL_START).join('')
-    .split(PROPOSAL_END).join('')
-    .split(LESSONS_BEGIN).join('')
-    .split(LESSONS_END).join('')
+  const markers = [PROPOSAL_START, PROPOSAL_END, LESSONS_BEGIN, LESSONS_END];
+  let cur = String(line == null ? '' : line);
+  for (;;) {
+    let next = cur;
+    for (const m of markers) next = next.split(m).join('');
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur
+    .replace(/["\u201c\u201d]/g, "'")
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, LESSON_LINE_MAX);
@@ -209,7 +213,7 @@ function defaultDeps() {
     listTranscripts: (/** @type {any} */ o) => require('./weeklyConsolidationInputs.cjs').listProjectTranscripts(o),
     collectLessons: (/** @type {any} */ o) => require('./weeklyConsolidationInputs.cjs').collectLessons(o),
     steeringPath: (/** @type {string} */ cwd) => {
-      const p = path.join(cwd, STEERING_REL);
+      const p = opsPath(cwd, 'md-network', 'steering.md');
       try { return fs.existsSync(p) ? p : null; } catch { return null; }
     },
   };
@@ -372,6 +376,7 @@ module.exports = {
   maybeStartConsolidation,
   startConsolidationTimer,
   extractProposal,
+  sanitizeLessonLine,
   parseTotals,
   AGENT,
   TASK_TIMEOUT_SEC,

@@ -5,7 +5,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-20 namespaces, no top-level files. [Single-writer law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
+21 namespaces, no top-level files. [Single-writer law](architecture/domain-model.md#single-writer-law), enforced by `src/main/lib/opsOwnership.cjs`.
 
 - **Owned** (app state): each `OWNERS →` row; `project-pages` = admin render route only
   ([README](project-pages/README.md)). `not owned` rows are skill-authored, no write hazard.
@@ -22,11 +22,12 @@ Epic lifecycle: [`prompt-sessions/README.md#lifecycle`](prompt-sessions/README.m
 | `artifacts` | OWNERS → artifacts | runtime | review files `<epic-id>/` | `artifactsDays` after Epic completes | [link](artifacts/README.md) |
 | `design-mocks` | not owned | tracked | design mock artifacts | keep | [link](design-mocks/README.md) |
 | `events` | OWNERS → event-log | runtime | per-Epic event log `<epic-id>/events.jsonl` | keep forever | none |
-| `feedback` | retired 2026-08-02 | project's own | Session Manager retired it on 2026-08-02 and never writes, ignores, bans or untracks it, because in other projects it is that project's own folder | n/a | none |
+| `feedback` | retired 2026-08-02 | project's own | retired; never touched (project's own) | n/a | none |
 | `feedback-inbox` | OWNERS → feedback-inbox | runtime | per-project website feedback inbox | `feedbackInboxDays`, resolved/wontfix (default 90d) | none |
 | `HUMAN_LEARN` | not owned | tracked | knowledge-base pages | keep | [link](HUMAN_LEARN/README.md) |
 | `logs` | OWNERS → logs | runtime | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | tracked | free Field Manual source | keep | [link](manual/README.md), [2.0.0](manual/RELEASE-2.0.0.md) |
+| `md-network` | not owned | tracked | human `steering.md`; read-only for code | keep | — |
 | `memory-clusters` | OWNERS → memory-clusters | runtime | memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
 | `plan-records` | OWNERS → scheduler | runtime | validator + ship/deploy records, `<epic-id>/<slug>.md` | `planRecordsDays` after Epic completes (default 14d) | [link](plan-records/README.md) |
 | `project-brief` | OWNERS → project-home | tracked | synthesized per-project Brief | keep | [link](project-brief/README.md) |

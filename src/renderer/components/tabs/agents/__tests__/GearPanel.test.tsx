@@ -46,6 +46,7 @@ describe('GearPanel', () => {
     await mount({ tools: ['Edit'] })
     expect(q('[data-tool="Bash"]').className).toContain('border-dashed')
     expect(q('[data-tool="Bash"] [data-badge="risky"]')).toBeTruthy()
+    expect(q('[data-tool="Bash"] [data-badge="risky"]').className).not.toContain('honey')
     await act(async () => { q('[data-tool="Bash"]').click() })
     expect(latest.tools).toContain('Bash')
     await act(async () => { q('[data-tool="Edit"]').click() })

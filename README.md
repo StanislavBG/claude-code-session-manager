@@ -209,6 +209,7 @@ claude plugin install session-manager-dev@session-manager
 | `competitive-researcher` | Looks up one rival product for the matrix. |
 | `blender-artist` | Makes 3D game art in Blender. |
 | `plan-reviewer` | Checks a queued plan's PRDs before they run. |
+| `md-network-curator` | Keeps a project's markdown docs short and free of drift. |
 <!-- /list:personas -->
 
 ## Install

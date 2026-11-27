@@ -39,6 +39,7 @@ describe('McpPowers', () => {
     await mount({ tools: ['Edit', 'mcp__blender__a', 'mcp__blender__b'], mcpServers: ['blender'] })
     expect(q('[data-testid="agent-mcp-powers-count"]').textContent).toBe('2 of 3 powers')
     expect(q('[data-power="mcp__blender__a"] [data-badge="risky"]').textContent).toBe('public')
+    expect(q('[data-power="mcp__blender__a"] [data-badge="risky"]').className).not.toContain('honey')
     expect(q('[data-power="mcp__blender__b"] [data-badge="risky"]')).toBeNull()
     expect(q('[data-power="mcp__blender__c"] [data-badge="risky"]')).toBeNull()
     expect(q('[data-power="mcp__blender__a"] span[title]').textContent).toBe('a')

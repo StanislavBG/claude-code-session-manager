@@ -4,6 +4,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { AgentLibrary } from '../AgentLibrary'
+import { useSessions } from '../../../state/sessions'
+import { overlayEdit, overlayOf } from '../agents/AgentDetail'
 import type { AgentPersona } from '../../../../preload/api'
 
 // Stub the sheet: it exposes the draft setter + Save/Revert/override so the test drives AgentLibrary's save payload.
@@ -25,7 +27,11 @@ vi.mock('../agents/AgentSheet', () => ({
       createElement('button', { key: 's', 'data-testid': 'g-save', onClick: () => p.onSave() }),
       createElement('button', { key: 'r', 'data-testid': 'g-revert', onClick: () => p.onRevert() }),
       createElement('span', { key: 'o', 'data-testid': 'g-packs' }, JSON.stringify(p.obj.packs ?? null)),
+      createElement('button', { key: 'sel', 'data-testid': 'g-select', onClick: () => p.onSelect('/work/proj') }),
       createElement('button', { key: 'ov', 'data-testid': 'g-overlay', onClick: () => p.onSaveOverride({ tools: [] }) }),
+      createElement('button', { key: 'ovs', 'data-testid': 'g-overlay-servers', onClick: () => p.onSaveOverride({ mcpServers: [] }) }),
+      createElement('button', { key: 'ovp', 'data-testid': 'g-overlay-packs', onClick: () => p.onSaveOverride({ packs: [] }) }),
+      createElement('button', { key: 'gn', 'data-testid': 'g-none', onClick: () => p.set({ tools: [] }) }),
     ]),
 }))
 
@@ -92,9 +98,35 @@ describe('AgentLibrary global save sends gear', () => {
     await click('g-pack'); await click('g-save')
     expect(container!.querySelector('[data-testid="g-packs"]')!.textContent).toBe('["pk"]')
   })
-  it('overlay tools [] sends loadout unbound (replace with none)', async () => {
-    // saveOverride needs a picked project; none is open here, so it is a no-op — covered by the payload shape in AgentLibrary.
-    await click('g-overlay')
-    expect(api.agents.savePersona).not.toHaveBeenCalled()
+  it('clearing every tool globally (no explicit choice) saves loadout bare, never unbound', async () => {
+    await click('g-none'); await click('g-save')
+    const sent = api.agents.savePersona.mock.calls[0][0]
+    expect(sent.tools).toEqual([]); expect(sent.loadout).toBe('bare')
+  })
+  describe('project overlay write path', () => {
+    beforeEach(async () => {
+      useSessions.setState({ tabs: [{ id: 't1', cwd: '/work/proj' }] as never, activeTabId: 't1' })
+      await click('g-select')
+    })
+    afterEach(() => { useSessions.setState({ tabs: [], activeTabId: null }) })
+    it('servers cleared -> mcpServers: []', async () => {
+      await click('g-overlay-servers')
+      expect(api.agents.savePersona).toHaveBeenCalledWith(expect.objectContaining({ projectCwd: '/work/proj', mcpServers: [] }))
+    })
+    it('packs cleared -> packs: []', async () => {
+      await click('g-overlay-packs')
+      expect(api.agents.savePersona).toHaveBeenCalledWith(expect.objectContaining({ projectCwd: '/work/proj', packs: [] }))
+    })
+    it('all tools cleared -> tools: [] + loadout bare', async () => {
+      await click('g-overlay')
+      const sent = api.agents.savePersona.mock.calls[0][0]
+      expect(sent.tools).toEqual([]); expect(sent.loadout).toBe('bare')
+    })
+  })
+  it('overlayEdit keeps emptied mcpServers/packs as []; overlayOf round-trips them', () => {
+    expect(overlayEdit({}, { mcpServers: [], packs: [] })).toEqual({ mcpServers: [], packs: [] })
+    expect(overlayEdit({ packs: ['a'] }, { packs: undefined })).toEqual({})
+    const d = { fields: ['mcpServers', 'packs', 'tools'], values: { mcpServers: '[]', packs: '[]', tools: '[]' } } as never
+    expect(overlayOf(d)).toEqual({ mcpServers: [], packs: [], tools: [] })
   })
 })

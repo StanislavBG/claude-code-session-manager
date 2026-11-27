@@ -44,6 +44,11 @@ import { normalizeCwd, projectNameFromCwd } from '../../lib/knownProjectAggregat
  * from the persona) is no longer editable here; saves pass it through untouched.
  */
 
+/** Loadout a tool list saves as: none = bare, ['*'] = unbound (only the explicit Unbound choice), else equipped. */
+function loadoutForTools(tools: readonly string[]): 'bare' | 'equipped' | 'unbound' {
+  return tools.length === 0 ? 'bare' : tools.includes('*') ? 'unbound' : 'equipped'
+}
+
 /** One entry per unique `normalizeCwd(tab.cwd)` (so `/a/b/` and `/a/b` are one), sorted by name then cwd. */
 function openProjectsOf(tabs: readonly { cwd: string }[]): OpenProject[] {
   const byCwd = new Map<string, OpenProject>()
@@ -231,7 +236,7 @@ function AgentLibraryComponent() {
         ...(obj.mcpServers ? { mcpServers: obj.mcpServers } : {}),
         ...(obj.packs ? { packs: obj.packs } : {}),
         ...(obj.environment ? { environment: obj.environment } : {}),
-        ...(obj.loadout ? { loadout: obj.loadout } : {}),
+        ...(obj.loadout || obj.tools.length === 0 ? { loadout: obj.tools.length === 0 ? 'bare' as const : obj.loadout === 'unbound' && !obj.tools.includes('*') ? 'equipped' as const : obj.loadout } : {}),
         ...(obj.agentCli !== 'claude' && obj.agentCliModel.trim() ? { agentCliModel: obj.agentCliModel.trim() } : {}),
       }
       // savePersona rewrites the whole file, so an existing persona is the base: title and the
@@ -313,7 +318,7 @@ function AgentLibraryComponent() {
           name: saved.name, projectCwd, description: '', tools: overlay.tools ?? [], color: '', tags: [], body: '',
           ...(overlay.model ? { model: overlay.model } : {}),
           ...(overlay.effort ? { effort: overlay.effort } : {}),
-          ...(overlay.tools ? { loadout: overlay.tools.length ? 'equipped' : 'unbound' } : {}),
+          ...(overlay.tools ? { loadout: loadoutForTools(overlay.tools) } : {}),
           ...(overlay.mcpServers ? { mcpServers: overlay.mcpServers } : {}),
           ...(overlay.packs ? { packs: overlay.packs } : {}),
           ...(overlay.environment ? { environment: overlay.environment } : {}),

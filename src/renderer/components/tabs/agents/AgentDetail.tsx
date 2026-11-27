@@ -105,13 +105,13 @@ export function overlayOf(d: OverrideDetail): OverlayKeys {
   if (d.fields.includes('model') && v.model) out.model = v.model
   if (d.fields.includes('effort') && v.effort) out.effort = v.effort
   if (d.fields.includes('environment') && v.environment) out.environment = v.environment
-  if (d.fields.includes('tools') && v.tools !== undefined) { const t = splitList(String(v.tools)); out.tools = t.includes('*') ? [] : t }
-  if (d.fields.includes('mcpServers') && v.mcpServers) out.mcpServers = splitList(String(v.mcpServers))
-  if (d.fields.includes('packs') && v.packs) out.packs = splitList(String(v.packs))
+  if (d.fields.includes('tools') && v.tools !== undefined) { const t = splitList(String(v.tools)); out.tools = t }
+  if (d.fields.includes('mcpServers') && v.mcpServers !== undefined) out.mcpServers = splitList(String(v.mcpServers))
+  if (d.fields.includes('packs') && v.packs !== undefined) out.packs = splitList(String(v.packs))
   return out
 }
 
-/** Apply a draft-shaped edit to an overlay: 'inherit' / empty list / blank = the key goes back to global (tools [] is kept: every tool). */
+/** Apply a draft-shaped edit to an overlay: 'inherit' / empty list / blank = the key goes back to global (an explicitly emptied tools/mcpServers/packs is kept as [] = replace with none). */
 export function overlayEdit(overlay: OverlayKeys, patch: Partial<Draft>): OverlayKeys {
   const next: OverlayKeys = { ...overlay }
   for (const k of ['model', 'effort', 'environment'] as const) {
@@ -124,7 +124,7 @@ export function overlayEdit(overlay: OverlayKeys, patch: Partial<Draft>): Overla
   for (const k of ['mcpServers', 'packs'] as const) {
     if (!(k in patch)) continue
     const v = patch[k]
-    if (v && v.length) next[k] = v
+    if (v) next[k] = v
     else delete next[k]
   }
   return next

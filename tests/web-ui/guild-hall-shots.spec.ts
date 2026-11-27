@@ -62,9 +62,11 @@ test('Guild Hall screenshots: empty, populated, quest board, light + dark, at 15
         await page.addInitScript(() => {
           const w = window as any
           w.__fillTexts = []
+          w.__fillYs = {}
           const orig = CanvasRenderingContext2D.prototype.fillText
           CanvasRenderingContext2D.prototype.fillText = function (this: CanvasRenderingContext2D, text: string, ...rest: number[]) {
             w.__fillTexts.push(String(text))
+            w.__fillYs[String(text)] = rest[1]
             return (orig as any).call(this, text, ...rest)
           }
         })
@@ -95,6 +97,12 @@ test('Guild Hall screenshots: empty, populated, quest board, light + dark, at 15
           expect(drawn).not.toContain(CAPTION)
           expect(drawn).toContain('dev-lead')
           expect(drawn).toContain('architect')
+          // All three groups sit below the overlay bar: label baselines are under the bar's bottom edge.
+          const barBottom = await page.locator('header').first().evaluate((h) => h.getBoundingClientRect().bottom)
+          const ys = await page.evaluate(() => (window as any).__fillYs as Record<string, number>)
+          const labelYs = Object.entries(ys).filter(([t]) => /×\d+$/.test(t))
+          expect(labelYs.length, `${scheme}: three group labels`).toBeGreaterThanOrEqual(3)
+          for (const [t, y] of labelYs) expect(y, `${scheme}: ${t} hidden under the bar`).toBeGreaterThan(barBottom)
           const s = await canvasStats(page)
           expect(s.opaque, `${scheme}: populated canvas is blank`).toBeGreaterThan(0)
           expect(s.colours, `${scheme}: populated canvas has a single flat colour`).toBeGreaterThan(4)

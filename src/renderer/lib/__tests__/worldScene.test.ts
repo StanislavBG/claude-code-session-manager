@@ -93,6 +93,29 @@ describe('layoutWorld', () => {
     }
   })
 
+  it('keeps every group, label and actor below insetTop for 1..n groups', () => {
+    const types = ['a', 'b', 'c', 'd', 'e', 'f']
+    for (let n = 1; n <= types.length; n++) {
+      const r = types.slice(0, n).map((agentType, i) => ({ agentType, count: i + 2 }))
+      const groups = layoutGroups(r, 600, 400, 60)
+      expect(groups).toHaveLength(n)
+      for (const g of groups) {
+        expect(g.y).toBeGreaterThanOrEqual(60)
+        expect(g.y + g.h).toBeLessThanOrEqual(400 + 1e-6)
+      }
+      const actors = layoutWorld(r, 600, 400, 60)
+      for (const a of actors) {
+        expect(a.y).toBeGreaterThanOrEqual(60 + 16)
+        expect(a.y).toBeLessThanOrEqual(400)
+      }
+      expect(layoutWorld(r, 600, 400, 60)).toEqual(actors)
+    }
+  })
+
+  it('insetTop defaults to 0', () => {
+    expect(layoutWorld(roster, 600, 400, 0)).toEqual(layoutWorld(roster, 600, 400))
+  })
+
   it('stays in bounds even in a tiny world', () => {
     for (const a of layoutWorld(roster, 30, 20)) {
       expect(a.x).toBeGreaterThanOrEqual(0)

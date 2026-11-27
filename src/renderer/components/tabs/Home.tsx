@@ -15,7 +15,7 @@
  * time the page is opened (at most every 30 s) and on the Refresh button.
  */
 
-import { memo, useMemo, useEffect, useState, type ReactNode } from 'react'
+import { memo, useMemo, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { NavKey } from '../../lib/navKey'
 import { useScheduleState } from '../../state/scheduleState'
 import { usePromptSessions } from '../../state/promptSessions'
@@ -62,12 +62,27 @@ function HomeComponent({ onNavigate }: HomeProps) {
   const holders = slots?.holders ?? EMPTY_HOLDERS
   const roster = useMemo(() => worldRoster(holders, jobs, chats, sessions), [holders, jobs, chats, sessions])
 
+  const barRef = useRef<HTMLElement | null>(null)
+  const [barInset, setBarInset] = useState(0)
+  useEffect(() => {
+    const el = barRef.current
+    if (!el) return
+    const measure = () => setBarInset(el.offsetTop + el.offsetHeight + BAR_GAP)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    if (el.parentElement) ro.observe(el.parentElement)
+    return () => ro.disconnect()
+  }, [])
+
   return (
     <div className="relative h-full w-full overflow-hidden text-fg" data-testid="guild-hall">
       <div className="absolute inset-0">
-        <WorldView roster={roster} />
+        <WorldView roster={roster} insetTop={barInset} />
       </div>
       <GuildHallBar
+        barRef={barRef}
         inUse={slots?.inUse ?? 0}
         total={slots?.total ?? 5}
         questCount={needsRows.length}
@@ -122,6 +137,8 @@ function useNeedsYouRows(): { rows: NeedsYouRow[]; answer: OutsideAnswer; reload
 }
 
 const REFRESH_STAMP_TICK_MS = 15_000
+/** Breathing room between the overlay bar and the first group label. */
+const BAR_GAP = 8
 
 // ────────────────────────────────────────────────────────────────────
 // Overlay bar — title, slot count, Refresh + stamp, pause-above control,
@@ -138,7 +155,9 @@ export function GuildHallBar({
   lastRefreshedAt = null,
   failedSources,
   focused = true,
+  barRef,
 }: {
+  barRef?: React.Ref<HTMLElement>
   inUse: number
   total: number
   questCount: number
@@ -166,7 +185,7 @@ export function GuildHallBar({
     : lastRefreshedAt != null ? `Updated ${formatAgo(lastRefreshedAt, now)}` : null
 
   return (
-    <header className={`absolute left-3 right-3 top-3 flex items-center gap-3 rounded-[12px] border border-line bg-bg-hi/90 px-4 py-2 backdrop-blur ${Z.dialog}`}>
+    <header ref={barRef} className={`absolute left-3 right-3 top-3 flex items-center gap-3 rounded-[12px] border border-line bg-bg-hi/90 px-4 py-2 backdrop-blur ${Z.dialog}`}>
       <h1 className="m-0 font-serif text-[20px] font-semibold leading-none text-fg">Guild Hall</h1>
       <span data-testid="guild-hall-slots" className="font-mono text-[12px] text-fg-dim">
         {inUse} of {total} slots busy

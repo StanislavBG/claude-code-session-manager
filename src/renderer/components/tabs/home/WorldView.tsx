@@ -30,7 +30,7 @@ function prefersReducedMotion(): boolean {
     : false
 }
 
-export function WorldView({ roster }: { roster: WorldRosterEntry[] }) {
+export function WorldView({ roster, insetTop = 0 }: { roster: WorldRosterEntry[]; insetTop?: number }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cacheRef = useRef<ReturnType<typeof createSpriteCache> | null>(null)
@@ -42,8 +42,8 @@ export function WorldView({ roster }: { roster: WorldRosterEntry[] }) {
   const visible = useDocumentVisible()
   const [reduced, setReduced] = useState(prefersReducedMotion)
 
-  const actors = useMemo(() => layoutWorld(roster, size.w, size.h), [roster, size.w, size.h])
-  const groups = useMemo(() => layoutGroups(roster, size.w, size.h), [roster, size.w, size.h])
+  const actors = useMemo(() => layoutWorld(roster, size.w, size.h, insetTop), [roster, size.w, size.h, insetTop])
+  const groups = useMemo(() => layoutGroups(roster, size.w, size.h, insetTop), [roster, size.w, size.h, insetTop])
   const animate = focused && visible && roster.length > 0 && !reduced
 
   const draw = useCallback(
@@ -124,7 +124,7 @@ export function WorldView({ roster }: { roster: WorldRosterEntry[] }) {
 
   return (
     <div ref={wrapRef} className="h-full w-full">
-      <canvas ref={canvasRef} data-testid="world-canvas" className="block h-full w-full" />
+      <canvas ref={canvasRef} data-testid="world-canvas" data-inset-top={insetTop} className="block h-full w-full" />
     </div>
   )
 }

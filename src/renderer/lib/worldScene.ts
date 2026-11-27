@@ -37,26 +37,28 @@ export const groupLabel = (agentType: string, count: number): string => `${agent
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), Math.max(lo, hi))
 
-export function layoutGroups(roster: RosterEntry[], width: number, height: number): WorldGroup[] {
+/** `insetTop` reserves a strip at the top (an overlay bar) that no group or actor may enter. */
+export function layoutGroups(roster: RosterEntry[], width: number, height: number, insetTop = 0): WorldGroup[] {
+  const inset = Math.min(Math.max(0, insetTop), Math.max(0, height))
   const live = roster.filter((r) => r.count > 0)
   if (live.length === 0) return []
   const cols = Math.ceil(Math.sqrt(live.length))
   const rows = Math.ceil(live.length / cols)
   const cw = width / cols
-  const ch = height / rows
+  const ch = (height - inset) / rows
   return live.map((r, i) => ({
     agentType: r.agentType,
     count: r.count,
     x: (i % cols) * cw,
-    y: Math.floor(i / cols) * ch,
+    y: inset + Math.floor(i / cols) * ch,
     w: cw,
     h: ch,
   }))
 }
 
-export function layoutWorld(roster: RosterEntry[], width: number, height: number): WorldActor[] {
+export function layoutWorld(roster: RosterEntry[], width: number, height: number, insetTop = 0): WorldActor[] {
   const out: WorldActor[] = []
-  for (const g of layoutGroups(roster, width, height)) {
+  for (const g of layoutGroups(roster, width, height, insetTop)) {
     const n = Math.min(g.count, MAX_DRAWN_PER_TYPE)
     const innerW = Math.max(0, g.w - PAD * 2)
     const perRow = Math.max(1, Math.min(4, Math.floor(innerW / ACTOR_STEP)))

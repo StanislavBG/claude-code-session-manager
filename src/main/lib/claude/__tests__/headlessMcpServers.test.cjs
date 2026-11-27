@@ -75,4 +75,69 @@ describe('resolveHeadlessMcpServers', () => {
     const r = resolveHeadlessMcpServers({ cwd: 'rel', home });
     expect(Object.keys(r.known).sort()).toEqual([seed.SERVER_NAME, 'u'].sort());
   });
+
+  const refused = (entry, ...needles) => {
+    write(userFile(), { mcpServers: { s: entry } });
+    const { known, credentialed } = resolveHeadlessMcpServers({ cwd, home });
+    expect(known.s).toBeUndefined();
+    expect(credentialed.s).toContain('s ');
+    for (const n of needles) expect(credentialed.s).toContain(n);
+    expect(credentialed.s).not.toMatch(/sekret/);
+  };
+
+  it('refuses a secret flag followed by a value', () => {
+    refused({ command: 'x', args: ['--API-Key', 'sekret'] }, '--api-key', 'args');
+  });
+  it('refuses a secret flag in --flag=value form', () => {
+    refused({ command: 'x', args: ['--token=sekret'] }, '--token', 'args');
+  });
+  it('refuses URL userinfo in args', () => {
+    refused({ command: 'x', args: ['https://u:sekret@host/p'] }, 'userinfo', 'args');
+  });
+  it('refuses URL userinfo in url', () => {
+    refused({ url: 'https://u:sekret@host/p' }, 'userinfo', 'url');
+  });
+  it('refuses a credential query key in url', () => {
+    refused({ url: 'https://host/p?access_token=sekret' }, 'access_token', 'url');
+  });
+  it('refuses broader env and header key names', () => {
+    refused({ command: 'x', env: { GITHUB_PAT: 'sekret' } }, 'GITHUB_PAT', 'env');
+    refused({ command: 'x', env: { AWS_CREDENTIALS: 'sekret' } }, 'AWS_CREDENTIALS');
+    refused({ command: 'x', env: { MY_PRIVATE_KEY: 'sekret' } }, 'MY_PRIVATE_KEY');
+    refused({ url: 'https://h', headers: { 'X-Authorization-Extra': 'sekret' } }, 'X-Authorization-Extra', 'headers');
+  });
+  it('refuses URL userinfo in an env value', () => {
+    refused({ command: 'x', env: { DB: 'postgres://u:sekret@h/db' } }, 'DB', 'userinfo');
+  });
+
+  it('real-config shapes still resolve as known', () => {
+    write(userFile(), {
+      mcpServers: {
+        plain: { command: 'npx', args: ['-y', 'some-mcp@latest', '--port', '8080'] },
+        blender: { command: 'uvx', args: ['blender-mcp'], env: { BLENDER_MCP_HOST: 'localhost', BLENDER_MCP_PORT: '9876', BLENDER_MCP_PATH: '/usr/bin/blender' } },
+        remote: { url: 'https://host/mcp?mode=fast' },
+      },
+    });
+    const { known, credentialed } = resolveHeadlessMcpServers({ cwd, home });
+    expect(Object.keys(credentialed)).toEqual([]);
+    expect(Object.keys(known)).toEqual(expect.arrayContaining(['plain', 'blender', 'remote']));
+  });
+
+  it('projectRoot local scope merges before cwd (cwd wins)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hms-root-'));
+    try {
+      write(userFile(), {
+        projects: {
+          [root]: { mcpServers: { a: { command: 'root' }, b: { command: 'root' } } },
+          [cwd]: { mcpServers: { b: { command: 'cwd' } } },
+        },
+      });
+      const { known } = resolveHeadlessMcpServers({ cwd, projectRoot: root, home });
+      expect(known.a.command).toBe('root');
+      expect(known.b.command).toBe('cwd');
+      expect(resolveHeadlessMcpServers({ cwd, home }).known.a).toBeUndefined();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

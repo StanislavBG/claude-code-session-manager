@@ -32,24 +32,72 @@ function serversOf(map) {
   return out;
 }
 
-function credentialReason(name, entry) {
-  for (const field of ['env', 'headers']) {
-    const obj = entry[field];
-    if (!isPlain(obj)) continue;
-    for (const key of Object.keys(obj)) {
-      if (SECRET_KEY_RE.test(key) || /^authorization$/i.test(key)) {
-        return `${name} carries credential key ${key} in its ${field}; move the secret to a vault ref (environment profile) or run it outside the job`;
+const SECRET_FLAG_RE = /^--(api-key|apikey|token|access-token|secret|password|auth|pat)(=|$)/i;
+const EXTRA_KEY_RE = /(^|_)(PAT|CREDENTIALS?|PRIVATE_KEY)$/i;
+const QUERY_KEY_RE = /(token|key|secret|password|sig|signature|auth)/i;
+const USERINFO_RE = /[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]*@/i;
+const HINT = 'move the secret to a vault ref (environment profile) or run it outside the job';
+
+function secretKey(key) {
+  return SECRET_KEY_RE.test(key) || EXTRA_KEY_RE.test(key) || /authorization/i.test(key);
+}
+
+function argsReason(name, args) {
+  if (!Array.isArray(args)) return null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (typeof a !== 'string') continue;
+    const m = SECRET_FLAG_RE.exec(a);
+    if (m) {
+      const flag = `--${m[1].toLowerCase()}`;
+      if (m[2] === '=' || i + 1 < args.length) {
+        return `${name} carries secret flag ${flag} in its args; ${HINT}`;
       }
+    }
+    if (USERINFO_RE.test(a)) {
+      return `${name} carries URL userinfo in its args; ${HINT}`;
     }
   }
   return null;
 }
 
+function urlReason(name, url) {
+  if (typeof url !== 'string') return null;
+  if (USERINFO_RE.test(url)) return `${name} carries URL userinfo in its url; ${HINT}`;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.username || parsed.password) return `${name} carries URL userinfo in its url; ${HINT}`;
+  for (const key of parsed.searchParams.keys()) {
+    if (QUERY_KEY_RE.test(key)) return `${name} carries credential query key ${key} in its url; ${HINT}`;
+  }
+  return null;
+}
+
+function credentialReason(name, entry) {
+  for (const field of ['env', 'headers']) {
+    const obj = entry[field];
+    if (!isPlain(obj)) continue;
+    for (const key of Object.keys(obj)) {
+      if (secretKey(key)) {
+        return `${name} carries credential key ${key} in its ${field}; ${HINT}`;
+      }
+      if (typeof obj[key] === 'string' && USERINFO_RE.test(obj[key])) {
+        return `${name} carries URL userinfo in ${field} value ${key}; ${HINT}`;
+      }
+    }
+  }
+  return argsReason(name, entry.args) || urlReason(name, entry.url);
+}
+
 /**
- * @param {{ cwd?: string, home?: string }} [opts]
+ * @param {{ cwd?: string, projectRoot?: string, home?: string }} [opts]
  * @returns {{ known: Record<string, object>, credentialed: Record<string, string> }}
  */
-function resolveHeadlessMcpServers({ cwd, home = os.homedir() } = {}) {
+function resolveHeadlessMcpServers({ cwd, projectRoot, home = os.homedir() } = {}) {
   /** @type {Record<string, any>} */
   const merged = {};
   try {
@@ -60,8 +108,13 @@ function resolveHeadlessMcpServers({ cwd, home = os.homedir() } = {}) {
       const proj = readJson(path.join(cwd, '.mcp.json'));
       Object.assign(merged, serversOf(proj && proj.mcpServers));
       const projects = userCfg && userCfg.projects;
-      if (isPlain(projects) && has(projects, cwd) && isPlain(projects[cwd])) {
-        Object.assign(merged, serversOf(projects[cwd].mcpServers));
+      const scopes = [];
+      if (typeof projectRoot === 'string' && path.isAbsolute(projectRoot) && projectRoot !== cwd) scopes.push(projectRoot);
+      scopes.push(cwd);
+      for (const key of scopes) {
+        if (isPlain(projects) && has(projects, key) && isPlain(projects[key])) {
+          Object.assign(merged, serversOf(projects[key].mcpServers));
+        }
       }
     }
   } catch {

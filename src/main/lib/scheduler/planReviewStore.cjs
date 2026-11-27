@@ -139,7 +139,8 @@ function readPlanReviewFiles(cwd, epicId) {
   for (const name of names.sort()) {
     if (!name.endsWith(SUFFIX)) continue;
     const rec = readFile(`${dir}/${name}`);
-    if (rec) out.push(rec);
+    // markCreateRefused stubs (no review, no release) are not plan reviews; readPlanReview still returns them.
+    if (rec && !((!Array.isArray(rec.reviews) || rec.reviews.length === 0) && !rec.release)) out.push(rec);
   }
   return out;
 }

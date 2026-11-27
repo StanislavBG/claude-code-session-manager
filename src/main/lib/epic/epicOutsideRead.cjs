@@ -258,8 +258,12 @@ function readEpicFixes(cwd, epicId) {
           const list = typeof fm.fixes === 'string' ? parseFixes(fm.fixes) : null;
           hit = { mtimeMs: st.mtimeMs, size: st.size, fixes: (list || []).map((f) => ({ prd: f.prd, missKind: f.missKind })) };
           fixesCache.set(file, hit);
-          while (fixesCache.size > MAX_FIX_CACHE) fixesCache.delete(fixesCache.keys().next().value);
+        } else {
+          // LRU: a hit moves the entry to the back so eviction drops the least recently used.
+          fixesCache.delete(file);
+          fixesCache.set(file, hit);
         }
+        while (fixesCache.size > MAX_FIX_CACHE) fixesCache.delete(fixesCache.keys().next().value);
         for (const f of hit.fixes) out.push({ prd: f.prd, missKind: f.missKind });
       } catch { fixesCache.delete(file); /* skip unreadable or deleted PRD */ }
     }

@@ -107,4 +107,12 @@ describe('planReviewStore', () => {
     assert.equal(rec.release, null);
     assert.deepEqual(rec.reviews, []);
   });
+
+  it('readPlanReviewFiles skips markCreateRefused stubs; readPlanReview returns them', async () => {
+    await markCreateRefused(cwd, base.epicId, base.validateSlug, 1);
+    assert.ok(readPlanReview(cwd, base.epicId, base.validateSlug));
+    assert.equal(readPlanReviewFiles(cwd, base.epicId).length, 0);
+    await save(1);
+    assert.equal(readPlanReviewFiles(cwd, base.epicId).length, 1);
+  });
 });

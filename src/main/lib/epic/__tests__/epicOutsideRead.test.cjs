@@ -631,3 +631,28 @@ test('readEpicFixes: one combined NN-sorted list keeps the highest NNs; cache st
     _setFixesCapsForTests();
   }
 });
+
+test('readEpicFixes: a cache hit refreshes position so eviction is least-recently-used', async () => {
+  const cwd = await mkTmp('sm-outside-read-cwd-');
+  const mk = (epic, n) => {
+    const d = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epic, 'prds');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, `${n}-x.md`), `---\nfixes: ${JSON.stringify([{ prd: `${n}-a`, missKind: 'spec-gap', reason: 'g' }])}\n---\n`);
+  };
+  const spy = vi.spyOn(fs, 'readFileSync');
+  try {
+    _setFixesCapsForTests(null, 4);
+    for (const e of ['e-lA', 'e-lB', 'e-lC']) { mk(e, 1); mk(e, 2); }
+    readEpicFixes(cwd, 'e-lA');
+    readEpicFixes(cwd, 'e-lB');
+    readEpicFixes(cwd, 'e-lA'); // refresh A
+    readEpicFixes(cwd, 'e-lC'); // evicts B, not A
+    expect(_fixesCacheSizeForTests()).toBeLessThanOrEqual(4);
+    spy.mockClear();
+    readEpicFixes(cwd, 'e-lA');
+    expect(spy.mock.calls.filter((c) => String(c[0]).includes('e-lA')).length).toBe(0);
+  } finally {
+    spy.mockRestore();
+    _setFixesCapsForTests();
+  }
+});

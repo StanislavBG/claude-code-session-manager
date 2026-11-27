@@ -241,7 +241,7 @@ Two distinct failure modes — don't conflate them:
   `active-index.json` is exactly the racing second writer the single-writer law
   exists to prevent. Tell the human to start the app, and report the finding to
   them in the meantime so it isn't lost.
-- **`feedback_open_session` is absent from your tool list entirely** — the
+- **`feedback_open_session` is absent from your tool list entirely** —
   a misconfiguration, not an offline app. STOP: never hand-write the session.
   Diagnose first: run `claude mcp get session-manager-scheduler`. If it shows
   **Connected**, the server is registered and the chat's gear scope hid it —

@@ -138,11 +138,13 @@ one-line reason, and a rejection with no reason is refused.</p>
   <li><strong>All ok releases itself.</strong> If every work order is <code>ok</code> and there are
   no plan-level findings, the plan is released automatically and the message says so. If the review
   itself fails, the plan is released too, marked as unreviewed, so a broken reviewer never
-  strands your work.</li>
+  strands your work. If the review job cannot even be started, the planner's Session gets a
+  message that starts with <code>PLAN REVIEW NOT STARTED</code>, and the plan stays held until it
+  is released or times out.</li>
   <li><strong>A block can be re-checked once.</strong> After a <code>block</code>, the planner may
   ask for one more review of the revised plan, and no more than one.</li>
   <li><strong>A timeout releases it.</strong> A hold never lasts forever. If nobody releases the
-  plan within 4 hours, the Scheduler releases it. Set <code>SM_PLAN_REVIEW_HOLD_MINUTES</code> to
+  plan within 4 hours of the hold starting, the Scheduler releases it. Set <code>SM_PLAN_REVIEW_HOLD_MINUTES</code> to
   change the length.</li>
 </ol>
 

@@ -2,7 +2,7 @@
 
 // Run: timeout 300 npx vitest run src/main/scheduler/__tests__/planReviewHold.test.cjs
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 const hold = require('../planReviewHold.cjs');
 const { reviewerModelFor } = hold;
 
@@ -48,6 +48,15 @@ describe('planReviewHold rules', () => {
     const fresh = hold.computePlanReviewHolds(plan3(), {}, { now: NOW, holdMs: 4 * HOUR });
     expect(fresh.expired).toEqual([]);
   });
+  it('hold starts at the first review at, not the validator createdAt', () => {
+    const now = NOW + 5 * HOUR;
+    const rec = { validate: { reviews: [{ at: new Date(now - HOUR).toISOString() }] } };
+    const r = hold.computePlanReviewHolds(plan3(), rec, { now, holdMs: 4 * HOUR });
+    expect(r.expired).toEqual([]);
+    expect(r.needsReview).toEqual([]);
+    const old = hold.computePlanReviewHolds(plan3(), {}, { now, holdMs: 4 * HOUR });
+    expect(old.expired).toEqual(['90-validate']);
+  });
   it('ignores rows from another cwd', () => {
     const rows = [row('1-a'), row('2-b'), row('3-c', { cwd: '/other' }), validator(['a', 'b', 'c'])];
     const r = hold.computePlanReviewHolds(rows, {}, { now: NOW, holdMs: 4 * HOUR });
@@ -78,5 +87,31 @@ describe('reviewerModelFor', () => {
     expect(reviewerModelFor('opus', 'opus')).toBe('sonnet');
     expect(reviewerModelFor('claude-opus-4', 'opus')).toBe('sonnet');
     expect(reviewerModelFor('fable', 'fable')).toBe('sonnet');
+  });
+});
+
+describe('env helpers', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+  it('holdMsFromEnv defaults to 240 minutes', () => {
+    vi.stubEnv('SM_PLAN_REVIEW_HOLD_MINUTES', '');
+    expect(hold.holdMsFromEnv()).toBe(240 * 60 * 1000);
+  });
+  it('holdMsFromEnv honours a valid override', () => {
+    vi.stubEnv('SM_PLAN_REVIEW_HOLD_MINUTES', '10');
+    expect(hold.holdMsFromEnv()).toBe(600000);
+  });
+  it('holdMsFromEnv falls back on invalid values', () => {
+    for (const bad of ['abc', '0', '-5']) {
+      vi.stubEnv('SM_PLAN_REVIEW_HOLD_MINUTES', bad);
+      expect(hold.holdMsFromEnv()).toBe(240 * 60 * 1000);
+    }
+  });
+  it('planReviewEnabled is false only for SM_PLAN_REVIEW=0', () => {
+    vi.stubEnv('SM_PLAN_REVIEW', '0');
+    expect(hold.planReviewEnabled()).toBe(false);
+    vi.stubEnv('SM_PLAN_REVIEW', '1');
+    expect(hold.planReviewEnabled()).toBe(true);
+    vi.stubEnv('SM_PLAN_REVIEW', '');
+    expect(hold.planReviewEnabled()).toBe(true);
   });
 });

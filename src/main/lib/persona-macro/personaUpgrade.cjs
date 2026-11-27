@@ -6,18 +6,18 @@
  * Boot upgrade pass: ../../seedAgentPersonas.cjs.
  */
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const {
   PERSONAS, readSeedVersion, personaBodyHash, normalizeNewlines, buildUpgradedPersona,
   backupPathFor, bundledSourceDir, destAgentsDir,
 } = require('../../seedAgentPersonas.cjs');
+const { schedulerHome } = require('../scheduler/schedulerPaths.cjs');
 const { SHIPPED_PERSONA_SEEDS } = require('./shippedPersonaSeeds.cjs');
 const { splitFrontmatter } = require('../prd/prdFrontmatter.cjs');
 const { writeTextAtomic, validatePath, validateWrite } = require('../../config.cjs');
 
 function dismissalsPath() {
-  return path.join(os.homedir(), '.claude', 'session-manager', 'persona-upgrade-dismissals.json');
+  return path.join(schedulerHome(), 'persona-upgrade-dismissals.json');
 }
 
 /** { [name]: bundledVersion } — {} for a missing or malformed file; invalid values dropped. */

@@ -11,10 +11,13 @@ const persona = (v, model, body) => `---\nname: architect\nmodel: ${model}\nseed
 const sha = (text) => require('../../../seedAgentPersonas.cjs').personaBodyHash(text);
 const installedPath = () => path.join(tmpHome, '.claude', 'agents', 'architect.md');
 
+let realSched;
 beforeEach(() => {
   realHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'persona-upgrade-test-'));
   process.env.HOME = tmpHome;
+  realSched = process.env.SM_SCHEDULER_HOME;
+  process.env.SM_SCHEDULER_HOME = path.join(tmpHome, '.claude', 'session-manager');
   purge();
   mod = require('../personaUpgrade.cjs');
   srcDir = path.join(tmpHome, 'seed');
@@ -24,6 +27,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   process.env.HOME = realHome;
+  if (realSched === undefined) delete process.env.SM_SCHEDULER_HOME; else process.env.SM_SCHEDULER_HOME = realSched;
   fs.rmSync(tmpHome, { recursive: true, force: true });
   purge();
 });

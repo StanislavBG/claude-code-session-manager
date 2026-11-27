@@ -286,6 +286,44 @@ describe('service mcp', () => {
       }
     });
 
+    describe('two paired desktops (real pickDevice)', () => {
+      const { pickDevice } = require('../serviceClient.cjs');
+      const DEVICES = [{ deviceId: 'af9911e0aaaa', devicePubKey: 'k1' }, { deviceId: '5bf774adbbbb', devicePubKey: 'k2' }];
+      const pickingClient = (picked) => fakeClient({
+        pair: async (args) => { const d = pickDevice(DEVICES, args.device); picked.push(d.deviceId); return { deviceId: d.deviceId }; },
+        connect: async (c) => { c.opts.onSas('123456'); await new Promise((r) => setTimeout(r, 5)); return { sas: '123456' }; },
+      });
+      const startRoutes = (deviceId) => (url) => (url.endsWith('/confirm')
+        ? { status: 200, body: { ok: true, service: { id: 's1' } } }
+        : { status: 200, body: { ok: true, code: 'CODE', pairingId: 'p1', ...(deviceId ? { deviceId } : {}) } });
+
+      it('no device anywhere: still fails with choose a device', async () => {
+        const { adminApiPath, fetchImpl } = setup(startRoutes());
+        const picked = [];
+        const r = await pairLocalWith(fetchImpl, adminApiPath, pickingClient(picked).factory);
+        expect(r.ok).toBe(false);
+        expect(r.error).toContain('choose a device (2 paired)');
+        expect(picked).toEqual([]);
+      });
+
+      it('start route deviceId is used by default', async () => {
+        const { adminApiPath, fetchImpl } = setup(startRoutes('5bf774adbbbb'));
+        const picked = [];
+        const r = await pairLocalWith(fetchImpl, adminApiPath, pickingClient(picked).factory);
+        expect(r.ok).toBe(true);
+        expect(picked).toEqual(['5bf774adbbbb']);
+      });
+
+      it('--device wins over the start deviceId', async () => {
+        const { adminApiPath, fetchImpl } = setup(startRoutes('5bf774adbbbb'));
+        const picked = [];
+        const { factory } = pickingClient(picked);
+        const r = await run([...base, '--device', 'af9911'], { fetchImpl, adminApiPath, clientFactory: factory });
+        expect(r.code).toBe(0);
+        expect(picked).toEqual(['af9911e0aaaa']);
+      });
+    });
+
     function pairLocalWith(fetchImpl, adminApiPath, clientFactory) {
       return pairLocal({ stateDir: '/s', name: 'K', homeCwd: '/h', tools: ['a'], fetchImpl, adminApiPath, clientFactory });
     }

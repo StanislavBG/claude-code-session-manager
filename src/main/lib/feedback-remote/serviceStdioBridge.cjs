@@ -41,7 +41,7 @@ const USAGE = [
   'usage:',
   '  claude-code-session-manager service pair --code <code> --name <name> --state-dir <dir> [--device <prefix>] [--timeout <seconds>]',
   '  claude-code-session-manager service mcp --state-dir <dir>',
-  '  claude-code-session-manager service pair-local --state-dir <dir> --name <name> --home <cwd> --tools a,b,c [--project-root <dir>] [--timeout <seconds>]',
+  '  claude-code-session-manager service pair-local --state-dir <dir> --name <name> --home <cwd> --tools a,b,c [--project-root <dir>] [--device <prefix>] [--timeout <seconds>]',
 ].join('\n');
 
 /** Parses `--key value` / `--key=value` pairs. Returns { flags } or { error }. */
@@ -139,11 +139,13 @@ function errText(err) { return err && err.message ? err.message : String(err); }
 
 /**
  * Pairs a same-machine service through the loopback admin API, no window step.
- * @param {{ stateDir: string, name: string, homeCwd: string, tools: string[], projectRoot?: string, timeoutS?: number, fetchImpl?: Function, clientFactory?: Function, adminApiPath?: string }} opts
+ * The redeem targets the start route's `deviceId` (this desktop), or `device` (a prefix) when the
+ * caller overrides it; without either, 2+ paired desktops fail with "choose a device".
+ * @param {{ stateDir: string, name: string, homeCwd: string, tools: string[], projectRoot?: string, device?: string, timeoutS?: number, fetchImpl?: Function, clientFactory?: Function, adminApiPath?: string }} opts
  * @returns {Promise<{ ok: true, service: any } | { ok: false, error: string }>}
  */
 async function pairLocal(opts) {
-  const { stateDir, name, homeCwd, tools, projectRoot, timeoutS = DEFAULT_PAIR_TIMEOUT_S } = opts || {};
+  const { stateDir, name, homeCwd, tools, projectRoot, device, timeoutS = DEFAULT_PAIR_TIMEOUT_S } = opts || {};
   const fetchImpl = (opts && opts.fetchImpl) || globalThis.fetch;
   const clientFactory = (opts && opts.clientFactory) || defaultClientFactory;
   let admin;
@@ -187,7 +189,10 @@ async function pairLocal(opts) {
       confirmP.then((r) => { if (!r.ok) rejectConfirm(new Error(r.error)); });
     };
     client = clientFactory({ stateDir, onSas });
-    await client.pair({ code: started.code, name });
+    const pairArgs = { code: started.code, name };
+    const target = device || started.deviceId;
+    if (target) pairArgs.device = String(target);
+    await client.pair(pairArgs);
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error(`timed out after ${timeoutS} s waiting for pairing to confirm`)), timeoutS * 1000);
     });
@@ -205,7 +210,7 @@ async function pairLocal(opts) {
 }
 
 async function runPairLocal(args, { stdout, stderr, clientFactory, fetchImpl, adminApiPath }) {
-  const parsed = parseFlags(args, ['state-dir', 'name', 'home', 'tools', 'project-root', 'timeout']);
+  const parsed = parseFlags(args, ['state-dir', 'name', 'home', 'tools', 'project-root', 'device', 'timeout']);
   if (parsed.error) { line(stderr, `${parsed.error}\n${USAGE}`); return EXIT_USAGE; }
   const { flags } = parsed;
   for (const k of ['state-dir', 'name', 'home', 'tools']) {
@@ -220,7 +225,7 @@ async function runPairLocal(args, { stdout, stderr, clientFactory, fetchImpl, ad
   }
   const r = await pairLocal({
     stateDir: flags['state-dir'], name: flags.name, homeCwd: flags.home, tools,
-    projectRoot: flags['project-root'], timeoutS, clientFactory, fetchImpl, adminApiPath,
+    projectRoot: flags['project-root'], device: flags.device, timeoutS, clientFactory, fetchImpl, adminApiPath,
   });
   if (!r.ok) { line(stderr, `service pair-local: ${r.error}`); return EXIT_FAIL; }
   line(stdout, `Paired locally: ${flags.name}`);

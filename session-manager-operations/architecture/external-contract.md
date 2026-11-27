@@ -895,11 +895,15 @@ Refusals, both routes, body `{ ok: false, error }`: `400` for invalid JSON, a bo
 `no_pending_service` (unknown `pairingId`) or `not_local_pairing` (the pending pairing was started from the
 window, not here); `403` for `sas_mismatch`.
 
-Callers: the CLI line `claude-code-session-manager service pair-local --state-dir <dir> --name <name> --home <cwd> --tools a,b,c [--project-root <dir>] [--timeout <seconds>]`
+Callers: the CLI line `claude-code-session-manager service pair-local --state-dir <dir> --name <name> --home <cwd> --tools a,b,c [--project-root <dir>] [--device <prefix>] [--timeout <seconds>]`
 ([`serviceStdioBridge.cjs`](../../src/main/lib/feedback-remote/serviceStdioBridge.cjs)) starts, redeems, and confirms in one run; the
 `service_pair_local` MCP tool (arguments `stateDir`, `name`, `homeCwd`, `tools`, and optional `projectRoot` — needed with `project_create`) does the same for an agent in a
 Session Manager chat or terminal session (refused inside a scheduled job). The pairing is identical to the window one:
 the same scope, `homeCwd`, `projectRoot`, revoke and kill-switch rules apply, and the audit log marks it `paired-locally`.
+
+Which desktop it pairs with: the redeem targets the `deviceId` the start route answered (this machine, the one that
+minted the code), so an account with two or more paired desktops never hits `choose a device`. `--device` (a 6+ char
+prefix) overrides it.
 
 The SAS is still compared. The local client derives it from the relay handshake and posts it over loopback, and the
 desktop checks it against its own; a relay man-in-the-middle derives a different one, so it still fails with `sas_mismatch`.

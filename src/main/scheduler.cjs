@@ -131,6 +131,7 @@ const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFro
 const { phaseOfJob } = require('./lib/phaseProjection.cjs');
 const epicValidationHook = require('./lib/epic/epicValidationHook.cjs');
 const prdCreate = require('./lib/prd/prdCreate.cjs');
+const { mcpReachWarnings } = require('./lib/prd/prdMcpReachWarnings.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const { expandHome } = require('./lib/util/expandHome.cjs');
 const { hasDownstreamValidator } = require('./lib/prd/planValidator.cjs');
@@ -15163,6 +15164,12 @@ const remote = {
     try {
       await config.writeTextAtomic(filePath, newRaw, { writer: 'scheduler' });
       const stat = await fsp.stat(filePath);
+      try {
+        patchWarnings = patchWarnings.concat(mcpReachWarnings(
+          { agentType: fm.agentType, riskTools: fm.riskTools, cwd: fm.cwd || cwd },
+          prdCreate.mcpReachDeps,
+        ));
+      } catch { /* advisory only — never fails the update */ }
       return patchWarnings.length
         ? { ok: true, slug, bytesWritten: stat.size, warnings: patchWarnings }
         : { ok: true, slug, bytesWritten: stat.size };

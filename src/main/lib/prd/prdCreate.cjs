@@ -1533,6 +1533,7 @@ function registerAdminRoute(adminHttp, remote) {
 }
 
 module.exports = {
+  mcpReachDeps,
   crossEpicFilesOverlapWarnings,
   PRD_CREATE_SLUG_RE,
   STANDARDS_PATH,

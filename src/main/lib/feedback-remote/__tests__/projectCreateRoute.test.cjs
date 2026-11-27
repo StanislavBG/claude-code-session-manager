@@ -25,15 +25,11 @@ const TOKEN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'project-create-token-')
 const TEST_TOKEN_PATH = path.join(TOKEN_DIR, '.claude', 'admin-api.json');
 process.env.SM_ADMIN_TOKEN_PATH = TEST_TOKEN_PATH;
 fs.mkdirSync(path.join(TOKEN_DIR, '.claude'));
-// config.cjs has no removal API (allowedRoots is a private Set), so evict the
-// module from the require cache afterwards: later requirers in this worker
-// get a fresh module whose roots no longer include TOKEN_DIR.
-const CONFIG_PATH = require.resolve('../../../config.cjs');
-const hadConfigCached = Boolean(require.cache[CONFIG_PATH]);
-require(CONFIG_PATH).addAllowedRoot(TOKEN_DIR);
+const config = require('../../../config.cjs');
+config.addAllowedRoot(TOKEN_DIR);
 afterAll(() => {
   fs.rmSync(TOKEN_DIR, { recursive: true, force: true });
-  if (!hadConfigCached) delete require.cache[CONFIG_PATH];
+  config.removeAllowedRoot(TOKEN_DIR);
 });
 
 const GIT_ENV_KEYS = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'];

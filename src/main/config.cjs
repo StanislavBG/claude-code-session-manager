@@ -79,6 +79,17 @@ function addAllowedRoot(dir) {
   if (dir) allowedRoots.add(pathFor().resolve(dir));
 }
 
+/**
+ * Remove a root registered via addAllowedRoot (same normalization). Returns
+ * true when one was removed; the built-in home root is never removed.
+ */
+function removeAllowedRoot(dir) {
+  if (!dir) return false;
+  const abs = pathFor().resolve(dir);
+  if (abs === pathFor().resolve(os.homedir())) return false;
+  return allowedRoots.delete(abs);
+}
+
 /** Snapshot of the registered roots (main-process-registered only). */
 function getAllowedRoots() {
   return [...allowedRoots];
@@ -703,6 +714,7 @@ module.exports = {
   listDir,
   exists,
   addAllowedRoot,
+  removeAllowedRoot,
   getAllowedRoots,
   registerPromptSessionsRoot,
   transitionEpicArchiveWrite,

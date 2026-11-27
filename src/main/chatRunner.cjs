@@ -932,7 +932,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     let gearArgs = [];
     if (!isAgentCli && plan.persona && plan.persona.snapshot) {
       try {
-        const gear = gearChatArgs({ snapshot: plan.persona.snapshot, cwd });
+        const gear = gearChatArgs({ snapshot: plan.persona.snapshot, cwd: plan.execCwd || cwd, projectRoot: cwd });
         gearArgs = gear.args;
         // Persona-declared packs load with the Epic's (as for jobs); known ones only.
         const snapPacks = (Array.isArray(plan.persona.snapshot.packs) ? plan.persona.snapshot.packs.map(String) : [])
@@ -1695,11 +1695,12 @@ const undecidedLogged = new Set();
  * packs' skill allow-list. HEADLESS_DISALLOWED_TOOLS is deliberately NOT applied to chat.
  * Unstamped (older) snapshots and Unbound personas add nothing; Undecided runs unscoped.
  * An unknown declared server/pack never crashes the turn: it is dropped and reported in `errors`.
- * Pure apart from reading the pack catalog / seeded MCP entry (injectable for tests).
- * @param {{ snapshot: any, cwd?: string, deps?: { home?: string, knownMcpServers?: Record<string, object>, listPacks?: () => { packs: any[] }, listUnpackedSkills?: () => string[], log?: (msg: string) => void } }} opts
+ * Pure apart from reading ~/.claude.json and <cwd>/.mcp.json (declared servers), the pack catalog and the seeded MCP entry (injectable for tests).
+ * `projectRoot` is the Epic's main project cwd: a worktree `cwd` still sees servers under projects[<main root>].
+ * @param {{ snapshot: any, cwd?: string, projectRoot?: string, deps?: { home?: string, knownMcpServers?: Record<string, object>, listPacks?: () => { packs: any[] }, listUnpackedSkills?: () => string[], log?: (msg: string) => void } }} opts
  * @returns {{ args: string[], errors: string[] }}
  */
-function gearChatArgs({ snapshot, cwd, deps = {} }) {
+function gearChatArgs({ snapshot, cwd, projectRoot, deps = {} }) {
   const none = { args: [], errors: [] };
   if (!snapshot || snapshot.gearBindsChat !== true) return none;
   const loadout = snapshot.loadout;
@@ -1717,7 +1718,7 @@ function gearChatArgs({ snapshot, cwd, deps = {} }) {
   let credentialed = {};
   if (!known) {
     try {
-      const r = require('./lib/claude/headlessMcpServers.cjs').resolveHeadlessMcpServers({ cwd, ...(deps.home ? { home: deps.home } : {}) });
+      const r = require('./lib/claude/headlessMcpServers.cjs').resolveHeadlessMcpServers({ cwd, projectRoot, ...(deps.home ? { home: deps.home } : {}) });
       known = r.known;
       credentialed = r.credentialed;
     } catch { known = {}; }

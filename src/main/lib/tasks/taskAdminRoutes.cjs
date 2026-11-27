@@ -469,10 +469,11 @@ function registerAdminRoute(adminHttp, deps = {}) {
   const buildEnv = (/** @type {any} */ rt, /** @type {any} */ env) => (deps.buildTaskEnv || taskRun().buildTaskEnv)(rt, env);
   const ledger = () => deps.ledger || require('./taskLedger.cjs');
   // The servers a declared `mcpServers:` name may resolve to — the same map a job gets.
-  const knownMcpServers = deps.knownMcpServers || ((/** @type {string} */ cwd) => {
+  const resolveMcp = (/** @type {string} */ cwd) => {
+    if (deps.knownMcpServers) return { known: deps.knownMcpServers(cwd), credentialed: /** @type {Record<string, string>} */ ({}) };
     const { resolveHeadlessMcpServers } = require('../claude/headlessMcpServers.cjs');
-    return resolveHeadlessMcpServers({ cwd, ...(deps.mcpHome ? { home: deps.mcpHome } : {}) }).known;
-  });
+    return resolveHeadlessMcpServers({ cwd, ...(deps.mcpHome ? { home: deps.mcpHome } : {}) });
+  };
   const costOfUsage = (/** @type {any} */ m, /** @type {any} */ b) => (deps.costOfUsage || require('../claude/modelPricing.cjs').costOfUsage)(m, b);
   const now = deps.now || Date.now;
   const newId = deps.randomUUID || (() => crypto.randomUUID());
@@ -635,7 +636,14 @@ function registerAdminRoute(adminHttp, deps = {}) {
     let args;
     try {
       const declaredMcpServers = Array.isArray(info.declaredMcpServers) ? info.declaredMcpServers : [];
-      args = buildArgs({ model, effort, runtime: argsRuntime, projectCwd: cwd, declaredMcpServers, knownMcpServers: knownMcpServers(cwd), skillDeny: Array.isArray(info.skillDeny) ? info.skillDeny : [] });
+      const mcp = resolveMcp(cwd);
+      for (const name of declaredMcpServers) {
+        if (Object.prototype.hasOwnProperty.call(mcp.credentialed, name)) {
+          reply(400, { ok: false, error: `capability_credentialed: ${mcp.credentialed[name]}`, code: 'capability_credentialed', details: mcp.credentialed[name] });
+          return;
+        }
+      }
+      args = buildArgs({ model, effort, runtime: argsRuntime, projectCwd: cwd, declaredMcpServers, knownMcpServers: mcp.known, skillDeny: Array.isArray(info.skillDeny) ? info.skillDeny : [] });
     } catch (e) {
       reply(400, { ok: false, error: (e && /** @type {any} */ (e).code) || 'invalid_request', details: e instanceof Error ? e.message : String(e) });
       return;

@@ -137,6 +137,41 @@ describe('Task route resolves user-scope servers', () => {
   });
 });
 
+ describe('Task route refuses credentialed servers', () => {
+  test('400 capability_credentialed with the resolver reason', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-taskhome-'));
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-taskcwd-'));
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'secret-srv': { command: 'node', env: { API_TOKEN: 'abc' } } } }));
+    let built = false;
+    const routes = {};
+    registerAdminRoute({ registerRoute: (m, p, h) => { routes[`${m} ${p}`] = h; } }, {
+      mcpHome: home,
+      taskSwitch: { isTaskSwitchOn: () => true },
+      resolveProjectRoot: (c) => c,
+      resolveInfo: async () => ({ personaFound: true, resolvedModelId: 'sonnet', personaEffort: 'low', declaredMcpServers: ['secret-srv'] }),
+      buildTaskArgs: () => { built = true; return []; },
+      ledger: { appendTaskStart: async () => {}, appendTaskEnd: async () => {} },
+      usageHold: () => null,
+      appendAuditEvent: () => {},
+    });
+    try {
+      const { Readable } = require('node:stream');
+      const body = JSON.stringify({ cwd, agent: 'a', missionId: 'm1', prompt: 'hi' });
+      const req = Object.assign(Readable.from([Buffer.from(body)]), { headers: { 'content-type': 'application/json' }, method: 'POST' });
+      const out = { status: 0, body: '' };
+      const res = { on() {}, setHeader() {}, writeHead(s) { out.status = s; }, end(b) { out.body = String(b || ''); }, get headersSent() { return out.status !== 0; } };
+      await routes['POST /admin/tasks'](req, res);
+      expect(out.status).toBe(400);
+      expect(out.body).toContain('capability_credentialed');
+      expect(out.body).toContain('credential key API_TOKEN');
+      expect(built).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('seed personas declare the MCP servers their tools name', () => {
   const dir = path.resolve(__dirname, '../../../../seed/agents');
   for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.md'))) {

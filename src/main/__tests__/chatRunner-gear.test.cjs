@@ -167,3 +167,18 @@ test('user-scope server declared by the persona reaches --mcp-config; credential
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('worktree cwd: a server under projects[<main root>] reaches --mcp-config via projectRoot', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gear-home-'));
+  try {
+    const main = path.join(home, 'main-proj');
+    const wt = path.join(home, 'wt');
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ projects: { [main]: { mcpServers: { 'local-srv': { command: 'node', args: ['x.js'] } } } } }));
+    const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'], mcpServers: ['local-srv'] };
+    const { args } = cr.gearChatArgs({ snapshot: snap, cwd: wt, projectRoot: main, deps: { home } });
+    const mcp = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    expect(Object.keys(mcp.mcpServers)).toEqual(['local-srv']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

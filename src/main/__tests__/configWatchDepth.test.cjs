@@ -46,10 +46,33 @@ async function waitFor(pred, ms = 3000) {
 
 const settle = () => new Promise((r) => setTimeout(r, 300));
 
+// Chokidar exposes no ready hook through config.watch, and ignoreInitial drops
+// anything written before its scan finishes. A fixed settle() is therefore a
+// race under CPU load. Probe instead: write fresh files until the watcher reports.
+async function untilWatching(dir, events) {
+  // A fresh file every 250ms: constant rewrites would keep resetting
+  // awaitWriteFinish's stability window and never emit.
+  const end = Date.now() + 12000;
+  let n = 0;
+  while (events.length === 0 && Date.now() < end) {
+    fs.writeFileSync(path.join(dir, `probe-${n++}.txt`), 'x');
+    await waitFor(() => events.length > 0, 250);
+  }
+  expect(events.length).toBeGreaterThan(0);
+  // Drain: stop only after one full quiet interval with no new event (cap ~5s).
+  const drainEnd = Date.now() + 5000;
+  let seen;
+  do {
+    seen = events.length;
+    await new Promise((r) => setTimeout(r, 400));
+  } while (events.length !== seen && Date.now() < drainEnd);
+  events.length = 0;
+}
+
 test('depth 0: direct child emits, nested child does not', async () => {
   const { dir, events } = setup();
   config.watch([dir], 1, { depth: 0 });
-  await settle();
+  await untilWatching(dir, events);
   fs.writeFileSync(path.join(dir, 'sub', 'deep.txt'), 'x');
   fs.writeFileSync(path.join(dir, 'a.txt'), 'x');
   expect(await waitFor(() => events.some((e) => e.path === dir))).toBe(true);
@@ -62,28 +85,11 @@ test('depth 0: direct child emits, nested child does not', async () => {
 test('no opts: nested create still emits (recursive default)', async () => {
   const { dir, events } = setup();
   config.watch([dir], 1);
-  await settle();
+  await untilWatching(dir, events);
   fs.writeFileSync(path.join(dir, 'sub', 'deep.txt'), 'x');
   expect(await waitFor(() => events.some((e) => e.path === dir))).toBe(true);
   config.unwatch([dir], 1);
 });
-
-// Chokidar exposes no ready hook through config.watch, and ignoreInitial drops
-// anything written before its scan finishes. A fixed settle() is therefore a
-// race under CPU load. Probe instead: rewrite a file until the watcher reports.
-async function untilWatching(dir, events) {
-  // A fresh file every 250ms: constant rewrites would keep resetting
-  // awaitWriteFinish's stability window and never emit.
-  const end = Date.now() + 12000;
-  let n = 0;
-  while (events.length === 0 && Date.now() < end) {
-    fs.writeFileSync(path.join(dir, `probe-${n++}.txt`), 'x');
-    await waitFor(() => events.length > 0, 250);
-  }
-  expect(events.length).toBeGreaterThan(0);
-  await new Promise((r) => setTimeout(r, 400)); // drain in-flight probe events
-  events.length = 0;
-}
 
 test('recursive and depth-0 watches are separate refcounted watchers; unwatch with same opts releases the match', async () => {
   const { dir, events } = setup();

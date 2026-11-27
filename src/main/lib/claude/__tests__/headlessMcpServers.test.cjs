@@ -117,6 +117,14 @@ describe('resolveHeadlessMcpServers', () => {
     expect(r.known.g).toBeDefined();
     expect(r.credentialed.g).toBeUndefined();
   });
+  it('an @ in a URL query or fragment is not userinfo', () => {
+    write(userFile(), { mcpServers: { g: { command: 'x', args: ['https://host?e=a@b', 'https://host#a@b'] } } });
+    const r = resolveHeadlessMcpServers({ cwd, home });
+    expect(r.known.g).toBeDefined();
+    expect(r.credentialed.g).toBeUndefined();
+    expect(refused({ command: 'x', args: ['https://ghp_x@host'] }, 'userinfo', 'args')).toContain('s ');
+    expect(refused({ command: 'x', args: ['https://u:p@host'] }, 'userinfo', 'args')).toContain('s ');
+  });
   it('refuses URL userinfo in an env value', () => {
     expect(refused({ command: 'x', env: { DB: 'postgres://u:sekret@h/db' } }, 'DB', 'userinfo')).toContain('s ');
   });

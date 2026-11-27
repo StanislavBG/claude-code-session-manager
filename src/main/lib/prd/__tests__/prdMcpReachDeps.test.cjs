@@ -49,8 +49,20 @@ test('readPersonaServers never throws on an unreadable persona', () => {
   writePersona('reach-bad', '\0\0 not frontmatter');
   let out;
   expect(() => { out = prdCreate.mcpReachDeps.readPersonaServers({ agentType: 'reach-bad', cwd: tmpHome }); }).not.toThrow();
+  // A file with no frontmatter is readable (declares no servers): [] not null.
   expect(out).toEqual([]);
-  expect(() => prdCreate.mcpReachDeps.readPersonaServers({ agentType: 'does-not-exist', cwd: '/nonexistent' })).not.toThrow();
+  let missing;
+  expect(() => { missing = prdCreate.mcpReachDeps.readPersonaServers({ agentType: 'does-not-exist', cwd: '/nonexistent' }); }).not.toThrow();
+  expect(missing).toBeNull();
+});
+
+test('mcpReachWarnings yields no warning for a missing persona even with riskTools', () => {
+  const { mcpReachWarnings } = require('../prdMcpReachWarnings.cjs');
+  const out = mcpReachWarnings(
+    { agentType: 'does-not-exist', cwd: '/nonexistent', riskTools: ['mcp__foo__bar'] },
+    prdCreate.mcpReachDeps,
+  );
+  expect(out).toEqual([]);
 });
 
 test('updatePrd changing agentType to a persona naming an undefined server warns', async () => {

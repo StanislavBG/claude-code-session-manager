@@ -35,7 +35,7 @@ function serversOf(map) {
 const SECRET_FLAG_RE = /^--(api-key|apikey|token|access-token|secret|password|auth|pat)(=|$)/i;
 const EXTRA_KEY_RE = /(^|_)(PAT|CREDENTIALS?|PRIVATE_KEY)$/i;
 const QUERY_KEY_RE = /(token|key|secret|password|sig|signature|auth)/i;
-const USERINFO_RE = /[a-z][a-z0-9+.-]*:\/\/[^/\s@]+@/i;
+const USERINFO_RE = /[a-z][a-z0-9+.-]*:\/\/[^/?#\s@]+@/i;
 const HINT = 'move the secret to a vault ref (environment profile) or run it outside the job';
 
 function secretKey(key) {

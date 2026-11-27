@@ -2,7 +2,9 @@
  * prdMcpReachWarnings.cjs — advisory rule: a PRD whose persona (declared mcpServers + mcp__<server>__
  * tools) or riskTools name an MCP server a headless job cannot load (undefined for the cwd, or
  * credential-bearing) will park capability_unknown / capability_credentialed. Never blocks a write,
- * never throws (an unreadable persona or resolver yields no warning).
+ * never throws (an unreadable persona or resolver yields no warning). readPersonaServers returns null
+ * when the persona is missing/unreadable (no warning at all, riskTools included) and an array — [] when
+ * a readable persona declares no servers — otherwise.
  */
 'use strict';
 

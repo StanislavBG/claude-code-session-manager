@@ -134,6 +134,24 @@ describe('inboundFeedbackOrigin', () => {
     expect(origin?.title.startsWith('Auto-started by macro "Fable" from /home/bilko/Projects/Self')).toBe(true)
   })
 
+  it('names the service on a service-stamped Epic', () => {
+    const origin = inboundFeedbackOrigin({
+      source: {
+        producer: 'cross-project-feedback',
+        fromCwd: '/home/bilko/Projects/Self',
+        autoApprove: {
+          requestedBy: 'service',
+          serviceId: 'sv1',
+          serviceName: 'Kiln',
+          verifiedAt: '2026-10-11T00:00:00.000Z',
+          fromClaudeSessionId: null,
+        },
+      },
+    })
+    expect(origin?.label).toBe('Self · Kiln')
+    expect(origin?.title.startsWith('Auto-started by service "Kiln" from /home/bilko/Projects/Self')).toBe(true)
+  })
+
   it('always warns in the hover text that the sender has not read this codebase', () => {
     const origin = inboundFeedbackOrigin({
       source: { producer: 'cross-project-feedback', fromCwd: '/p/a' },

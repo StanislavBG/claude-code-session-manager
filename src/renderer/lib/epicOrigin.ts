@@ -48,15 +48,18 @@ export function inboundFeedbackOrigin(epic: Pick<PromptSession, 'source'>): Inbo
   const series = proposal?.series ?? null
   const auto = source.autoApprove
   const macroLabel = auto?.requestedBy === 'macro' ? auto.macroLabel : null
+  const serviceName = auto?.requestedBy === 'service' ? auto.serviceName : null
   const tail =
     (source.fromEpicId ? ` (session ${source.fromEpicId})` : '')
     + (proposal?.originAsk ? ` — raised while working on: ${proposal.originAsk}` : '')
   const fromName = basename(fromCwd)
   const replyOf = threadRef(source.replyOf)
   const replyTo = threadRef(source.replyTo)
-  const baseLabel = macroLabel ? `${fromName} · ${macroLabel}` : fromName
+  const baseLabel = macroLabel ? `${fromName} · ${macroLabel}` : serviceName ? `${fromName} · ${serviceName}` : fromName
   const baseTitle = macroLabel
     ? `Auto-started by macro "${macroLabel}" from ${fromCwd}${tail}.`
+    : serviceName
+      ? `Auto-started by service "${serviceName}" from ${fromCwd}${tail}.`
     : `Proposed by another project: ${fromCwd}${tail}`
       + '. Verify the claim against this codebase before approving — the sender has not read it.'
   return {

@@ -125,6 +125,35 @@ describe('inboundAutoApprove', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
+  it('starts a service-stamped Epic; unstamped and unknown stay proposed', async () => {
+    usePromptSessions.setState({
+      sessions: {
+        svc: epic('svc', {
+          source: {
+            producer: 'cross-project-feedback',
+            autoApprove: {
+              requestedBy: 'service',
+              serviceId: 'sv1',
+              serviceName: 'Kiln',
+              verifiedAt: '2026-10-11T00:00:00.000Z',
+              fromClaudeSessionId: null,
+            },
+          },
+        }),
+        plain: epic('plain', { source: { producer: 'cross-project-feedback' } }),
+        weird: epic('weird', {
+          source: { producer: 'cross-project-feedback', autoApprove: { requestedBy: 'bot' } as never },
+        }),
+      },
+    } as never)
+    await approveStampedInbound(CWD)
+    const s = usePromptSessions.getState().sessions
+    expect(s.svc.status).toBe('active')
+    expect(s.plain.status).toBe('proposed')
+    expect(s.weird.status).toBe('proposed')
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
   it('leaves a plain proposed and a completed Epic untouched', async () => {
     usePromptSessions.setState({
       sessions: {

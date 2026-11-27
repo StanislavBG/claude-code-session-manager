@@ -52,6 +52,7 @@ export interface EpicSource {
   autoApprove?:
     | { requestedBy: 'human'; quote: string; verifiedAt: string; fromClaudeSessionId: string }
     | { requestedBy: 'macro'; macroId: string; macroLabel: string; verifiedAt: string; fromClaudeSessionId: string }
+    | { requestedBy: 'service'; serviceId: string; serviceName: string; verifiedAt: string; fromClaudeSessionId: string | null }
   /** 'cross-project-feedback' only — the asking Epic a feedback_reply lands in; absent when the sender was unresolved. */
   replyTo?: { cwd: string; epicId: string; claudeSessionId: string }
   /** Who started this Epic when a script did (main's epic/scriptStartedBy.cjs); absent = a person pressed it. */

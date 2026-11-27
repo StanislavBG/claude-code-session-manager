@@ -1791,7 +1791,7 @@ app.whenReady().then(async () => {
   // ~/.claude/projects scan, banned on timer paths); a project with no
   // subscriptions is a no-op.
   const runWebhookDelivery = () => {
-    scheduler.readQueue()
+    Promise.resolve().then(() => scheduler.readQueue())
       .then((q) => require('./lib/telemetry/webhookDelivery.cjs').runDeliveryPass({
         cwds: (Array.isArray(q?.jobs) ? q.jobs : []).map((j) => j && j.cwd).filter((c) => typeof c === 'string' && c),
         logs,

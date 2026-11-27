@@ -1,6 +1,6 @@
 'use strict';
 
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 const { clearMainModuleCache, registerActiveProject } = require('./_helpers/schedulerHarness.cjs');
 
 describe('reconcile parks fix plans that list protected .claude paths', () => {
@@ -53,6 +53,33 @@ describe('reconcile parks fix plans that list protected .claude paths', () => {
     expect(row.error).toBeTruthy();
     expect(row.reviewNotice).toMatchObject({ sentAt: null, firstParkedAt: row.statusHistory[0].at });
     expect(selectAutoFixTargets([row], { fixSlugExists: () => false })).toEqual([]);
+  });
+
+  test('a row minted by the real park branch is flushed once after the hold', async () => {
+    const row = await mint(`1442-fix-flush-${uniq()}`, ['.claude/skills/x/SKILL.md']);
+    expect(row.status).toBe('needs_review');
+    const jobs = [row];
+    const queueStore = require('../lib/scheduler/queueStore.cjs');
+    const state = () => ({
+      config: {}, jobs, scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null,
+      paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [],
+    });
+    const spies = [
+      vi.spyOn(queueStore, 'readMerged').mockImplementation(async () => state()),
+      vi.spyOn(queueStore, 'readMergedSync').mockImplementation(() => state()),
+      vi.spyOn(queueStore, 'writeSplit').mockResolvedValue(undefined),
+    ];
+    try {
+      const { flushDueReviewNotices } = require('../scheduler.cjs');
+      const appendResponseEvent = vi.fn().mockResolvedValue(true);
+      const after = Date.parse(row.reviewNotice.firstParkedAt) + 250 * 60_000;
+      await flushDueReviewNotices({ appendResponseEvent, now: after });
+      await flushDueReviewNotices({ appendResponseEvent, now: after + 60_000 });
+      expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+      expect(row.reviewNotice.sentAt).toBeTruthy();
+    } finally {
+      spies.forEach((s) => s.mockRestore());
+    }
   });
 
   test('fix plan without a protected path stays pending', async () => {

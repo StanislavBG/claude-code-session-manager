@@ -145,8 +145,7 @@ function parkedAgeMs(j, now) {
  * SWEEP_MIN_AGE_MINUTES old (parkedAgeMs); a row due on its own skips that
  * check entirely.
  */
-function selectDueReviewNotices(rawJobs = [], { now = Date.now(), holdMs = DEFAULT_HOLD_MINUTES * 60000 } = {}) {
-  const jobs = rawJobs;
+function selectDueReviewNotices(jobs = [], { now = Date.now(), holdMs = DEFAULT_HOLD_MINUTES * 60000 } = {}) {
   const isCandidate = (j) => Boolean(
     j
     && j.reviewNotice

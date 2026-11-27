@@ -197,7 +197,6 @@ test('a parked-at-pickup row (stored notice) is sent once after the hold, and no
   expect(appendResponseEvent).toHaveBeenCalledTimes(1);
 });
 
-
 test('a second flush does not resend an already-sent notice', async () => {
   const job = parkedJob({ status: 'skipped', needsReviewAutoResolvedSkip: true });
   mockQueueStore([job]);

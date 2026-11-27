@@ -42,6 +42,7 @@ describe('webRemote wiring', () => {
         'webRemote:service-pair-cancel',
         'webRemote:service-pair-start',
         'webRemote:service-revoke',
+        'webRemote:service-set-start-work',
         'webRemote:services-list',
       ].sort(),
     )

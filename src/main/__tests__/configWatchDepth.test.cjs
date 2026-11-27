@@ -68,21 +68,40 @@ test('no opts: nested create still emits (recursive default)', async () => {
   config.unwatch([dir], 1);
 });
 
+// Chokidar exposes no ready hook through config.watch, and ignoreInitial drops
+// anything written before its scan finishes. A fixed settle() is therefore a
+// race under CPU load. Probe instead: rewrite a file until the watcher reports.
+async function untilWatching(dir, events) {
+  // A fresh file every 250ms: constant rewrites would keep resetting
+  // awaitWriteFinish's stability window and never emit.
+  const end = Date.now() + 12000;
+  let n = 0;
+  while (events.length === 0 && Date.now() < end) {
+    fs.writeFileSync(path.join(dir, `probe-${n++}.txt`), 'x');
+    await waitFor(() => events.length > 0, 250);
+  }
+  expect(events.length).toBeGreaterThan(0);
+  await new Promise((r) => setTimeout(r, 400)); // drain in-flight probe events
+  events.length = 0;
+}
+
 test('recursive and depth-0 watches are separate refcounted watchers; unwatch with same opts releases the match', async () => {
   const { dir, events } = setup();
   config.watch([dir], 1);
   config.watch([dir], 1, { depth: 0 });
   config.unwatch([dir], 1);
-  await settle();
+  // Only the depth-0 watcher remains; wait until it is actually live.
+  await untilWatching(dir, events);
+  // Nested write first, direct write second: the direct event is the barrier.
   fs.writeFileSync(path.join(dir, 'sub', 'deep.txt'), 'x');
-  await settle();
-  expect(events.length).toBe(0); // recursive one closed; depth-0 still ignores nested
   fs.writeFileSync(path.join(dir, 'a.txt'), 'x');
-  expect(await waitFor(() => events.length > 0)).toBe(true);
+  expect(await waitFor(() => events.length > 0, 10000)).toBe(true);
+  await settle();
+  expect(events.length).toBe(1); // recursive one closed: nested write never emitted
   config.unwatch([dir], 1, { depth: 0 });
   await settle();
   const n = events.length;
   fs.writeFileSync(path.join(dir, 'b.txt'), 'x');
   await settle();
   expect(events.length).toBe(n);
-});
+}, 30000);

@@ -40,10 +40,13 @@ Each kept pattern becomes ONE change of one kind:
 - **verify:** a memory or doc line no longer true is fixed or removed.
 - **organize:** duplicates are merged; a lasting fact moves from memory into the doc that owns it (placement.md).
 - **enrich:** a missing lesson is added.
+- **procedure:** a new skill or small tool is proposed for a multi-step procedure that was worked out by hand (the same steps rebuilt from scratch, not run from a doc) in at least 2 sessions in the window. The proposal names the skill's path, when to use it, its steps, and the files or commands it relies on; a tool instead names its path and the README line that lists it. Before you propose one, search the project's existing skills (`.claude/skills/`, `plugins/*/skills/`), tools and docs for the same procedure. If one already covers it, propose an edit to that file as **organize** instead, never a second skill. A pattern that repeats a single step, or that only produced a lesson, stays enrich.
 
 ## Keep learnings few
 
-- At most 5 enrich adds per run.
+- At most 5 adds per run: enrich and procedure together.
+- At most 1 procedure per run. If more than one qualifies, propose the one seen in the most sessions; the rest produce no change.
+- A run with no procedure rebuilt by hand in 2+ sessions proposes none.
 - Merges and removals are unlimited.
 - Prefer pruning.
 
@@ -70,14 +73,15 @@ Template:
 | Id | Kind | Target file | Change | Example sessions | Count |
 | --- | --- | --- | --- | --- | --- |
 | c1 | verify / organize / enrich | <path> | <the change> | <id>, <id> | <N, at least 2> |
+| c2 | procedure | <proposed skill or tool path> | <name; when to use it; steps; files or commands it relies on; README line for a tool> | <id>, <id> | <N, at least 2> |
 ```
 
-Every row names at least 2 session ids.
+Every row names at least 2 session ids. A procedure row counts as an add in Totals.
 
 ## Apply
 
 1. The owner accepts or rejects each change. Only accepted changes are applied.
-2. The architect applies them in the Epic the owner opened with the macro: memory edits inline; doc changes inline when small and provable, otherwise `/develop`.
+2. The architect applies them in the Epic the owner opened with the macro: memory edits inline; doc changes inline when small and provable, otherwise `/develop`. An accepted procedure row whose path is under `.claude/` (a skill) is written from the Epic chat, never by a PRD: headless job sandboxes mount `.claude/` read-only. A tool outside `.claude/` may go through `/develop`.
 3. Commit the record as session-manager-operations/reviews/docs/<YYYY-MM-DD>-md-network-weekly.md, following the record rules in drift-check.md.
 
 When pressed with Mode 'Weekly consolidation', first look for the newest pending weekly Task (`task_list` with pipeline memory-consolidation, then `task_get` for its output) and walk its record. If none is pending, run the pass in the Epic.

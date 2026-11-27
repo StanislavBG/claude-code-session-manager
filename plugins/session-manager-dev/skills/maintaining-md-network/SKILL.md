@@ -81,6 +81,6 @@ Weekly consolidation
 - [ ] Look for a pending weekly Task record; walk it if found (weekly-consolidation.md)
 - [ ] Else gather memory, network, transcripts, Lessons blocks, steering file
 - [ ] Subagents find patterns; keep those seen in 2+ sessions
-- [ ] Write the record: verify, organize, enrich changes plus housekeeping
+- [ ] Write the record: verify, organize, enrich, procedure changes plus housekeeping
 - [ ] Owner accepts or rejects each change; apply only accepted ones, commit the record
 ```

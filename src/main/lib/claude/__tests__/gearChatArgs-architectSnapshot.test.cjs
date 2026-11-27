@@ -6,7 +6,6 @@
 // mcpServers ['session-manager-scheduler'] but names no mcp__ tool. 0.144.0 emitted an --agents
 // tools array without mcp__session-manager-scheduler, hiding the whole server from chat.
 
-const assert = require('node:assert/strict');
 const { personaToolScopeArgs, buildPersonaToolScope } = require('../personaToolScope.cjs');
 
 const tools = ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write', 'WebFetch', 'WebSearch', 'Task'];
@@ -27,7 +26,7 @@ function jsonAfter(args, flag) {
 
 function scopedTools(args) {
   const agents = jsonAfter(args, '--agents');
-  assert.ok(agents && agents['sm-headless-scoped'], 'sm-headless-scoped agent present');
+  expect(agents && agents['sm-headless-scoped'], 'sm-headless-scoped agent present').toBeTruthy();
   return agents['sm-headless-scoped'].tools;
 }
 
@@ -42,10 +41,10 @@ describe('architect snapshot gear (828e5a57 regression)', () => {
         listUnpackedSkills: () => [],
       },
     });
-    assert.ok(scopedTools(args).includes('mcp__session-manager-scheduler'));
+    expect(scopedTools(args)).toContain('mcp__session-manager-scheduler');
     const cfg = jsonAfter(args, '--mcp-config');
-    assert.ok(cfg && cfg.mcpServers['session-manager-scheduler']);
-    assert.deepEqual(errors, []);
+    expect(cfg && cfg.mcpServers['session-manager-scheduler']).toBeTruthy();
+    expect(errors).toStrictEqual([]);
   });
 
   it('personaToolScopeArgs: no refusal, scheduler server in tools', () => {
@@ -53,7 +52,7 @@ describe('architect snapshot gear (828e5a57 regression)', () => {
       mcpServers: known,
       declaredServers: ['session-manager-scheduler'],
     });
-    assert.equal(r.refusal, null);
-    assert.ok(scopedTools(r.args).includes('mcp__session-manager-scheduler'));
+    expect(r.refusal).toBe(null);
+    expect(scopedTools(r.args)).toContain('mcp__session-manager-scheduler');
   });
 });

@@ -248,7 +248,10 @@ test('last-seen config: a press before any queue read still reads the queue and 
   scheduler._forgetLastSeenConfigForTests();
   const readSpy = vi.spyOn(queueStore, 'readMerged');
   await scheduler._auditHumanPressForTests('force-tick');
-  expect(readSpy).toHaveBeenCalledTimes(1);
+  // At least one read: the press itself pays for it. Not an exact count — other scheduler
+  // activity (watchers/timers from earlier tests sharing the module) may also read the queue
+  // while the press awaits, which made an exact count flake in full-suite runs.
+  expect(readSpy).toHaveBeenCalled();
   const ev = pressEvents().filter((e) => e.kind === 'scheduler_human_press');
   expect(ev).toHaveLength(1);
   expect(ev[0]).toMatchObject({ press: 'force-tick', hold: { reason: 'utilization-held', window: 'weekly_all', percent: 96, threshold: 90 } });

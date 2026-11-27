@@ -99,6 +99,15 @@ const FRAMES: Frame[] = [
     if (await page.getByTestId('agent-details').count()) throw new Error('no empty DETAILS card in project mode')
     await page.getByTestId('agent-other-projects').waitFor()
   } },
+  // Persona upgrade: the roster card's marker, then the sheet's notice + the list row badge with the diff open.
+  { name: 'persona-upgrade-roster', testid: 'agent-roster', reference: '(none: no design mock)', setUp: async (page) => { await expect(page.getByTestId('agent-roster-upgrade-architect')).toBeVisible() } },
+  { name: 'persona-upgrade-sheet', testid: 'agent-roster', reference: '(none: no design mock)', setUp: async (page) => {
+    await openSheet('architect')(page)
+    await expect(page.getByTestId('persona-upgrade-notice')).toBeVisible()
+    await page.getByTestId('agent-list-toggle').click() // the row badge lives in the expanded list column
+    await expect(page.getByTestId('agent-row-upgrade-architect')).toBeVisible()
+    await page.getByTestId('persona-upgrade-notice').locator('summary').click()
+    await expect(page.locator('[data-testid="persona-upgrade-notice"] [data-diff="add"]').first()).toBeVisible() } },
 ]
 
 let browser: Browser

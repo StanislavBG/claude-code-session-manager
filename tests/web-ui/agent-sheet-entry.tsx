@@ -33,6 +33,9 @@ const personas: AgentPersona[] = SPEC.map(([name, model, effort, loadout, tools,
   name, description, model, tools, effort, loadout, agentCli: null, agentCliModel: null, color,
   tags: [], projects: [], action: null, actionLabel: null, title: null, seedVersion: null, executorOnly: false,
   path: `${HOME}/.claude/agents/${name}.md`, body: `You are ${name}. ${description}`,
+  upgrade: name === 'architect'
+    ? { installedVersion: 6, bundledVersion: 8, edited: true, bundledBody: `You are ${name}. Designs the shape of a change before it is built.\nAlways name the files a change will touch.` }
+    : null,
   overridingProjects: i === 4 ? ['Self'] : [],
   overrideDetails: i === 4 ? [{ project: 'Self', cwd: CWD, fields: ['model'], values: { model: 'opus' }, bodyOverridden: false, issue: null }] : [],
 }))
@@ -68,6 +71,8 @@ const api = {
     savePersona: async () => ({ ok: true, path: personas[0].path }),
     deletePersona: ok,
     removeOverride: ok,
+    takeBundledPersona: async () => ({ backupPath: `${HOME}/.claude/agents/architect.md.bak`, seedVersion: 8 }),
+    dismissPersonaUpgrade: async () => ({ ok: true }),
     onChanged: () => () => {},
   },
   toolRisk: { read: async () => ({ ok: true, marks: {} }) },

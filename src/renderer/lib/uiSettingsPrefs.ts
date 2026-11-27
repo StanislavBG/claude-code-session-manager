@@ -3,8 +3,8 @@
  * the terminal
  * appearance theme/font size (`lib/terminalSettings.ts`), the Editor scene's
  * prefs (`state/editorPrefs.ts`), the History screen's analytics/budget
- * prefs (`lib/historyAnalyticsPrefs.ts`), and the Files sidebar's hidden-file
- * toggle (`components/layout/FileTree.tsx`), and the consultation strip's
+ * prefs (`lib/historyAnalyticsPrefs.ts`), the Files sidebar's hidden-file
+ * toggle (`components/layout/FileTree.tsx`), the consultation strip's
  * dismissed-version (`components/ConsultationNotice.tsx`), the Projects page's
  * split/collapse state (`components/tabs/ProjectsWorkspace.tsx`), and the Agents
  * sheet's list-column toggle (`components/tabs/agents/AgentSheet.tsx`) — deliberately global rather than

@@ -17,7 +17,7 @@ import {
   COLORS, COLOR_SWATCH, MoreMenu, RowLabel, ModelSelect, EffortSelect, RunsOnSelect,
   toDraft, overrideParts, overlayOf, overlayEdit, overlayDiff, type OverlayKeys, type Draft, type OpenProject,
 } from './AgentDetail'
-import { GearPanel } from './GearPanel'
+import { GearPanel, headerLoadout } from './GearPanel'
 import { LoadoutFirstRun, showsFirstRun } from './LoadoutFirstRun'
 import { ConstraintsPanel } from './ConstraintsPanel'
 import { loadoutOf, type LoadoutState } from './AgentRoster'
@@ -269,9 +269,14 @@ export function AgentSheet({
   const overridden = (k: keyof OverlayKeys) => diffs.some((d) => d.keys.includes(k))
   const changes = canRevertOrSave ? changedFields(obj, saved, isNew) : []
   const state: LoadoutState = saved && !isNew ? loadoutOf(saved) : 'undecided'
+  const headState: LoadoutState = headerLoadout(view)
   const servers = new Set(view.tools.map((t) => /^mcp__(.+?)__/.exec(t)?.[1]).filter(Boolean)).size
   const builtins = view.tools.filter((t) => t !== '*' && !t.startsWith('mcp__')).length
-  const counts = view.tools.length === 0 ? 'every tool' : `${builtins} tools${servers ? ` · ${servers} server${servers > 1 ? 's' : ''}` : ''}`
+  const packCount = view.packs?.length ?? 0
+  const counts = headState === 'unbound' ? 'every tool'
+    : headState === 'bare' ? 'floor only'
+    : headState === 'undecided' ? 'no decision — every tool'
+    : `${builtins} tool${builtins === 1 ? '' : 's'} · ${servers} server${servers === 1 ? '' : 's'} · ${packCount} pack${packCount === 1 ? '' : 's'}`
 
   useEffect(() => {
     if (!editorOpen) return
@@ -314,11 +319,11 @@ export function AgentSheet({
               <h1 className="text-[22px] font-semibold text-fg font-mono truncate">{obj.name}</h1>
               <span
                 data-testid="agent-loadout-badge"
-                data-loadout={state}
+                data-loadout={headState}
                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-line bg-bg-hi text-[11px] text-fg-dim"
               >
-                <span aria-hidden="true" className="w-2 h-2 rounded-full" style={{ background: STATE_DOT[state] }} />
-                {STATE_LABEL[state]} · {counts}
+                <span aria-hidden="true" className="w-2 h-2 rounded-full" style={{ background: STATE_DOT[headState] }} />
+                {STATE_LABEL[headState]} · {counts}
               </span>
               {(isNew || dirty) && (
                 <span data-testid="config-detail-pill" className="px-2 py-0.5 rounded-full bg-accent/10 text-accent text-[11px] font-semibold">
@@ -582,7 +587,7 @@ export function AgentSheet({
                 ))}
               </section>
             )}
-            {!armoryOpen && <ConstraintsPanel obj={view} set={editing} />}
+            <ConstraintsPanel obj={view} set={editing} />
             {inProject && selected && (
               <section data-testid="agent-other-projects" className="px-[18px] py-4 rounded-[14px] bg-bg-hi border border-line">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-fg-faint">Other open projects</div>

@@ -28,6 +28,12 @@ export function serversOfTools(tools: readonly string[]): string[] {
 /** Every tool granted: an explicit Unbound loadout (or a '*' entry) or an Undecided draft (which runs with every tool). Never inferred from an empty tools list. */
 const allGranted = (d: Pick<Draft, 'tools' | 'loadout'>) => d.loadout === 'unbound' || d.loadout === 'undecided' || d.tools.includes('*')
 
+/** The header's loadout state from the draft's explicit loadout (a '*' entry means Unbound); never from tools.length. */
+export function headerLoadout(d: Pick<Draft, 'tools' | 'loadout'>): 'unbound' | 'bare' | 'undecided' | 'equipped' {
+  if (d.loadout === 'unbound' || d.tools.includes('*')) return 'unbound'
+  return d.loadout
+}
+
 function SubLabel({ children }: { children: ReactNode }) {
   return <div className="font-serif italic text-[12px] text-fg-faint font-normal">{children}</div>
 }

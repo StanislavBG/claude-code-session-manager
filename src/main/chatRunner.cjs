@@ -56,7 +56,7 @@ const { developLoopOffSettingsArgs } = require('./lib/epic/developLoopSpawn.cjs'
 const packSpawnArgs = require('./lib/packs/packSpawnArgs.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { planEpicSpawn, resolveEpicTurnModel } = require('./lib/epic/epicSpawnPlan.cjs');
-const { buildPersonaToolScope, personaToolScopeArgs, skillDenyArgs } = require('./lib/claude/personaToolScope.cjs');
+const { buildPersonaToolScope, personaToolScopeArgs, skillDenyArgs, CHAT_HARNESS_MCP_SERVERS } = require('./lib/claude/personaToolScope.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const epicDepsSync = require('./lib/epic/epicDepsSync.cjs');
 const logs = require('./logs.cjs');
@@ -1729,7 +1729,10 @@ function gearChatArgs({ snapshot, cwd, projectRoot, deps = {} }) {
   try { unpacked = (deps.listUnpackedSkills || require('./lib/packs/packCatalog.cjs').listUnpackedSkills)(); } catch { unpacked = []; }
   const packs = Array.isArray(snapshot.packs) ? snapshot.packs.map(String) : [];
   const knownPackIds = new Set(catalog.map((p) => String(p.id)));
-  const declared = Array.isArray(snapshot.mcpServers) ? snapshot.mcpServers.map(String) : [];
+  const personaDeclared = Array.isArray(snapshot.mcpServers) ? snapshot.mcpServers.map(String) : [];
+  // SM's own harness rides every scoped chat; the scheduler is always kept so its absence is reported below.
+  const harness = CHAT_HARNESS_MCP_SERVERS.filter((n) => n === 'session-manager-scheduler' || Object.prototype.hasOwnProperty.call(known || {}, n));
+  const declared = [...new Set([...personaDeclared, ...harness])];
   const scope = buildPersonaToolScope(snapshot.tools, { loadout, disallowed: [] });
   const attempt = personaToolScopeArgs(scope, { mcpServers: known, declaredServers: declared, packs, knownPacks: [...knownPackIds] });
   /** @type {string[]} */ const errors = [];

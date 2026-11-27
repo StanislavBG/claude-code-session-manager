@@ -100,12 +100,12 @@ async function runTurn(snapshotExtra) {
 
 const MCP = 'session-manager-scheduler';
 
-test('stamped Bare persona: floor-only scope, strict MCP with no server', async () => {
+test('stamped Bare persona: floor-only scope plus the SM harness server', async () => {
   const argv = await runTurn({ gearBindsChat: true, loadout: 'bare' });
   const agents = JSON.parse(argv[argv.indexOf('--agents') + 1]);
-  expect(Object.values(agents)[0].tools).toEqual(['Agent', 'Skill', 'ToolSearch', 'TodoWrite']);
+  expect(Object.values(agents)[0].tools).toEqual(['Agent', 'Skill', 'ToolSearch', 'TodoWrite', `mcp__${MCP}`]);
   expect(argv).toContain('--strict-mcp-config');
-  expect(argv).not.toContain('--mcp-config');
+  expect(Object.keys(JSON.parse(argv[argv.indexOf('--mcp-config') + 1]).mcpServers)).toEqual([MCP]);
   expect(argv.join(' ')).not.toContain('--disallowedTools=Bash');
 });
 
@@ -126,7 +126,7 @@ test('stamped Equipped persona: persona tools, declared server and pack', async 
 test('unknown declared server: turn runs without it and a notice is emitted', async () => {
   const argv = await runTurn({ gearBindsChat: true, loadout: 'equipped', tools: ['Read'], mcpServers: ['ghost-server'] });
   expect(argv).toContain('--strict-mcp-config');
-  expect(argv).not.toContain('--mcp-config');
+  expect(Object.keys(JSON.parse(argv[argv.indexOf('--mcp-config') + 1]).mcpServers)).not.toContain('ghost-server');
   expect(sent.some((e) => e.channel === 'chat:run:notice' && /ghost-server/.test(e.payload.message))).toBe(true);
 });
 
@@ -161,7 +161,7 @@ test('user-scope server declared by the persona reaches --mcp-config; credential
     const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'], mcpServers: ['user-srv', 'secret-srv'] };
     const { args, errors } = cr.gearChatArgs({ snapshot: snap, cwd: home, deps: { home } });
     const mcp = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
-    expect(Object.keys(mcp.mcpServers)).toEqual(['user-srv']);
+    expect(Object.keys(mcp.mcpServers)).toEqual(['user-srv', MCP]);
     expect(errors.some((e) => /secret-srv/.test(e) && /credential key API_TOKEN/.test(e))).toBe(true);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -177,8 +177,41 @@ test('worktree cwd: a server under projects[<main root>] reaches --mcp-config vi
     const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'], mcpServers: ['local-srv'] };
     const { args } = cr.gearChatArgs({ snapshot: snap, cwd: wt, projectRoot: main, deps: { home } });
     const mcp = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
-    expect(Object.keys(mcp.mcpServers)).toEqual(['local-srv']);
+    expect(Object.keys(mcp.mcpServers)).toEqual(['local-srv', MCP]);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+const SRV = { command: 'node', args: ['x.js'] };
+const toolsOf = (args) => Object.values(JSON.parse(args[args.indexOf('--agents') + 1]))[0].tools;
+const mcpKeys = (args) => Object.keys(JSON.parse(args[args.indexOf('--mcp-config') + 1]).mcpServers);
+
+test('harness: equipped persona with no mcpServers gets scheduler + bilko-host', () => {
+  const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'] };
+  const { args, errors } = cr.gearChatArgs({ snapshot: snap, deps: { knownMcpServers: { [MCP]: SRV, 'bilko-host': SRV } } });
+  expect(toolsOf(args)).toEqual(expect.arrayContaining([`mcp__${MCP}`, 'mcp__bilko-host']));
+  expect(mcpKeys(args).sort()).toEqual(['bilko-host', MCP].sort());
+  expect(errors).toEqual([]);
+});
+
+test('harness: bare persona gets both too', () => {
+  const snap = { name: 'p', gearBindsChat: true, loadout: 'bare' };
+  const { args } = cr.gearChatArgs({ snapshot: snap, deps: { knownMcpServers: { [MCP]: SRV, 'bilko-host': SRV } } });
+  expect(toolsOf(args)).toEqual(expect.arrayContaining([`mcp__${MCP}`, 'mcp__bilko-host']));
+  expect(mcpKeys(args).sort()).toEqual(['bilko-host', MCP].sort());
+});
+
+test('harness: missing scheduler yields the Gear error', () => {
+  const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'] };
+  const { errors } = cr.gearChatArgs({ snapshot: snap, deps: { knownMcpServers: { 'bilko-host': SRV } } });
+  expect(errors.some((e) => /Gear: "session-manager-scheduler" is not available/.test(e))).toBe(true);
+});
+
+test('harness: missing bilko-host is skipped silently', () => {
+  const snap = { name: 'p', gearBindsChat: true, loadout: 'equipped', tools: ['Read'] };
+  const { args, errors } = cr.gearChatArgs({ snapshot: snap, deps: { knownMcpServers: { [MCP]: SRV } } });
+  expect(errors).toEqual([]);
+  expect(mcpKeys(args)).toEqual([MCP]);
+  expect(toolsOf(args)).not.toContain('mcp__bilko-host');
 });

@@ -238,7 +238,11 @@ async function resolveSkillDeny({ packs = [], loadout, deps } = {}) {
   }
 }
 
+/** Session Manager's own MCP harness, added to every scoped chat's declared servers (scheduler required, bilko-host optional). */
+const CHAT_HARNESS_MCP_SERVERS = Object.freeze(['session-manager-scheduler', 'bilko-host']);
+
 module.exports = {
+  CHAT_HARNESS_MCP_SERVERS,
   resolveSkillDeny,
   JOB_MCP_TOOLS_ENV,
   personaToolScopeEnv,

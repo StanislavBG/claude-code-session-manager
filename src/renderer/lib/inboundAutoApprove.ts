@@ -29,7 +29,7 @@ export function approveAndStart(epic: PromptSession, source: string, origin: Sen
   return approved
 }
 
-function isStampedInbound(e: PromptSession): boolean {
+export function isStampedInbound(e: PromptSession): boolean {
   return (
     e.status === 'proposed' &&
     e.source?.producer === 'cross-project-feedback' &&

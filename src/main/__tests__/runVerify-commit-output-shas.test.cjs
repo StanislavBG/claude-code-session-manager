@@ -80,7 +80,10 @@ test('clusters not ending in m and long options containing m yield no subject', 
 test('clusters where a value-taking letter precedes m (-Cm, -Fm) yield no subject', () => {
   assert.deepEqual(commitMessageSubjects('git commit -Cm "x subj here"'), []);
   assert.deepEqual(commitMessageSubjects('git commit -Fm "x subj here"'), []);
+  assert.deepEqual(commitMessageSubjects('git commit -cm "x subj here"'), []);
+  assert.deepEqual(commitMessageSubjects('git commit -tm "x subj here"'), []);
   assert.deepEqual(commitMessageSubjects('git commit -am "x subj here"'), ['x subj here']);
+  assert.deepEqual(commitMessageSubjects('git commit -sm "x subj here"'), ['x subj here']);
 });
 
 test('non-commit command is ignored', () => {

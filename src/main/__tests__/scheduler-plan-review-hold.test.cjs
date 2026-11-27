@@ -215,3 +215,56 @@ describe('default readers against a temp project', () => {
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });
+
+describe('hold stamp and create-failed notice', () => {
+  const noStamp = () => mk().map((r) => { const { createdAt, ...rest } = r; return rest; });
+  const realStore = () => require('../lib/scheduler/planReviewStore.cjs');
+  const withRoot = async (fn) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-plan-review-'));
+    try {
+      fs.mkdirSync(path.join(root, 'session-manager-operations'), { recursive: true });
+      await fn(root);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  };
+
+  it('stamps planReviewHeldAt once on a validator without queuedAt/createdAt', async () => {
+    const state = { jobs: noStamp() };
+    const d = deps({ mutateRows: async (fn) => { fn(state.jobs); } });
+    await sched.applyPlanReviewHolds(state, d);
+    const v = state.jobs.find((r) => r.slug === '90-validate');
+    expect(v.planReviewHeldAt).toBe(new Date(T0).toISOString());
+    await sched.applyPlanReviewHolds(state, { ...d, now: T0 + 60000 });
+    expect(v.planReviewHeldAt).toBe(new Date(T0).toISOString());
+  });
+
+  it('notifies once for a refused create across two ticks', async () => {
+    await withRoot(async (root) => {
+      const d = deps({ createPrd: vi.fn(async () => ({ ok: false, error: 'refused-x' })) });
+      delete d.readReview;
+      d.markCreateRefused = (c, e, s, r) => realStore().markCreateRefused(c, e, s, r);
+      const state = { jobs: mk().map((r) => ({ ...r, cwd: root })) };
+      await sched.applyPlanReviewHolds(state, d);
+      await sched.applyPlanReviewHolds(state, d);
+      const calls = d.notify.mock.calls.filter((c) => c[3] && c[3].notice === 'plan-review-create-failed');
+      expect(calls).toHaveLength(1);
+      expect(calls[0][2]).toMatch(/^PLAN REVIEW NOT STARTED/);
+      expect(calls[0][2]).toContain('validate');
+      expect(calls[0][2]).toContain('refused-x');
+      expect(calls[0][3]).toEqual({ prdSlug: '90-validate', notice: 'plan-review-create-failed', allowInactive: true });
+    });
+  });
+
+  it('notifies once for a thrown create across two ticks', async () => {
+    await withRoot(async (root) => {
+      const d = deps({ createPrd: vi.fn(async () => { throw new Error('boom-y'); }) });
+      delete d.readReview;
+      d.markCreateRefused = (c, e, s, r) => realStore().markCreateRefused(c, e, s, r);
+      const state = { jobs: mk().map((r) => ({ ...r, cwd: root })) };
+      await sched.applyPlanReviewHolds(state, d);
+      await sched.applyPlanReviewHolds(state, d);
+      const calls = d.notify.mock.calls.filter((c) => c[3] && c[3].notice === 'plan-review-create-failed');
+      expect(calls).toHaveLength(1);
+      expect(calls[0][2]).toContain('boom-y');
+    });
+  });
+});

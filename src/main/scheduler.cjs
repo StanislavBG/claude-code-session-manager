@@ -8347,6 +8347,11 @@ async function applyPlanReviewHolds(state, deps = {}) {
     });
     const markCreateRefused = deps.markCreateRefused || ((cwd, epicId, slug, round) => planReviewStore.markCreateRefused(cwd, epicId, slug, round));
     const heldReasons = new Map();
+    const notifyCreateFailed = async (v, epicId, vslug, err) => {
+      try {
+        await notify(v.cwd, epicId, `PLAN REVIEW NOT STARTED — the independent review job for plan ${bareSlug(vslug)} could not be created: ${err}. Its PRDs stay held until the review lands, you release it with scheduler_release_plan, or the hold times out.`, { prdSlug: v.slug, notice: 'plan-review-create-failed', allowInactive: true });
+      } catch { /* notice never breaks the tick */ }
+    };
 
     const reviews = {};
     const validators = rows.filter((r) => r && r.status === 'pending' && r.agentType === 'validator' && r.planReview === 'required');
@@ -8415,22 +8420,36 @@ async function applyPlanReviewHolds(state, deps = {}) {
           console.warn('[scheduler] plan review PRD not created', reviewSlug, err);
           if (await markCreateRefused(v.cwd, epicId, v.slug, round)) {
             audit('plan_review_create_refused', { validateSlug: vslug, round, error: err });
+            await notifyCreateFailed(v, epicId, vslug, err);
           }
         }
       } catch (e) {
         console.error('[scheduler] plan review PRD create failed', reviewSlug, e?.message || e);
+        try {
+          const err = String(e?.message || e);
+          if (await markCreateRefused(v.cwd, epicId, v.slug, round)) {
+            audit('plan_review_create_refused', { validateSlug: vslug, round, error: err });
+            await notifyCreateFailed(v, epicId, vslug, err);
+          }
+        } catch { /* never breaks the tick */ }
       }
     }
 
     // Stamp / clear heldReason on pending rows so settle + starvation see a known wait.
     const mutateRows = deps.mutateRows || ((fn) => mutate((s) => fn(s.jobs)));
-    const dirty = rows.some((r) => r && r.status === 'pending' && (
+    const stampSlugs = new Set();
+    for (const v of validators) {
+      if (expiredSet.has(v.slug) || v.queuedAt || v.createdAt || v.planReviewHeldAt) continue;
+      if (needsReview.includes(v.slug) || planReviewHold.planMembers(v, rows).some((m) => held.has(m.slug))) stampSlugs.add(v.slug);
+    }
+    const dirty = stampSlugs.size > 0 || rows.some((r) => r && r.status === 'pending' && (
       (heldReasons.has(r.slug) && !r.preflightHold && r.heldReason !== heldReasons.get(r.slug))
       || (!heldReasons.has(r.slug) && typeof r.heldReason === 'string' && r.heldReason.startsWith(PLAN_REVIEW_HELD_PREFIX))));
     if (dirty) {
       await mutateRows((list) => {
         for (const r of list) {
           if (!r || r.status !== 'pending') continue;
+          if (stampSlugs.has(r.slug) && !r.queuedAt && !r.createdAt && !r.planReviewHeldAt) r.planReviewHeldAt = new Date(now).toISOString();
           if (heldReasons.has(r.slug) && !r.preflightHold) r.heldReason = heldReasons.get(r.slug);
           else if (typeof r.heldReason === 'string' && r.heldReason.startsWith(PLAN_REVIEW_HELD_PREFIX)) delete r.heldReason;
         }

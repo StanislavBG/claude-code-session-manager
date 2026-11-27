@@ -93,6 +93,15 @@ Code: `src/main/lib/feedback-remote/crossProjectFeedback.cjs` (`openFeedbackSess
 Required fields: `toCwd`, `fromCwd` (must differ), `title`, `body`, `motivation`, `acceptanceCriteria`
 (at least one item), and `plan` when `tag` is `feature`. `tag` is `bug`, `feature` or `discussion`.
 
+**`autoStart: true` starts the work at once only on one of three grounds**; otherwise the Epic lands
+`proposed` and the answer's `note` names why:
+
+1. a verified human quote (`humanRequestQuote`, copied verbatim, naming the target project);
+2. a macro run with 'Can start work in other projects' on, for an allowed project;
+3. a paired service whose owner ticked 'May start work it opens' with a grant covering `toCwd`, sent
+   with `autoStart: true` and `tag` `bug` or `feature`. The grant is re-read at decision time, so a revoked
+   grant or a `discussion` tag falls back to `proposed`.
+
 - First call: creates the Epic and answers with `status: "proposed"` (or `"auto-approved"`) and the
   `externalRef`.
 - Repeat with the same `toCwd`, `fromCwd` and `externalRef`: creates nothing, writes no receipt and no
@@ -921,6 +930,11 @@ Enforced on the desktop by [`serviceMcpSession.cjs`](../../src/main/lib/feedback
 | `cmd:mcp` only | A service may send only boxed `cmd:mcp` envelopes. Anything else is refused with an opaque `rejected` and written to the audit log. |
 | No env identity | `originClaudeSessionId` / `originProjectRoot` sent by a service are dropped; only a local process may vouch for a session. |
 | Projects folder binds `parentDir` | `project_create` always runs in the projects folder the owner approved at pairing. A pairing without one is refused with 403 (audit `refused:projectRoot`; re-pair to grant the tool). A `parentDir` that does not resolve to that folder is refused with 403 (audit `refused:parentDir`; the answer names the approved `projectRoot`). `fromCwd` is always the service's home project; one sent by the service is overwritten. |
+
+Auto-start: the owner sets and revokes the 'May start work it opens' grant per service in App Settings >
+Web remote > Services. Rule and grounds: [section 2A](#a-feedback_open_session-mcp--post-adminfeedbackopen-session).
+Every service auto-start is written to the audit log (`service grant <serviceId>`), and the Epic records
+`startedBy` kind `service` (`serviceId`, `name`).
 
 ### The seven tools
 

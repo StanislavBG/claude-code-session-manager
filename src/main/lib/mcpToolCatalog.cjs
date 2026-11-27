@@ -348,14 +348,16 @@ const MCP_TOOL_CATALOG = [
       + '`acceptanceCriteria`; put evidence, symptom and references in `body`. Name the file in THEIR repo '
       + 'that looks responsible if you know it. When one request is split into several proposals, send '
       + 'them ALL with one shared `series` {key, title, total} (plus each one\'s `index`) and summarise '
-      + 'the overall plan in each motivation. THREE MODES: (1) agent-initiated (your own idea) = PROPOSED, a '
+      + 'the overall plan in each motivation. FOUR MODES: (1) agent-initiated (your own idea) = PROPOSED, a '
       + 'human in the receiving project must approve it; pass neither autoStart nor humanRequestQuote. '
       + '(2) human-requested = the human in THIS conversation explicitly asked for the work in that other '
       + 'project: pass `autoStart: true` plus `humanRequestQuote`, copied VERBATIM from their own message, '
       + 'whose quoted words themselves must name the target project. An unverified request silently falls back to PROPOSED. '
       + '(3) macro auto-start = a session launched from a macro with "Can start work in other projects" on '
       + 'auto-starts sends tagged `bug` or `feature` to allowed projects with no flag and no quote; otherwise it stays '
-      + 'a proposal. Pass tag `bug` or `feature` for work you want started.',
+      + 'a proposal. (4) paired-service grant = a paired service whose owner ticked "May start work it opens" '
+      + 'for the target project auto-starts `autoStart: true` sends tagged `bug` or `feature`; without the grant it '
+      + 'stays proposed. Pass tag `bug` or `feature` for work you want started.',
     whenNotToUse: 'WHEN NOT TO USE IT: for work in the project you are ALREADY in, run /develop inside the Epic you '
       + 'are already in — this tool refuses toCwd === fromCwd outright.',
     exampleArgs: {

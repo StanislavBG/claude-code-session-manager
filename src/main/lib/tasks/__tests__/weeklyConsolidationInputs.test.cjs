@@ -213,3 +213,38 @@ test('history: a mid-read error is flagged partial and reaches collectLessons', 
   expect(w.collectLessons({ cwd: ROOT, sinceMs: 0, untilMs: 1, deps: d }).lessonsPartial).toBe(true);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('history: an in-window row more than HISTORY_SLACK_ROWS behind the first pre-window row is not collected', () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'hist-'));
+  const file = path.join(dir, 'history.jsonl');
+  const base = T('2026-11-19T00:00:00Z');
+  const row = (id, t) => JSON.stringify({ id, finishedAt: new Date(t).toISOString() });
+  const lines = [row('tooFar', base + 2)];
+  for (let i = 0; i < w.HISTORY_SLACK_ROWS + 50; i++) lines.push(row(`pre${i}`, base - 100000 + i));
+  lines.push(row('in', base + 1));
+  fs.writeFileSync(file, lines.join('\n') + '\n');
+  expect(w.readHistorySince(file, base, 64).rows.map((x) => x.id)).toEqual(['in']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('history: default readHistory wiring reads the project history shard and passes partial through', () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const proj = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'proj-'));
+  const { projectHistoryPath } = require('../../scheduler/queueStore.cjs');
+  const file = projectHistoryPath(proj);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const base = T('2026-11-19T00:00:00Z');
+  fs.writeFileSync(file, JSON.stringify({ id: 'h1', slug: 's', runId: 'r1', cwd: proj, agentType: 'dev-lead', status: 'completed', finishedAt: new Date(base + 10).toISOString() }) + '\n');
+  const d = ldeps([], { [path.join('/runs', 'r1', 's.log')]: 'done\nLessons:\n- wiring works' });
+  delete d.readHistory;
+  const ok = w.collectLessons({ cwd: proj, sinceMs: base, untilMs: base + 1000, deps: d });
+  expect(ok.lessonsPartial).toBeFalsy();
+  expect(JSON.stringify(ok.lessons)).toContain('wiring works');
+  const orig = fs.readSync;
+  fs.readSync = () => { throw new Error('EIO'); };
+  let bad;
+  try { bad = w.collectLessons({ cwd: proj, sinceMs: base, untilMs: base + 1000, deps: d }); } finally { fs.readSync = orig; }
+  expect(bad.lessonsPartial).toBe(true);
+  fs.rmSync(proj, { recursive: true, force: true });
+});

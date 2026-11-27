@@ -12740,6 +12740,33 @@ async function attributeLandedCommits(job, pathCommits, cwd) {
  *
  * @returns {Promise<{commits: string[], paths: string[], detectedAt: string, rule: string} | null>}
  */
+async function ownTranscriptCommitOnHead({ cwd, logPath, startedAt, finishedAt } = {}) {
+  try {
+    if (!cwd || !logPath) return null;
+    const start = Date.parse(startedAt);
+    const end = Date.parse(finishedAt);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    const parsed = parseLog(logPath);
+    const candidates = [...new Set([
+      ...(parsed.transcriptCommitShas || []),
+      ...(parsed.transcriptCommitOutputShas || []),
+    ])];
+    for (const cand of candidates) {
+      try {
+        if (typeof cand !== 'string' || !/^[0-9a-f]{4,64}$/i.test(cand)) continue;
+        const full = String(await execGitAt(cwd, ['rev-parse', '--verify', `${cand}^{commit}`])).trim();
+        if (!/^[0-9a-f]{40,64}$/i.test(full)) continue;
+        await execGitAt(cwd, ['merge-base', '--is-ancestor', full, 'HEAD']);
+        const cIso = String(await execGitAt(cwd, ['show', '-s', '--format=%cI', full])).trim();
+        const ct = Date.parse(cIso);
+        if (!Number.isFinite(ct) || ct < start || ct > end + 60_000) continue;
+        return full;
+      } catch { /* this candidate fails closed */ }
+    }
+  } catch { /* never throws */ }
+  return null;
+}
+
 async function computeLooksDone(job, fetchedCwds) {
   // An explicit executor FAIL is authoritative: the run said the work is not
   // done, so its own commits (often just a record of the blocker) are never
@@ -13186,6 +13213,7 @@ async function reverifyNeedsReview() {
   // rescan) rather than through the isRescanCandidate machinery.
   const candidates = snap.jobs.filter((j) => reviewLadder.isRescanCandidate(j) || reviewLadder.isGuardParkedWithoutAutoFix(j) || reviewLadder.isStaleSharedTreeRevertedPark(j));
   const healed = [];
+  const transcriptHealed = new Map();
   const leftForReview = [];
   const looksDoneUpdates = [];
   // Shared across every computeLooksDone call in this one pass — dedupes
@@ -13255,6 +13283,9 @@ async function reverifyNeedsReview() {
       const hist = await queueHistory.historyTerminalBySlug().catch(() => null);
       priorLandedCommit = hist?.get(job.slug)?.landedCommit ?? null;
     }
+    const transcriptOwn = !job.landedCommit && reviewLadder.NO_ATTRIBUTABLE_COMMIT_VERDICTS.has(job.verifierVerdict)
+      ? await ownTranscriptCommitOnHead({ cwd: job.cwd, logPath: path.join(runDir, `${job.slug}.log`), startedAt: job.startedAt, finishedAt: job.finishedAt })
+      : null;
     let v = null;
     try {
       v = await verifyRun({
@@ -13273,16 +13304,17 @@ async function reverifyNeedsReview() {
         // ground-truth-outranks-heuristics evidence spawnJob passes live,
         // just read back post-hoc since there is no in-flight guardHeadBefore/
         // headAtExit pair to recompute for an already-terminal row.
-        jobLandedCommitThisRun: job.landedCommit ?? null,
+        jobLandedCommitThisRun: job.landedCommit ?? transcriptOwn,
         exitCode: job.exitCode ?? null,
       });
     } catch { leftForReview.push({ slug: job.slug, reason: 'verifyRun threw' }); continue; }
-    const refusal = reviewLadder.healRefusalReason(job, v, committedDuringRun);
+    const refusal = reviewLadder.healRefusalReason(transcriptOwn ? { ...job, landedCommit: transcriptOwn } : job, v, committedDuringRun);
     let stillOpen = true;
     if (refusal) {
       leftForReview.push({ slug: job.slug, reason: refusal });
     } else if (v && COMPLETED_EQUIVALENT_VERDICTS.has(v.verdict)) {
       healed.push(job.slug);
+      if (transcriptOwn) transcriptHealed.set(job.slug, transcriptOwn);
       stillOpen = false;
     } else {
       leftForReview.push({ slug: job.slug, reason: v ? `${v.verdict}: ${v.reason}` : 'null verdict' });
@@ -13388,6 +13420,10 @@ async function reverifyNeedsReview() {
           j.error = null;
           delete j.verifierVerdict;
           delete j.looksDone;
+          if (transcriptHealed.has(j.slug) && !j.landedCommit) {
+            j.landedCommit = transcriptHealed.get(j.slug);
+            j.landedCommitSource = 'transcript-output';
+          }
           healedPrds.push({ slug: j.slug, cwd: j.cwd });
         }
       }
@@ -15703,6 +15739,7 @@ module.exports = {
   applyNeedsReviewAutoResolve,
   applyStuckFailedAutoSkip,
   computeLooksDone,
+  ownTranscriptCommitOnHead,
   attributeLandedCommits,
   isPromotableOriginal,
   applyRcaClassification,

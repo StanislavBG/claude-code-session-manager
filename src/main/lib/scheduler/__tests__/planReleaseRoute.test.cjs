@@ -129,7 +129,7 @@ describe('release-plan', () => {
       expect(res.body).toEqual({ ok: false, error: 'bad_cwd' });
       expect(readPlanReview(cwd, IDS.epicId, IDS.validateSlug)).toBeNull();
       expect(fs.existsSync(path.join(cwd, 'nope'))).toBe(false);
-      expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'scheduler', 'scheduler'))).toBe(false);
+      expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'plan-records'))).toBe(false);
     });
   });
 
@@ -151,6 +151,18 @@ describe('release-plan', () => {
       expect(res.status).toBe(200);
       expect(res.body.validateSlug).toBe('5013-validate-x');
       expect(readPlanReview(cwd, IDS.epicId, '5013-validate-x')).not.toBeNull();
+    });
+
+    test('rereview with the bare slug flags the numbered-slug record', async () => {
+      writePrd('5013-validate-x.md');
+      await savePlanReviewResult({
+        cwd, epicId: IDS.epicId, validateSlug: '5013-validate-x', round: 1, reviewer: 'r', runId: 'x', model: 'm', review: review('block'),
+      });
+      const res = await call({ rereview: true });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ ok: true, rereviewRequested: true });
+      expect(readPlanReview(cwd, IDS.epicId, '5013-validate-x').rereviewRequested).toBe(true);
+      expect(readPlanReview(cwd, IDS.epicId, 'validate-x')).toBeNull();
     });
 
     test('unknown slug is 404 and writes nothing', async () => {

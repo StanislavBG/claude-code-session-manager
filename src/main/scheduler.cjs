@@ -4819,7 +4819,7 @@ async function notifyOriginatingTab(job, {
         console.error('[scheduler] notifyOriginatingTab verdicts file write error', job?.slug, e);
       }
     }
-    if (job.agentType === 'plan-reviewer' && (job.status === 'completed' || job.status === 'failed')) {
+    if (job.agentType === 'plan-reviewer' && (job.status === 'completed' || job.status === 'failed' || job.status === 'needs_review')) {
       await harvestPlanReview(job, epicId, logPath, { readStructured: readStructuredFromLog, sendPrompt, rows: planReviewRows, store: planReviewStoreImpl });
     }
     if (epicId) {
@@ -4933,9 +4933,13 @@ async function harvestPlanReview(job, epicId, logPath, deps = {}) {
     const members = planReviewHold.planMembers(validator, rows).map((r) => r.slug);
     let structured = null;
     try { structured = (deps.readStructured || extractStructuredOutputFromLog)(logPath); } catch { structured = null; }
-    const checked = job.status === 'completed' && structured
+    // A needs_review reviewer (e.g. it ended without structured output) is
+    // harvested like a completed one: valid output is saved, missing output
+    // releases as review-failed instead of waiting for the hold timeout.
+    const harvestable = job.status === 'completed' || job.status === 'needs_review';
+    const checked = harvestable && structured
       ? parsePlanReview(structured, { expected: members })
-      : { ok: false, error: job.status === 'completed' ? 'no structured output' : `reviewer ${job.status}` };
+      : { ok: false, error: harvestable ? 'no structured output' : `reviewer ${job.status}` };
 
     let outcome;
     if (checked.ok) {
@@ -6539,7 +6543,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     job.validatorCriteriaExpected = expected;
     if (section) prompt = `${prompt}\n\n${section}`;
   }
-  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly: isArtifactOnly || job.agentType === 'plan-reviewer', isValidator: job.agentType === 'validator', isPlanReviewer: job.agentType === 'plan-reviewer' }) });
+  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly, isValidator: job.agentType === 'validator', isPlanReviewer: job.agentType === 'plan-reviewer' }) });
 
   // Foreign-WIP manifest (starry-night-ships PRD 148 postmortem): the
   // scheduler already knows, at spawn time, which dirty paths this job did

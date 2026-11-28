@@ -4887,7 +4887,22 @@ async function notifyOriginatingTab(job, {
 
 /** Digest text for one harvested plan review (pure). */
 function buildPlanReviewDigest({ validateSlug, round, outcome, review, error }) {
-  const head = `PLAN REVIEWED: ${validateSlug} (round ${round})`;
+  const head = `PLAN REVIEWED${outcome === 'late' ? ' (late)' : ''}: ${validateSlug} (round ${round})`;
+  if (outcome === 'late') {
+    const lines = [head, 'The reviewer was healed after this round was released as review-failed. The plan stays released; apply what still matters with scheduler_update_prd.'];
+    for (const p of review.prds) {
+      lines.push('', `${p.prd}: ${p.decision}`);
+      for (const f of p.findings) {
+        lines.push(`  - [${f.severity}] ${f.check}: ${f.text}`);
+        if (f.suggestedEdit) lines.push(`    suggested edit: ${f.suggestedEdit}`);
+      }
+    }
+    if (review.planFindings.length) {
+      lines.push('', 'Plan findings:');
+      for (const f of review.planFindings) lines.push(`  - [${f.severity}] ${f.check}: ${f.text}`);
+    }
+    return lines.join('\n');
+  }
   if (outcome === 'failed') {
     return `${head}\nThe independent review failed (${error || 'no structured output'}) — the plan was released without review (review-failed). Its PRDs are free to dispatch.`;
   }
@@ -4933,8 +4948,14 @@ async function harvestPlanReview(job, epicId, logPath, deps = {}) {
     }
     const validateSlug = validator.slug;
     const prior = store.readPlanReview(job.cwd, epicId, validateSlug);
-    const sentBefore = prior && Array.isArray(prior.digestSent) ? prior.digestSent.slice() : [];
-    if (sentBefore.includes(round)) return;
+    // digestSent entries: { round, kind: 'review-failed' | 'reviewed' | 'late' };
+    // a bare number (old shape) reads as kind 'reviewed'.
+    const sentBefore = (prior && Array.isArray(prior.digestSent) ? prior.digestSent : [])
+      .map((e) => (typeof e === 'number' ? { round: e, kind: 'reviewed' } : e))
+      .filter((e) => e && typeof e.round === 'number');
+    const sentEntry = sentBefore.find((e) => e.round === round);
+    if (sentEntry && sentEntry.kind !== 'review-failed') return;
+    const late = !!sentEntry;
 
     const members = planReviewHold.planMembers(validator, rows).map((r) => r.slug);
     let structured = null;
@@ -4946,8 +4967,16 @@ async function harvestPlanReview(job, epicId, logPath, deps = {}) {
       ? parsePlanReview(structured, { expected: members })
       : { ok: false, error: job.status === 'completed' ? 'no structured output' : `reviewer ${job.status}` };
 
+    // A review-failed round accepts only a later completed run with valid output.
+    if (late && !checked.ok) return;
     let outcome;
-    if (checked.ok) {
+    if (late) {
+      await store.savePlanReviewResult({
+        cwd: job.cwd, epicId, validateSlug, round, reviewer: job.slug,
+        runId: job.runId || null, model: job.model || null, review: checked.value,
+      });
+      outcome = 'late';
+    } else if (checked.ok) {
       await store.savePlanReviewResult({
         cwd: job.cwd, epicId, validateSlug, round, reviewer: job.slug,
         runId: job.runId || null, model: job.model || null, review: checked.value,
@@ -4972,7 +5001,10 @@ async function harvestPlanReview(job, epicId, logPath, deps = {}) {
     if (rec) {
       const file = store.planReviewPath(job.cwd, epicId, validateSlug);
       assertOpsWrite(file, 'scheduler');
-      await writeJsonAtomic(file, { ...rec, digestSent: [...new Set([...sentBefore, round])] });
+      await writeJsonAtomic(file, { ...rec, digestSent: [
+        ...sentBefore.filter((e) => e.round !== round),
+        { round, kind: late ? 'late' : (checked.ok ? 'reviewed' : 'review-failed') },
+      ] });
     }
     const text = buildPlanReviewDigest({
       validateSlug, round, outcome,

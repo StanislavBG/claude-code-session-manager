@@ -108,7 +108,7 @@ describe('plan review harvest', () => {
     await run(reviewJob(), amendReview, send);
     expect(digests(send)).toHaveLength(1);
     expect(readPlanReview(cwd, EPIC, '12-validate').reviews).toHaveLength(1);
-    expect(readPlanReview(cwd, EPIC, '12-validate').digestSent).toEqual([1]);
+    expect(readPlanReview(cwd, EPIC, '12-validate').digestSent).toEqual([{ round: 1, kind: 'reviewed' }]);
   });
 
   test('needs_review reviewer is harvested as review-failed, one digest, deduped on repeat', async () => {
@@ -131,5 +131,31 @@ describe('plan review harvest', () => {
     expect(rec.release.rejected[0].reason).toBe('review-failed');
     expect(digests(send)).toHaveLength(1);
     expect(digests(send)[0][1]).toContain('reviewer needs_review');
+  });
+
+  test('review-failed harvest then late valid harvest: review saved, one late digest, release unchanged', async () => {
+    const send = vi.fn();
+    await run(reviewJob({ status: 'needs_review' }), null, send);
+    const before = readPlanReview(cwd, EPIC, '12-validate').release;
+    await run(reviewJob(), amendReview, send);
+    const rec = readPlanReview(cwd, EPIC, '12-validate');
+    expect(rec.reviews).toHaveLength(1);
+    expect(rec.release).toEqual(before);
+    expect(digests(send)).toHaveLength(2);
+    const text = digests(send)[1][1];
+    expect(text.split('\n')[0]).toBe('PLAN REVIEWED (late): 12-validate (round 1)');
+    expect(text).toContain('[Important] edge-case: misses empty input');
+    expect(rec.digestSent).toEqual([{ round: 1, kind: 'late' }]);
+    await run(reviewJob(), amendReview, send);
+    expect(digests(send)).toHaveLength(2);
+    expect(readPlanReview(cwd, EPIC, '12-validate').reviews).toHaveLength(1);
+  });
+
+  test('a valid harvest repeated is skipped', async () => {
+    const send = vi.fn();
+    await run(reviewJob(), okReview, send);
+    await run(reviewJob(), okReview, send);
+    expect(digests(send)).toHaveLength(1);
+    expect(readPlanReview(cwd, EPIC, '12-validate').reviews).toHaveLength(1);
   });
 });

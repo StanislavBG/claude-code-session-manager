@@ -77,6 +77,7 @@ function restoreEpicWorktree({ dir, branch, baseCwd }) {
     const run = (args) => execFileSync('git', args, { cwd: baseCwd, stdio: 'ignore', timeout: 15_000 });
     run(['worktree', 'prune']);
     run(['worktree', 'add', dir, branch]);
+    require('../claude/claudeJsonApproval.cjs').copyExternalIncludeApprovalSync({ fromPath: baseCwd, toPath: dir });
     return isUsableDir(dir, fs.statSync);
   } catch {
     return false;

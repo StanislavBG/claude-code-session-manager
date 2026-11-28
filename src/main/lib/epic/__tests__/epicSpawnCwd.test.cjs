@@ -281,3 +281,34 @@ test('restoreEpicWorktree refuses dirs outside an epic-worktrees segment and non
   expect(restoreEpicWorktree({ dir: '/tmp/session-manager-epic-worktrees/a/b', branch: 'main; rm -rf', baseCwd: '/projects/foo' })).toBe(false);
   expect(restoreEpicWorktree({ dir: 'relative/session-manager-epic-worktrees/a', branch: 'sm-epic/x', baseCwd: '/projects/foo' })).toBe(false);
 });
+
+test('restoreEpicWorktree copies the external-include approval onto the restored dir', () => {
+  const { restoreEpicWorktree } = require('../epicSpawnCwd.cjs');
+  const fsx = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { execFileSync } = require('node:child_process');
+  const saved = process.env.CLAUDE_CONFIG_DIR;
+  const tmp = fsx.realpathSync(fsx.mkdtempSync(path.join(os.tmpdir(), 'sm-restore-incl-')));
+  try {
+    const repo = path.join(tmp, 'repo');
+    fsx.mkdirSync(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+    git(['init', '-q']);
+    git(['-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'init']);
+    git(['branch', 'sm-epic/r1']);
+    const cfgDir = path.join(tmp, 'cfg');
+    fsx.mkdirSync(cfgDir);
+    const cfgFile = path.join(cfgDir, '.claude.json');
+    fsx.writeFileSync(cfgFile, JSON.stringify({ projects: { [repo]: { hasClaudeMdExternalIncludesApproved: true } } }));
+    process.env.CLAUDE_CONFIG_DIR = cfgDir;
+    const dir = path.join(tmp, 'session-manager-epic-worktrees', 'r1');
+    expect(restoreEpicWorktree({ dir, branch: 'sm-epic/r1', baseCwd: repo })).toBe(true);
+    const entry = JSON.parse(fsx.readFileSync(cfgFile, 'utf8')).projects[dir];
+    expect(entry.hasClaudeMdExternalIncludesApproved).toBe(true);
+    expect(entry.hasClaudeMdExternalIncludesWarningShown).toBe(true);
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = saved;
+    fsx.rmSync(tmp, { recursive: true, force: true });
+  }
+});

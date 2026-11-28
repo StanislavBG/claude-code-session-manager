@@ -4929,7 +4929,10 @@ function buildPlanReviewDigest({ validateSlug, round, outcome, review, error }) 
  * harvestPlanReview — a finished plan-reviewer job: parse its structured output,
  * save the round, auto-release an all-ok plan (an unusable review releases as
  * 'review-failed'), and send the planner's Epic ONE digest per (validateSlug,
- * round). The sent round is persisted in the record (`digestSent`) so a restart
+ * round). Late path: a round whose digest was 'review-failed' may later get a
+ * completed run with valid output; that run saves the review and sends ONE
+ * second 'PLAN REVIEWED (late)' digest (no release — the plan already released).
+ * The sent round + kind is persisted in the record (`digestSent`) so a restart
  * does not resend. Never throws.
  */
 async function harvestPlanReview(job, epicId, logPath, deps = {}) {
@@ -4970,17 +4973,15 @@ async function harvestPlanReview(job, epicId, logPath, deps = {}) {
     // A review-failed round accepts only a later completed run with valid output.
     if (late && !checked.ok) return;
     let outcome;
-    if (late) {
+    if (late || checked.ok) {
       await store.savePlanReviewResult({
         cwd: job.cwd, epicId, validateSlug, round, reviewer: job.slug,
         runId: job.runId || null, model: job.model || null, review: checked.value,
       });
+    }
+    if (late) {
       outcome = 'late';
     } else if (checked.ok) {
-      await store.savePlanReviewResult({
-        cwd: job.cwd, epicId, validateSlug, round, reviewer: job.slug,
-        runId: job.runId || null, model: job.model || null, review: checked.value,
-      });
       if (isAllOkPlanReview(checked.value)) {
         outcome = 'ok';
         await store.recordPlanRelease({ cwd: job.cwd, epicId, validateSlug, by: 'auto', accepted: 0 });

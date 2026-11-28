@@ -67,7 +67,7 @@ export function WorldView({ rooms, insetTop = 0 }: { rooms: GuildRoom[]; insetTo
         dpr,
         theme: themeRef.current,
         cache: cacheRef.current ?? undefined,
-      }, boxes.length > 0 ? boxes : undefined, roomInput)
+      }, boxes, roomInput)
     },
     [actors, boxes, roomInput, size.w, size.h],
   )

@@ -220,6 +220,14 @@ describe('layoutRooms', () => {
 })
 
 describe('drawWorld with rooms', () => {
+  it('paints the ground and the caption when rooms is empty', () => {
+    const { ctx, calls } = mockCtx()
+    drawWorld(ctx, [], [], { width: 600, height: 400, timeMs: 0, dpr: 1 }, [], [])
+    const caption = calls.filter((c) => c.name === 'fillText')
+    expect(caption.map((c) => c.args[0])).toEqual(['No one is out adventuring'])
+    expect(caption[0].args.slice(1)).toEqual([300, 200])
+    expect(calls.some((c) => c.name === 'drawImage')).toBe(true)
+  })
   it('strokes boundaries and labels rooms, idle and groups', () => {
     const { ctx, calls } = mockCtx()
     const input = [

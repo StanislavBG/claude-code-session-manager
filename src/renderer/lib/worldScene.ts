@@ -255,7 +255,7 @@ export function drawWorld(
   ctx.fillStyle = theme.label
   ctx.textBaseline = 'middle'
   ctx.font = '12px sans-serif'
-  if (rooms) {
+  if (rooms && rooms.length > 0) {
     const byKey = new Map((roomInput ?? []).map((r) => [r.key, r]))
     for (const r of rooms) {
       ctx.strokeStyle = theme.roomLine ?? DEFAULT_THEME.roomLine ?? theme.label
@@ -283,7 +283,7 @@ export function drawWorld(
     }
     return
   }
-  if (actors.length === 0 && groups.length === 0) {
+  if (rooms || (actors.length === 0 && groups.length === 0)) {
     ctx.textAlign = 'center'
     ctx.fillText('No one is out adventuring', width / 2, height / 2)
     return

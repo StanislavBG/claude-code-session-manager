@@ -37,6 +37,13 @@ function parentEntry(projects, fromPath) {
   } catch { return undefined; }
 }
 
+/**
+ * Return `config` with the parent project's external-include approval copied
+ * onto `toPath`'s project entry (unchanged `config` when there is nothing to
+ * copy). Does not mutate `config` and never writes a file, but it is not pure:
+ * when the parent key is absent it may call `fs.realpathSync` to resolve the
+ * parent key through symlinks.
+ */
 function applyApproval(config, fromPath, toPath) {
   if (!config || typeof config !== 'object' || !config.projects || typeof config.projects !== 'object') return config;
   const fromKey = path.resolve(fromPath);

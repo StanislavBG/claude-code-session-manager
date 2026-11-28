@@ -897,6 +897,21 @@ async function isRegisteredWorktreeOnBranch(cwd, dir, branch) {
 }
 
 /**
+ * Copy the parent project's CLAUDE.md external-include approval onto the
+ * worktree path in ~/.claude.json, so @-imports resolving outside the repo
+ * load in sessions started there. Best-effort: never throws.
+ */
+async function inheritIncludeApproval(cwd, dir) {
+  try {
+    const { copyExternalIncludeApproval } = require('../claude/claudeJsonApproval.cjs');
+    const r = await copyExternalIncludeApproval({ fromPath: cwd, toPath: dir });
+    if (r && r.ok === false && r.reason !== 'missing') console.warn(`[gitWorktree] include-approval copy skipped for ${dir}: ${r.reason}`);
+  } catch (err) {
+    console.warn(`[gitWorktree] include-approval copy skipped for ${dir}: ${(err && err.message) || err}`);
+  }
+}
+
+/**
  * Create a linked worktree on a fresh branch checked out from the main
  * tree's current HEAD. Returns `{ ok: true, dir, branch, baseCwd,
  * carriedPaths, baseBranch }` on success (`baseBranch` is `cwd`'s branch at
@@ -944,21 +959,6 @@ async function isRegisteredWorktreeOnBranch(cwd, dir, branch) {
  * replay only the job's own commits after a base rewrite. Omitted on an
  * unborn HEAD and on the Epic reuse result.
  */
-/**
- * Copy the parent project's CLAUDE.md external-include approval onto the
- * worktree path in ~/.claude.json, so @-imports resolving outside the repo
- * load in sessions started there. Best-effort: never throws.
- */
-async function inheritIncludeApproval(cwd, dir) {
-  try {
-    const { copyExternalIncludeApproval } = require('../claude/claudeJsonApproval.cjs');
-    const r = await copyExternalIncludeApproval({ fromPath: cwd, toPath: dir });
-    if (r && r.ok === false && r.reason !== 'missing') console.warn(`[gitWorktree] include-approval copy skipped for ${dir}: ${r.reason}`);
-  } catch (err) {
-    console.warn(`[gitWorktree] include-approval copy skipped for ${dir}: ${(err && err.message) || err}`);
-  }
-}
-
 async function createWorktree({ kind, cwd, key, fromRef }) {
   configFor(kind); // throws on an unknown kind before anything else runs
   if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };

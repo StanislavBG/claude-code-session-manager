@@ -73,6 +73,7 @@ function buildPlanReviewInput({ epicId, cwd, epicGoal, validateSlug, members, ba
   const bare = bareSlug(validateSlug);
   const slug = `plan-review-${bare}${round && round >= 2 ? `-r${round}` : ''}`;
   const acceptanceCriteria = list.map((m) => `Review ${m.slug}`);
+  acceptanceCriteria.push(`Return the review as the structured output object only; write no file — the scheduler saves the record (${validateSlug}.plan-review.json) from it`);
 
   const lines = [
     PERSONA_LINE,

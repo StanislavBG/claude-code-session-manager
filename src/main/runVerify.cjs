@@ -30,6 +30,7 @@
  *   abandoned_background_task → 'needs_review'
  *   run_commit_not_landed → 'needs_review' (PASS but transcript SHA unreachable)
  *   pass_no_commit_already_shipped → historical rows only; no longer emitted
+ *   pass_no_commit_plan_review → null (plan-reviewer's structured review is the deliverable)
  *
  * Time complexity: O(N·L) where N = log line count, L = avg content line count.
  * The log is read once with readFileSync (700 KB typical; well within Node.js
@@ -46,7 +47,6 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { parsePrdFile, isArtifactOnlyDeclaration } = require('./lib/prd/prdFrontmatter.cjs');
 const { isSatisfiedDepRow, makeDepResolver } = require('./lib/prd/depSlugResolve.cjs');
-const { parsePlanReview } = require('./lib/scheduler/planReviewSchema.cjs');
 
 const VERDICTS_SCHEMA_VERSION = 1;
 
@@ -382,6 +382,20 @@ function scanSentinel(resultEvent, events) {
  * 'pass' | 'fail' from a result event's structured_output.schedulerVerdict
  * (validator runs under `--json-schema`), else null.
  */
+/**
+ * Did a plan-reviewer run return its structured review? Shape only — a plain
+ * object carrying a `prds` array; the harvest validates the full schema.
+ * @param {{agentType?: string}|null|undefined} queueEntry
+ * @param {{structuredOutput?: unknown}|null|undefined} resultEvent
+ * @returns {boolean}
+ */
+function isPlanReviewStructured(queueEntry, resultEvent) {
+  if (queueEntry?.agentType !== 'plan-reviewer') return false;
+  const so = resultEvent?.structuredOutput;
+  if (!so || typeof so !== 'object' || Array.isArray(so)) return false;
+  return Array.isArray(/** @type {{prds?: unknown}} */ (so).prds);
+}
+
 function structuredSchedulerVerdict(resultEvent) {
   const so = resultEvent && resultEvent.structuredOutput;
   if (!so || typeof so !== 'object') return null;
@@ -932,19 +946,14 @@ async function verifyRun({
     // whole PRD from a wrong "stopped on a clarifying question" premise.
     // A plan-reviewer's ONLY deliverable is its PLAN_REVIEW_SCHEMA structured
     // output (FINISH_PLAN_REVIEWER_LINE: no commit, no file, no verdict line);
-    // harvestPlanReview saves it. A valid object is completion evidence. Shape
-    // check only — harvestPlanReview still checks the member list. Missing or
-    // invalid output falls through to the no_verdict_sentinel path below.
-    if (
-      sentinel === null
-      && queueEntry?.agentType === 'plan-reviewer'
-      && exitCode === 0
-      && resultEvent?.structuredOutput
-      && parsePlanReview(resultEvent.structuredOutput).ok
-    ) {
+    // harvestPlanReview saves it. Shape check only (a `prds` array): the
+    // harvest's parsePlanReview validates the schema and saves a malformed
+    // review as a failed round, which only happens once the job completes.
+    // Missing output falls through to the no_verdict_sentinel path below.
+    if (sentinel === null && !commitEvidence && exitCode === 0 && isPlanReviewStructured(queueEntry, resultEvent)) {
       return conclude(
-        'clean',
-        'plan-reviewer structured output is a valid PLAN_REVIEW_SCHEMA object — the object is the deliverable; no commit expected',
+        'pass_no_commit_plan_review',
+        'plan-reviewer returned its structured review (PLAN_REVIEW_SCHEMA); no commit or verdict line is expected',
         null,
         extras,
       );

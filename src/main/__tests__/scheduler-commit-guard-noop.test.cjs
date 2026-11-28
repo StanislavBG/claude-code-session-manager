@@ -262,6 +262,8 @@ test.each([
   ['pass_no_commit_prior_run_verified worktree + dirt', v('pass_no_commit_prior_run_verified'), true, ['a.cjs'], false],
   ['pass_no_commit_target_verified worktree + dirt', v('pass_no_commit_target_verified'), true, ['a.cjs'], false],
   ['pass_no_commit_artifact_verified', v('pass_no_commit_artifact_verified'), false, [], false],
+  ['pass_no_commit_plan_review worktree, clean tree', v('pass_no_commit_plan_review'), true, [], true],
+  ['pass_no_commit_plan_review worktree + dirt (stray reviewer edits)', v('pass_no_commit_plan_review'), true, ['x'], false],
   ['other verdict', v('transcript_errors', 'needs_review'), false, [], false],
 ])('commitGuardSkipped: %s', (_name, verifyResult, ranInWorktree, newlyDirty, expected) => {
   expect(gitTreeGuard.commitGuardSkipped({ verifyResult, ranInWorktree, newlyDirty })).toBe(expected);

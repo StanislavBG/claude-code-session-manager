@@ -25,7 +25,10 @@ describe('planReviewInput', () => {
     expect(input.files).toBeUndefined();
     expect(input.deliverable).toBeUndefined();
     expect(input.artifactPaths).toBeUndefined();
-    expect(input.acceptanceCriteria).toEqual(fx.members.map((m) => `Review ${m.slug}`));
+    expect(input.acceptanceCriteria).toEqual([
+      ...fx.members.map((m) => `Review ${m.slug}`),
+      'Return the review as the structured output object only; write no file — the scheduler saves the record (01-validate-launcher.plan-review.json) from it',
+    ]);
     expect(JSON.stringify(input)).not.toContain('.plan-review.md');
     expect(JSON.stringify(input)).not.toContain('Record written at');
     expect(input.implementationNotes).toContain('Deliverable: the structured output object (PLAN_REVIEW_SCHEMA) only. Write no file; the scheduler saves the review.');

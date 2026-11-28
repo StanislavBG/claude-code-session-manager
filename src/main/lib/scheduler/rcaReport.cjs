@@ -60,6 +60,7 @@ const VERDICT_LABELS = {
   sentinel_fail: 'executor reported SCHEDULER_VERDICT: FAIL',
   pass_no_commit_already_shipped: 'PASS with no commit — deliverables already shipped',
   pass_no_commit_prior_run_verified: 'PASS with no commit — prior run of this slug already landed the work',
+  pass_no_commit_plan_review: 'plan-reviewer returned its structured review — no commit expected',
   silent_no_op: 'no commit, clean tree — no evidence of work',
   blocked_by_foreign_wip_streak: 'blocked by a sibling job\'s foreign WIP 3x in a row',
 };

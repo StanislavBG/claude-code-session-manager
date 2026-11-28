@@ -1,8 +1,10 @@
 /**
  * runVerify-plan-reviewer-structured.test.cjs — a plan-reviewer run's
  * deliverable is its PLAN_REVIEW_SCHEMA structured output, not a commit or a
- * SCHEDULER_VERDICT line. A valid object must verify `clean`; a missing or
- * invalid one, or the same object from another persona, must not.
+ * SCHEDULER_VERDICT line. An object with a `prds` array must verify
+ * `pass_no_commit_plan_review` (harvestPlanReview validates the schema and
+ * saves a malformed review as failed); a missing object, a non-array `prds`,
+ * or the same object from another persona, must not.
  */
 import { test, beforeAll, afterAll, vi } from 'vitest';
 const assert = require('node:assert/strict');
@@ -58,10 +60,16 @@ async function run({ agentType, structuredOutput }) {
   }
 }
 
-test('(a) plan-reviewer with a valid structured output verifies clean', { timeout: 10_000 }, async () => {
+test('(a) plan-reviewer with a structured review verifies pass_no_commit_plan_review', { timeout: 10_000 }, async () => {
   const v = await run({ agentType: 'plan-reviewer', structuredOutput: VALID });
-  assert.equal(v.verdict, 'clean');
-  assert.equal(v.downgradeTo, null);
+  assert.equal(v.verdict, 'pass_no_commit_plan_review');
+  assert.equal(v.downgradeTo ?? null, null);
+});
+
+test('(a2) a malformed-but-array review still completes so harvest saves it as failed', { timeout: 10_000 }, async () => {
+  const v = await run({ agentType: 'plan-reviewer', structuredOutput: { prds: [{ prd: '10-a' }], planFindings: [] } });
+  assert.equal(v.verdict, 'pass_no_commit_plan_review');
+  assert.equal(v.downgradeTo ?? null, null);
 });
 
 test('(b) plan-reviewer with no structured output stays no_verdict_sentinel', { timeout: 10_000 }, async () => {
@@ -72,7 +80,6 @@ test('(b) plan-reviewer with no structured output stays no_verdict_sentinel', { 
 
 test('(c) plan-reviewer with an invalid structured output is not clean', { timeout: 10_000 }, async () => {
   const v = await run({ agentType: 'plan-reviewer', structuredOutput: { prds: 'x' } });
-  assert.notEqual(v.verdict, 'clean');
   assert.equal(v.verdict, 'no_verdict_sentinel');
 });
 

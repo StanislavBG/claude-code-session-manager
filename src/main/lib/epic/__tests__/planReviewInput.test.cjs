@@ -20,8 +20,15 @@ describe('planReviewInput', () => {
     expect(input).toMatchObject({
       slug: 'plan-review-validate-launcher', agentType: 'plan-reviewer', tag: 'build',
       gate: ['none'], sourcePromptId: 'epic-fixture',
-      files: ['session-manager-operations/plan-records/epic-fixture/01-validate-launcher.plan-review.md'],
     });
+    // The structured output is the only deliverable: no artifact, no file, no record criterion.
+    expect(input.files).toBeUndefined();
+    expect(input.deliverable).toBeUndefined();
+    expect(input.artifactPaths).toBeUndefined();
+    expect(input.acceptanceCriteria).toEqual(fx.members.map((m) => `Review ${m.slug}`));
+    expect(JSON.stringify(input)).not.toContain('.plan-review.md');
+    expect(JSON.stringify(input)).not.toContain('Record written at');
+    expect(input.implementationNotes).toContain('Deliverable: the structured output object (PLAN_REVIEW_SCHEMA) only. Write no file; the scheduler saves the review.');
     const n = input.implementationNotes;
     expect(n).toContain(fx.epicGoal);
     expect(n).toContain('Base: abc1234');

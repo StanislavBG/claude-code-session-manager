@@ -46,6 +46,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { parsePrdFile, isArtifactOnlyDeclaration } = require('./lib/prd/prdFrontmatter.cjs');
 const { isSatisfiedDepRow, makeDepResolver } = require('./lib/prd/depSlugResolve.cjs');
+const { parsePlanReview } = require('./lib/scheduler/planReviewSchema.cjs');
 
 const VERDICTS_SCHEMA_VERSION = 1;
 
@@ -929,6 +930,26 @@ async function verifyRun({
     // (abandoned_background_task) so the auto-fix investigation checks the
     // working tree for already-written work first, instead of re-planning the
     // whole PRD from a wrong "stopped on a clarifying question" premise.
+    // A plan-reviewer's ONLY deliverable is its PLAN_REVIEW_SCHEMA structured
+    // output (FINISH_PLAN_REVIEWER_LINE: no commit, no file, no verdict line);
+    // harvestPlanReview saves it. A valid object is completion evidence. Shape
+    // check only — harvestPlanReview still checks the member list. Missing or
+    // invalid output falls through to the no_verdict_sentinel path below.
+    if (
+      sentinel === null
+      && queueEntry?.agentType === 'plan-reviewer'
+      && exitCode === 0
+      && resultEvent?.structuredOutput
+      && parsePlanReview(resultEvent.structuredOutput).ok
+    ) {
+      return conclude(
+        'clean',
+        'plan-reviewer structured output is a valid PLAN_REVIEW_SCHEMA object — the object is the deliverable; no commit expected',
+        null,
+        extras,
+      );
+    }
+
     if (sentinel === null && !commitEvidence) {
       if (hasAbandonedBackgroundTask(events)) {
         issues.push({

@@ -72,15 +72,13 @@ function buildPlanReviewInput({ epicId, cwd, epicGoal, validateSlug, members, ba
   const list = Array.isArray(members) ? members : [];
   const bare = bareSlug(validateSlug);
   const slug = `plan-review-${bare}${round && round >= 2 ? `-r${round}` : ''}`;
-  const recordPath = `session-manager-operations/plan-records/${epicId}/${validateSlug}.plan-review.md`;
-
   const acceptanceCriteria = list.map((m) => `Review ${m.slug}`);
-  acceptanceCriteria.push(`Record written at ${recordPath}, relative to the job worktree's repository root (git rev-parse --show-toplevel), never relative to a subdirectory you cd'd into. Do not git add or commit it — the scheduler copies it to the main checkout`);
 
   const lines = [
     PERSONA_LINE,
     `Epic goal: ${epicGoal || 'unknown'}`,
     baseSha ? `Base: ${baseSha}` : 'Base: unknown',
+    'Deliverable: the structured output object (PLAN_REVIEW_SCHEMA) only. Write no file; the scheduler saves the review.',
     '',
     'Plan members:',
   ];
@@ -110,9 +108,7 @@ function buildPlanReviewInput({ epicId, cwd, epicGoal, validateSlug, members, ba
     implementationNotes: lines.join('\n'),
     outOfScope: ['Editing product code', 'Queuing fix PRDs'],
     gate: ['none'],
-    files: [recordPath],
-    deliverable: 'artifact',
-    artifactPaths: [recordPath],
+    // No `files`: the reviewer edits nothing (validateFiles refuses an empty list).
     agentType: 'plan-reviewer',
     tag: 'build',
     sourcePromptId: epicId,

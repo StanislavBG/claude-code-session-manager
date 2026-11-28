@@ -2,7 +2,8 @@
 
 /**
  * vitest globalSetup — one throwaway sandbox per run. Publishes SM_SCHEDULER_HOME,
- * SM_WORKTREE_ROOT, SM_ADMIN_TOKEN_PATH, SM_CLAUDE_VERSION and HOME via provide()
+ * SM_WORKTREE_ROOT, SM_ADMIN_TOKEN_PATH, SM_CLAUDE_VERSION, SM_MEMINFO_PATH, HOME,
+ * SM_SANDBOX_DIR and CLAUDE_CONFIG_DIR via provide()
  * (workers read them with inject() in tests/setup/schedulerSandbox.cjs) AND
  * process.env (inherited by forked workers and any child they spawn).
  * Teardown removes the sandbox.

@@ -54,12 +54,13 @@ if (env) {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
-  const tmp = path.resolve(os.tmpdir());
+  // realpath both sides: globalSetup's sandbox is realpath'd, and os.tmpdir() may be a symlink.
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const tmp = real(os.tmpdir());
   const cur = process.env.CLAUDE_CONFIG_DIR;
-  const rel = cur ? path.relative(tmp, path.resolve(cur)) : '';
+  const rel = cur ? path.relative(tmp, real(cur)) : '';
   if (!cur || !rel || rel.startsWith('..') || path.isAbsolute(rel)) {
-    process.env.CLAUDE_CONFIG_DIR = path.join(tmp, `sm-claude-config-${process.pid}`);
-    fs.mkdirSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+    process.env.CLAUDE_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-claude-config-'));
   }
 }
 

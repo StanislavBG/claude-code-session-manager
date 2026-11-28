@@ -29,6 +29,20 @@ process.env.SM_JOB_MEMORY_MAX_MB = '0';
 // the host's packages; tests of enforcement pass mode explicitly or set/delete this var themselves.
 process.env.SM_ENVIRONMENT_ENFORCEMENT = 'report';
 
+// Worktree creation reads <CLAUDE_CONFIG_DIR|~>/.claude.json and takes its .lock dir; keep every
+// unit test off the real home config. Tests that set CLAUDE_CONFIG_DIR themselves still override it.
+{
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmp = path.resolve(os.tmpdir());
+  const cur = process.env.CLAUDE_CONFIG_DIR;
+  const rel = cur ? path.relative(tmp, path.resolve(cur)) : '';
+  if (!cur || !rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    process.env.CLAUDE_CONFIG_DIR = fs.mkdtempSync(path.join(tmp, 'sm-claude-config-'));
+  }
+}
+
 const env = inject('schedulerSandbox');
 if (env) {
   Object.assign(process.env, env);

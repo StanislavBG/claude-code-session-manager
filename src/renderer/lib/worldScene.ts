@@ -234,6 +234,20 @@ export function createSpriteCache(): SpriteCache {
 
 const defaultCache = createSpriteCache()
 
+function drawActors(
+  ctx: CanvasRenderingContext2D,
+  actors: WorldActor[],
+  timeMs: number,
+  dpr: number,
+  cache: SpriteCache,
+): void {
+  const size = SPRITE_PX * SPRITE_SCALE
+  for (const a of actors) {
+    const bob = Math.round(Math.sin(timeMs / 400 + a.phase * Math.PI * 2))
+    ctx.drawImage(cache.sprite(a.agentType, dpr) as CanvasImageSource, Math.round(a.x - size / 2), Math.round(a.y - size / 2 + bob), size, size)
+  }
+}
+
 export function drawWorld(
   ctx: CanvasRenderingContext2D,
   actors: WorldActor[],
@@ -276,11 +290,7 @@ export function drawWorld(
         ctx.fillText(groupLabel(g.agentType, g.count), g.x + g.w / 2, g.y + LABEL_H / 2 + 2)
       }
     }
-    const size = SPRITE_PX * SPRITE_SCALE
-    for (const a of actors) {
-      const bob = Math.round(Math.sin(timeMs / 400 + a.phase * Math.PI * 2))
-      ctx.drawImage(cache.sprite(a.agentType, dpr) as CanvasImageSource, Math.round(a.x - size / 2), Math.round(a.y - size / 2 + bob), size, size)
-    }
+    drawActors(ctx, actors, timeMs, dpr, cache)
     return
   }
   if (actors.length === 0 && (rooms || groups.length === 0)) {
@@ -288,11 +298,7 @@ export function drawWorld(
     ctx.fillText('No one is out adventuring', width / 2, height / 2)
     return
   }
-  const size = SPRITE_PX * SPRITE_SCALE
-  for (const a of actors) {
-    const bob = Math.round(Math.sin(timeMs / 400 + a.phase * Math.PI * 2))
-    ctx.drawImage(cache.sprite(a.agentType, dpr) as CanvasImageSource, Math.round(a.x - size / 2), Math.round(a.y - size / 2 + bob), size, size)
-  }
+  drawActors(ctx, actors, timeMs, dpr, cache)
   ctx.textAlign = 'center'
   ctx.fillStyle = theme.label
   for (const g of groups) {

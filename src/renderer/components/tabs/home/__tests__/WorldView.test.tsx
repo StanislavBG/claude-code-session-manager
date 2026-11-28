@@ -12,13 +12,17 @@ vi.mock('../../../../lib/worldScene', () => ({
   DEFAULT_THEME: { ground: '#000', groundAlt: '#111', label: '#fff' },
   createSpriteCache: vi.fn(() => ({})),
   drawWorld: (...a: unknown[]) => drawWorld(...a),
-  layoutWorld: () => [],
-  layoutGroups: () => [],
+  layoutRooms: (r: unknown[]) => r.map(() => ({})),
+  layoutRoomActors: () => [],
 }))
 
 import { WorldView } from '../WorldView'
 
-const roster = [{ agentType: 'dev-lead', count: 1, owners: ['x'] }]
+const rooms = [
+  { cwd: '/p/a', label: 'a', roster: [{ agentType: 'dev-lead', count: 1, owners: ['x'] }] },
+  { cwd: '/p/b', label: 'b', roster: [] },
+]
+const idle = [{ cwd: '/p/a', label: 'a', roster: [] }]
 let container: HTMLDivElement
 let root: Root | null = null
 function render(el: React.ReactElement) {
@@ -62,31 +66,32 @@ afterEach(() => {
 
 describe('WorldView', () => {
   it('renders the canvas', () => {
-    const { getByTestId } = render(<WorldView roster={roster} />)
+    const { getByTestId } = render(<WorldView rooms={rooms} />)
     expect(getByTestId('world-canvas').tagName).toBe('CANVAS')
+    expect(getByTestId('world-canvas').getAttribute('data-room-count')).toBe('2')
   })
-  it('schedules no rAF for an empty roster', () => {
-    render(<WorldView roster={[]} />)
+  it('schedules no rAF for an all-idle rooms', () => {
+    render(<WorldView rooms={idle} />)
     expect(raf).not.toHaveBeenCalled()
   })
   it('schedules no rAF when unfocused', () => {
     state.focused = false
-    render(<WorldView roster={roster} />)
+    render(<WorldView rooms={rooms} />)
     expect(raf).not.toHaveBeenCalled()
   })
   it('schedules no rAF when document hidden', () => {
     state.visible = false
-    render(<WorldView roster={roster} />)
+    render(<WorldView rooms={rooms} />)
     expect(raf).not.toHaveBeenCalled()
   })
   it('schedules rAF when all conditions hold and cancels on unmount', () => {
-    const { unmount } = render(<WorldView roster={roster} />)
+    const { unmount } = render(<WorldView rooms={rooms} />)
     expect(raf).toHaveBeenCalled()
     unmount()
     expect(caf).toHaveBeenCalled()
   })
   it('throttles a callback 20 ms after the previous frame', () => {
-    render(<WorldView roster={roster} />)
+    render(<WorldView rooms={rooms} />)
     drawWorld.mockClear()
     const last = () => cbs[cbs.length - 1]
     act(() => last()(1000))

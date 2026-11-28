@@ -89,9 +89,10 @@ test('Guild Hall screenshots: empty, populated, quest board, light + dark, at 15
           await page.waitForTimeout(300)
           await page.screenshot({ path: path.join(OUT, `guild-hall-empty-${scheme}.png`) })
         } else {
-          await expect(page.getByTestId('guild-hall-slots')).toHaveText('5 of 5 slots busy')
+          await expect(page.getByTestId('guild-hall-slots')).toHaveText('4 of 5 slots busy')
           await expect(page.getByTestId('quest-board-toggle')).toContainText('Quest board (2)')
-          // Group labels for dev-lead (3), architect (1), unknown (1) are painted; the empty caption is not.
+          await expect(canvas).toHaveAttribute('data-room-count', '8')
+          // Group labels for dev-lead and architect are painted; the empty caption is not.
           await expect.poll(async () => (await texts()).length, { message: 'group labels drawn' }).toBeGreaterThanOrEqual(3)
           const drawn = (await texts()).join('|')
           expect(drawn).not.toContain(CAPTION)
@@ -101,7 +102,7 @@ test('Guild Hall screenshots: empty, populated, quest board, light + dark, at 15
           const barBottom = await page.locator('header').first().evaluate((h) => h.getBoundingClientRect().bottom)
           const ys = await page.evaluate(() => (window as any).__fillYs as Record<string, number>)
           const labelYs = Object.entries(ys).filter(([t]) => /×\d+$/.test(t))
-          expect(labelYs.length, `${scheme}: three group labels`).toBeGreaterThanOrEqual(3)
+          expect(labelYs.length, `${scheme}: group labels`).toBeGreaterThanOrEqual(2)
           for (const [t, y] of labelYs) expect(y, `${scheme}: ${t} hidden under the bar`).toBeGreaterThan(barBottom)
           const s = await canvasStats(page)
           expect(s.opaque, `${scheme}: populated canvas is blank`).toBeGreaterThan(0)

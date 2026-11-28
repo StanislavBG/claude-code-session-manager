@@ -1,16 +1,18 @@
 // Bundle entry for the real-Chromium Guild Hall screenshot spec. Mounts the real Home page over a
 // stub window.api (claude-config-entry pattern). location.hash picks the world:
 //   #empty      no slot holders -> the canvas draws its 'No one is out adventuring' caption.
-//   #populated  5 holders: 3 dev-lead scheduler jobs, 1 architect chat, 1 unresolvable owner (unknown).
+//   #populated  8 open project tabs (rooms); 4 holders: 3 dev-lead jobs (Self x2, Bilko), 1 architect chat (Self).
 // The spec spies on CanvasRenderingContext2D.fillText before this bundle loads (window.__fillTexts).
 import { createRoot } from 'react-dom/client'
 import { Home } from '../../src/renderer/components/tabs/Home'
 import { useScheduleState } from '../../src/renderer/state/scheduleState'
 import { usePromptSessions } from '../../src/renderer/state/promptSessions'
 import { useChat } from '../../src/renderer/state/chat'
+import { useSessions } from '../../src/renderer/state/sessions'
 
 const populated = location.hash === '#populated'
 const CWD = '/home/user/Projects/Self'
+const PROJECTS = ['Self', 'session-manager', 'Bilko', 'burrow', '3PMahjong', 'starry-night-2', 'Three-Winds', 'Hatch-Day']
 const EPIC = 'epic-architect-1'
 const at = new Date().toISOString()
 
@@ -20,7 +22,6 @@ const holders = populated
       { owner: 'scheduler:102-build-b', at },
       { owner: 'scheduler:103-build-c', at },
       { owner: `chat:${EPIC}`, at },
-      { owner: 'mystery:slot', at },
     ]
   : []
 
@@ -29,7 +30,7 @@ const job = (slug: string, status: string, extra: Record<string, unknown> = {}) 
 })
 const jobs = populated
   ? [
-      job('101-build-a', 'running'), job('102-build-b', 'running'), job('103-build-c', 'running'),
+      job('101-build-a', 'running'), job('102-build-b', 'running', { cwd: '/home/user/Projects/Bilko' }), job('103-build-c', 'running'),
       job('104-broken', 'failed', { error: 'gate red: typecheck failed' }),
     ]
   : []
@@ -66,6 +67,7 @@ const api = {
   promptSessions: { loadActiveIndex: async () => ({ ok: true, sessions: [] }) },
   billing: { fetch: async () => null },
   logs: { write: () => {} },
+  transcripts: { subscribe: async () => ({ ok: true, path: null }), unsubscribe: () => {}, onEvent: () => () => {}, buffer: async () => [] },
   shell: { open: ok },
 }
 
@@ -85,6 +87,12 @@ function fallback(target: any, path: string): any {
 
 useScheduleState.setState({ snapshot: snapshot as any, loaded: true })
 if (populated) {
+  useSessions.setState({
+    tabs: PROJECTS.map((name, i) => ({
+      id: `tab-${i}`, sessionId: `sess-${i}`, label: name, cwd: `/home/user/Projects/${name}`,
+      pid: null, status: 'dormant', exitCode: null, startupCommand: null,
+    })) as any,
+  })
   usePromptSessions.setState({
     sessions: { [EPIC]: { id: EPIC, cwd: CWD, goalText: 'Plan the next release', status: 'active', agentType: 'architect' } as any },
   })

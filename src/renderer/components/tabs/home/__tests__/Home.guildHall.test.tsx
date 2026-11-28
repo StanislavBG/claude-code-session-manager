@@ -18,6 +18,11 @@ vi.mock('../../../../lib/useOutsideNeedsYou', () => ({
 }))
 
 import { Home } from '../../Home'
+import { PanelFocusProvider } from '../../../../lib/panelFocus'
+import { useLayout } from '../../../../state/layout'
+import { useSessions } from '../../../../state/sessions'
+import { useLive } from '../../../../state/live'
+import { useScheduleState } from '../../../../state/scheduleState'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -51,6 +56,37 @@ async function mount() {
   })
   return container
 }
+
+describe('Home — Guild Hall rooms', () => {
+  it('3 open project tabs + 1 running job in the 2nd project -> 3 rooms; blur unsubscribes', async () => {
+    const tab = (id: string, cwd: string) => ({ id, sessionId: `s-${id}`, label: id, cwd, pid: null, status: 'dormant', exitCode: null, startupCommand: null }) as any
+    useSessions.setState({ tabs: [tab('t1', '/p/a'), tab('t2', '/p/b'), tab('t3', '/p/c')] })
+    const snap = { config: { utilizationThreshold: 90 }, jobs: [{ slug: 'a', cwd: '/p/b', status: 'running', agentType: 'dev-lead' }] } as any
+    useScheduleState.setState({ snapshot: snap })
+    const subscribe = vi.fn()
+    const unsubscribe = vi.fn()
+    const orig = useLive.getState()
+    useLive.setState({ subscribe, unsubscribe })
+    useLayout.setState({ focusedPanelId: 'overview' } as any)
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root!.render(createElement(PanelFocusProvider, { panelId: 'overview', children: createElement(Home, {}) }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await act(async () => { useScheduleState.setState({ snapshot: snap }) })
+    expect(container.querySelector('[data-testid="world-canvas"]')?.getAttribute('data-room-count')).toBe('3')
+    expect(subscribe).toHaveBeenCalledTimes(3)
+    expect(subscribe).toHaveBeenCalledWith('t2', '/p/b', 's-t2')
+    await act(async () => { useLayout.setState({ focusedPanelId: 'elsewhere' } as any) })
+    expect(unsubscribe).toHaveBeenCalledTimes(3)
+    useLive.setState({ subscribe: orig.subscribe, unsubscribe: orig.unsubscribe })
+    useSessions.setState({ tabs: [] })
+    useScheduleState.setState({ snapshot: null } as any)
+  })
+})
 
 describe('Home — Guild Hall', () => {
   it('renders the world canvas and none of the removed cards', async () => {

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePanelFocus } from '../../../lib/panelFocus'
 import { useDocumentVisible } from '../../../lib/useDocumentVisible'
-import type { WorldRosterEntry } from '../../../lib/worldRoster'
+import type { GuildRoom } from '../../../lib/guildRooms'
 import {
   DEFAULT_THEME,
   createSpriteCache,
   drawWorld,
-  layoutGroups,
-  layoutWorld,
+  layoutRoomActors,
+  layoutRooms,
+  type RoomInput,
   type WorldTheme,
 } from '../../../lib/worldScene'
 
@@ -21,6 +22,7 @@ function readTheme(el: HTMLElement | null): WorldTheme {
     ground: pick('--world-ground', DEFAULT_THEME.ground),
     groundAlt: pick('--world-ground-alt', DEFAULT_THEME.groundAlt),
     label: pick('--world-label', DEFAULT_THEME.label),
+    roomLine: pick('--world-room-line', DEFAULT_THEME.roomLine ?? DEFAULT_THEME.label),
   }
 }
 
@@ -30,7 +32,7 @@ function prefersReducedMotion(): boolean {
     : false
 }
 
-export function WorldView({ roster, insetTop = 0 }: { roster: WorldRosterEntry[]; insetTop?: number }) {
+export function WorldView({ rooms, insetTop = 0 }: { rooms: GuildRoom[]; insetTop?: number }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cacheRef = useRef<ReturnType<typeof createSpriteCache> | null>(null)
@@ -42,9 +44,14 @@ export function WorldView({ roster, insetTop = 0 }: { roster: WorldRosterEntry[]
   const visible = useDocumentVisible()
   const [reduced, setReduced] = useState(prefersReducedMotion)
 
-  const actors = useMemo(() => layoutWorld(roster, size.w, size.h, insetTop), [roster, size.w, size.h, insetTop])
-  const groups = useMemo(() => layoutGroups(roster, size.w, size.h, insetTop), [roster, size.w, size.h, insetTop])
-  const animate = focused && visible && roster.length > 0 && !reduced
+  const roomInput = useMemo<RoomInput[]>(
+    () => rooms.map((r, i) => ({ key: r.cwd ?? `other:${i}`, label: r.label, roster: r.roster })),
+    [rooms],
+  )
+  const boxes = useMemo(() => layoutRooms(roomInput, size.w, size.h, insetTop), [roomInput, size.w, size.h, insetTop])
+  const actors = useMemo(() => layoutRoomActors(boxes, roomInput), [boxes, roomInput])
+  const hasAgent = rooms.some((r) => r.roster.length > 0)
+  const animate = focused && visible && hasAgent && !reduced
 
   const draw = useCallback(
     (timeMs: number) => {
@@ -53,16 +60,16 @@ export function WorldView({ roster, insetTop = 0 }: { roster: WorldRosterEntry[]
       if (!canvas || !ctx || size.w === 0 || size.h === 0) return
       const dpr = window.devicePixelRatio || 1
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      drawWorld(ctx, actors, groups, {
+      drawWorld(ctx, actors, [], {
         width: size.w,
         height: size.h,
         timeMs,
         dpr,
         theme: themeRef.current,
         cache: cacheRef.current ?? undefined,
-      })
+      }, boxes.length > 0 ? boxes : undefined, roomInput)
     },
-    [actors, groups, size.w, size.h],
+    [actors, boxes, roomInput, size.w, size.h],
   )
 
   // Reduced-motion preference.
@@ -124,7 +131,7 @@ export function WorldView({ roster, insetTop = 0 }: { roster: WorldRosterEntry[]
 
   return (
     <div ref={wrapRef} className="h-full w-full">
-      <canvas ref={canvasRef} data-testid="world-canvas" data-inset-top={insetTop} className="block h-full w-full" />
+      <canvas ref={canvasRef} data-testid="world-canvas" data-inset-top={insetTop} data-room-count={rooms.length} className="block h-full w-full" />
     </div>
   )
 }

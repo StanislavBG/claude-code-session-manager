@@ -27,7 +27,9 @@ import { usePanelFocus } from '../../lib/panelFocus'
 import { useDashboardRefresh } from '../../lib/useDashboardRefresh'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { useSessionSlots } from '../../lib/useSessionSlots'
-import { worldRoster } from '../../lib/worldRoster'
+import { guildRooms } from '../../lib/guildRooms'
+import { useSessions, groupTabsByCwd } from '../../state/sessions'
+import { useLive } from '../../state/live'
 import { Z } from '../../lib/zLayers'
 import { usePagedList } from '../../lib/usePagedList'
 import { Pager } from '../ui/Pager'
@@ -60,7 +62,32 @@ function HomeComponent({ onNavigate }: HomeProps) {
   const chats = useChatSignals()
   const sessions = usePromptSessions((s) => s.sessions)
   const holders = slots?.holders ?? EMPTY_HOLDERS
-  const roster = useMemo(() => worldRoster(holders, jobs, chats, sessions), [holders, jobs, chats, sessions])
+  const allTabs = useSessions((s) => s.tabs)
+  // One representative tab per open project (cwd), in tab order.
+  const projectTabs = useMemo(() => groupTabsByCwd(allTabs).map((g) => g.tabs[0]), [allTabs])
+  const liveStore = useLive((s) => s.tabs)
+  const liveTabs = useMemo(
+    () => Object.values(liveStore).map((t) => ({ tabId: t.tabId, cwd: t.cwd, sessionUuid: t.sessionUuid, lastEventAt: t.lastEventAt })),
+    [liveStore],
+  )
+  const now = useGuildNow(focused)
+  const rooms = useMemo(
+    () => guildRooms({ tabs: projectTabs, holders, jobs, chats, epics: sessions, liveTabs, now }),
+    [projectTabs, holders, jobs, chats, sessions, liveTabs, now],
+  )
+  // Keep transcript tails for open project tabs only while the Guild Hall is focused.
+  // useLive's subscribe is refcounted, so tabs bound elsewhere are unaffected.
+  const subKey = projectTabs.map((t) => `${t.id}\u0000${t.cwd}\u0000${t.sessionId}`).join('\u0001')
+  useEffect(() => {
+    if (!focused || !subKey) return
+    const subs = subKey.split('\u0001').map((r) => r.split('\u0000'))
+    const live = useLive.getState()
+    for (const [id, cwd, sid] of subs) live.subscribe(id, cwd, sid)
+    return () => {
+      const l = useLive.getState()
+      for (const [id] of subs) l.unsubscribe(id)
+    }
+  }, [focused, subKey])
 
   const barRef = useRef<HTMLElement | null>(null)
   const [barInset, setBarInset] = useState(0)
@@ -79,7 +106,7 @@ function HomeComponent({ onNavigate }: HomeProps) {
   return (
     <div className="relative h-full w-full overflow-hidden text-fg" data-testid="guild-hall">
       <div className="absolute inset-0">
-        <WorldView roster={roster} insetTop={barInset} />
+        <WorldView rooms={rooms} insetTop={barInset} />
       </div>
       <GuildHallBar
         barRef={barRef}
@@ -134,6 +161,20 @@ function useNeedsYouRows(): { rows: NeedsYouRow[]; answer: OutsideAnswer; reload
     return buildNeedsYouRows(proposed, chats, jobs, Date.now(), outside)
   }, [sessions, chats, jobs, outside])
   return { rows, answer, reloadOutside }
+}
+
+const GUILD_NOW_TICK_MS = 5_000
+
+/** `now` for the room activity window, re-derived every 5 s only while focused. */
+function useGuildNow(focused: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!focused) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), GUILD_NOW_TICK_MS)
+    return () => clearInterval(id)
+  }, [focused])
+  return now
 }
 
 const REFRESH_STAMP_TICK_MS = 15_000

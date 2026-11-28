@@ -111,7 +111,7 @@ describe('plan review harvest', () => {
     expect(readPlanReview(cwd, EPIC, '12-validate').digestSent).toEqual([1]);
   });
 
-  test('needs_review reviewer with missing output is released as review-failed, one digest', async () => {
+  test('needs_review reviewer is harvested as review-failed, one digest, deduped on repeat', async () => {
     const send = vi.fn();
     await run(reviewJob({ status: 'needs_review' }), null, send);
     const rec = readPlanReview(cwd, EPIC, '12-validate');
@@ -119,14 +119,17 @@ describe('plan review harvest', () => {
     expect(rec.release.rejected[0].reason).toBe('review-failed');
     expect(digests(send)).toHaveLength(1);
     expect(digests(send)[0][1]).toContain('review-failed');
+    expect(digests(send)[0][1]).toContain('reviewer needs_review');
+    await run(reviewJob({ status: 'needs_review' }), null, send);
+    expect(digests(send)).toHaveLength(1);
   });
 
-  test('needs_review reviewer with valid output saves the review', async () => {
+  test('needs_review reviewer output is not parsed (completed-only rule): still review-failed', async () => {
     const send = vi.fn();
     await run(reviewJob({ status: 'needs_review' }), amendReview, send);
     const rec = readPlanReview(cwd, EPIC, '12-validate');
-    expect(rec.reviews).toHaveLength(1);
-    expect(rec.release).toBeNull();
+    expect(rec.release.rejected[0].reason).toBe('review-failed');
     expect(digests(send)).toHaveLength(1);
+    expect(digests(send)[0][1]).toContain('reviewer needs_review');
   });
 });

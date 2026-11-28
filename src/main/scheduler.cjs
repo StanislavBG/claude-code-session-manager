@@ -560,6 +560,12 @@ const FINISH_VALIDATOR_VERDICT_LINE = `
 
 // Plan-reviewer jobs (`--json-schema` PLAN_REVIEW_SCHEMA): the structured
 // object is the whole deliverable; there is nothing to commit.
+// Plan-reviewer COMMIT sentence: the reviewer is not artifact-only (its PRD
+// declares no deliverable: artifact), but it still commits nothing — say so in
+// the COMMIT step too, not only in the VERDICT bullet below.
+const FINISH_PLAN_REVIEWER_COMMIT_LINE = `
+   PLAN REVIEWER: you edit no files, so there is nothing to stage. Skip the commit and go to the next step.`;
+
 const FINISH_PLAN_REVIEWER_LINE = `
    - PLAN REVIEWER: your deliverable is the structured output object (PLAN_REVIEW_SCHEMA) ONLY. Do not commit, do not edit files; the scheduler reads the object, not this verdict line.`;
 
@@ -589,7 +595,7 @@ ${commitStepNum}. COMMIT — stage only the exact paths you created or changed f
    Never commit any file under these folders (except each folder's top-level README.md, the layout contract), even when the PRD names it:
      ${FINISH_RUNTIME_FOLDERS}
    Why: those folders hold the app's live state. A commit of them breaks the
-   running scheduler for every checkout that pulls it.${isArtifactOnly ? FINISH_ARTIFACT_ONLY_COMMIT_LINE : ''}
+   running scheduler for every checkout that pulls it.${isArtifactOnly ? FINISH_ARTIFACT_ONLY_COMMIT_LINE : ''}${isPlanReviewer ? FINISH_PLAN_REVIEWER_COMMIT_LINE : ''}
 ${verdictStepNum}. VERDICT LINE — end your final report with exactly one of these lines.
    Put nothing after it, except the FOREIGN_WIP_PATHS line described below.
      SCHEDULER_VERDICT: PASS
@@ -4933,13 +4939,12 @@ async function harvestPlanReview(job, epicId, logPath, deps = {}) {
     const members = planReviewHold.planMembers(validator, rows).map((r) => r.slug);
     let structured = null;
     try { structured = (deps.readStructured || extractStructuredOutputFromLog)(logPath); } catch { structured = null; }
-    // A needs_review reviewer (e.g. it ended without structured output) is
-    // harvested like a completed one: valid output is saved, missing output
-    // releases as review-failed instead of waiting for the hold timeout.
-    const harvestable = job.status === 'completed' || job.status === 'needs_review';
-    const checked = harvestable && structured
+    // Only a completed reviewer's output is parsed. A failed or needs_review
+    // reviewer takes the review-failed branch below, which releases the plan
+    // and sends the digest now instead of waiting for the hold timeout.
+    const checked = job.status === 'completed' && structured
       ? parsePlanReview(structured, { expected: members })
-      : { ok: false, error: harvestable ? 'no structured output' : `reviewer ${job.status}` };
+      : { ok: false, error: job.status === 'completed' ? 'no structured output' : `reviewer ${job.status}` };
 
     let outcome;
     if (checked.ok) {

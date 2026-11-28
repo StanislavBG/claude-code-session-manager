@@ -32,5 +32,9 @@ describe('plan-reviewer spawn args', () => {
     const text = sched.buildFinishProtocol({ reviewInRun: false, isFixPlan: false, isArtifactOnly: false, isValidator: false, isPlanReviewer: true });
     expect(text).toContain(grab('FINISH_PLAN_REVIEWER_LINE').trim());
     expect(text).not.toContain(grab('FINISH_ARTIFACT_ONLY_VERDICT_LINE').trim());
+    expect(text).not.toContain('deliverable: artifact');
+    expect(text).toContain(grab('FINISH_PLAN_REVIEWER_COMMIT_LINE').trim());
+    const plain = sched.buildFinishProtocol({ reviewInRun: false });
+    expect(plain).not.toContain(grab('FINISH_PLAN_REVIEWER_COMMIT_LINE').trim());
   });
 });

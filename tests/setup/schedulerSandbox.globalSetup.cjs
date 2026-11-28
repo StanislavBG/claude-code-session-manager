@@ -22,7 +22,8 @@ module.exports = function setup({ provide }) {
   // allowed-roots boundary covers it exactly as it does in production.
   const schedulerHome = path.join(home, '.claude', 'session-manager');
   const worktreeRoot = path.join(sandbox, 'worktrees');
-  for (const d of [home, schedulerHome, worktreeRoot]) fs.mkdirSync(d, { recursive: true });
+  const claudeConfigDir = path.join(sandbox, 'claude-config');
+  for (const d of [home, schedulerHome, worktreeRoot, claudeConfigDir]) fs.mkdirSync(d, { recursive: true });
 
   // Fixed memory reading so tickQueue's memory/swap gates never depend on the host.
   const meminfo = path.join(sandbox, 'meminfo');
@@ -36,6 +37,7 @@ module.exports = function setup({ provide }) {
     SM_CLAUDE_VERSION: '0.0.0-vitest',
     HOME: home,
     SM_SANDBOX_DIR: sandbox,
+    CLAUDE_CONFIG_DIR: claudeConfigDir,
   };
   provide('schedulerSandbox', env);
   Object.assign(process.env, env);

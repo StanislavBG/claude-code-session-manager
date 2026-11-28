@@ -26,7 +26,14 @@ afterEach(async () => {
     if (sup) await waitDead(sup);
     fs.rmSync(d, { recursive: true, force: true, maxRetries: 5 });
   }
-  while (extraPids.length) try { process.kill(extraPids.pop(), 'SIGKILL'); } catch { /* gone */ }
+  // Never signal pid <= 1 or ourselves: process.kill(0, ...) hits this whole process
+  // group (vitest included). An empty pid file read as Number('') === 0 did exactly
+  // that under CPU starvation (rc=137, no summary) before waitFile required content.
+  while (extraPids.length) {
+    const pid = extraPids.pop();
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) continue;
+    try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
+  }
 });
 
 function tmpDir() {
@@ -134,7 +141,7 @@ function firstEvent(events) {
  * child and stays a zombie until node reaps it.)
  */
 async function waitDead(pid) {
-  const reaped = typeof supervisorExited === "function" ? supervisorExited(pid) : null;
+  const reaped = supervisorExited(pid);
   if (reaped) {
     // A supervisor is this worker's child: wait for node to reap it, so a
     // following startOrAttach does not see its zombie as a live run.

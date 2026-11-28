@@ -660,6 +660,11 @@ function buildFinishProtocol({ reviewInRun = true, isFixPlan = false, isArtifact
     + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4, isFixPlan, isArtifactOnly, isValidator, isPlanReviewer });
 }
 
+/** Pure: role flags for buildFinishProtocol. isArtifactOnly comes from the PRD only. */
+function finishProtocolFlagsFor(job, isArtifactOnly) {
+  return { isArtifactOnly: !!isArtifactOnly, isValidator: job.agentType === 'validator', isPlanReviewer: job.agentType === 'plan-reviewer' };
+}
+
 const FINISH_PROTOCOL = buildFinishProtocol({ reviewInRun: true });
 
 // Machine-wide roots resolve lazily via lib/scheduler/schedulerPaths.cjs (SM_SCHEDULER_HOME
@@ -6581,7 +6586,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     job.validatorCriteriaExpected = expected;
     if (section) prompt = `${prompt}\n\n${section}`;
   }
-  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), isArtifactOnly, isValidator: job.agentType === 'validator', isPlanReviewer: job.agentType === 'plan-reviewer' }) });
+  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun, isFixPlan: resolveIsFixPlan(job.slug, job.isFixPlan), ...finishProtocolFlagsFor(job, isArtifactOnly) }) });
 
   // Foreign-WIP manifest (starry-night-ships PRD 148 postmortem): the
   // scheduler already knows, at spawn time, which dirty paths this job did
@@ -15760,6 +15765,10 @@ queueOps.bindQueueAccess({
 });
 
 module.exports = {
+  finishProtocolFlagsFor,
+  FINISH_PLAN_REVIEWER_LINE,
+  FINISH_ARTIFACT_ONLY_VERDICT_LINE,
+  FINISH_PLAN_REVIEWER_COMMIT_LINE,
   readQueue,
   PARK_ERRORS,
   applyPlanReviewHolds,

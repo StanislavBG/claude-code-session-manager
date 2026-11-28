@@ -228,6 +228,17 @@ describe('drawWorld with rooms', () => {
     expect(caption[0].args.slice(1)).toEqual([300, 200])
     expect(calls.some((c) => c.name === 'drawImage')).toBe(true)
   })
+  it('draws actors and no caption when rooms is empty but actors exist', () => {
+    const { ctx, calls } = mockCtx()
+    const actors = [
+      { agentType: 'dev-lead', x: 10, y: 10, phase: 0 },
+      { agentType: 'architect', x: 20, y: 20, phase: 0.5 },
+    ]
+    drawWorld(ctx, actors as never, [], { width: 32, height: 32, timeMs: 0, dpr: 1 }, [], [])
+    const sprites = calls.filter((c) => c.name === 'drawImage' && c.args[3] === 16)
+    expect(sprites).toHaveLength(2)
+    expect(calls.filter((c) => c.name === 'fillText').map((c) => c.args[0])).not.toContain('No one is out adventuring')
+  })
   it('strokes boundaries and labels rooms, idle and groups', () => {
     const { ctx, calls } = mockCtx()
     const input = [

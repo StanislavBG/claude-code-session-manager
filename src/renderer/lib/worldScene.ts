@@ -283,7 +283,7 @@ export function drawWorld(
     }
     return
   }
-  if (rooms || (actors.length === 0 && groups.length === 0)) {
+  if (actors.length === 0 && (rooms || groups.length === 0)) {
     ctx.textAlign = 'center'
     ctx.fillText('No one is out adventuring', width / 2, height / 2)
     return

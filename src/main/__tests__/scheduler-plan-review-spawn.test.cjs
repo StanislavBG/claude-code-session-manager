@@ -18,16 +18,16 @@ describe('plan-reviewer spawn args', () => {
     expect(args[args.indexOf('--json-schema') + 1]).toBe(JSON.stringify(PLAN_REVIEW_SCHEMA));
   });
 
-  it('spawnJob takes isArtifactOnly from the PRD only; reviewer finish text has the reviewer line, not the artifact line', () => {
-    const grab = (name) => sched[name];
+  it('finishProtocolFlagsFor takes isArtifactOnly from the PRD only; buildFinishProtocol reviewer finish text has the reviewer line, not the artifact line', () => {
+    const { FINISH_PLAN_REVIEWER_LINE, FINISH_ARTIFACT_ONLY_VERDICT_LINE, FINISH_PLAN_REVIEWER_COMMIT_LINE } = sched;
     expect(sched.finishProtocolFlagsFor({ agentType: 'plan-reviewer' }, false)).toEqual({ isArtifactOnly: false, isValidator: false, isPlanReviewer: true });
     expect(sched.finishProtocolFlagsFor({ agentType: 'plan-reviewer' }, true).isArtifactOnly).toBe(true);
     const text = sched.buildFinishProtocol({ reviewInRun: false, isFixPlan: false, isArtifactOnly: false, isValidator: false, isPlanReviewer: true });
-    expect(text).toContain(grab('FINISH_PLAN_REVIEWER_LINE').trim());
-    expect(text).not.toContain(grab('FINISH_ARTIFACT_ONLY_VERDICT_LINE').trim());
+    expect(text).toContain(FINISH_PLAN_REVIEWER_LINE.trim());
+    expect(text).not.toContain(FINISH_ARTIFACT_ONLY_VERDICT_LINE.trim());
     expect(text).not.toContain('deliverable: artifact');
-    expect(text).toContain(grab('FINISH_PLAN_REVIEWER_COMMIT_LINE').trim());
+    expect(text).toContain(FINISH_PLAN_REVIEWER_COMMIT_LINE.trim());
     const plain = sched.buildFinishProtocol({ reviewInRun: false });
-    expect(plain).not.toContain(grab('FINISH_PLAN_REVIEWER_COMMIT_LINE').trim());
+    expect(plain).not.toContain(FINISH_PLAN_REVIEWER_COMMIT_LINE.trim());
   });
 });

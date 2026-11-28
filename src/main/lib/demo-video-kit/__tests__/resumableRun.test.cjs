@@ -4,22 +4,27 @@
  */
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, beforeAll, afterAll } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const MOD = path.join(__dirname, '..', 'resumableRun.cjs');
-const { startOrAttach, waitForResult, writeResult, stopRun, readLogTail, winTreeKillArgv, DEFAULT_LEASE_MS } = require(MOD);
+const { startOrAttach, supervisorExited, waitForResult, writeResult, stopRun, readLogTail, winTreeKillArgv, DEFAULT_LEASE_MS } = require(MOD);
 
 const posix = test.skipIf(process.platform === 'win32');
 const dirs = [];
 const extraPids = [];
-afterEach(() => {
+afterEach(async () => {
   while (dirs.length) {
     const d = dirs.pop();
-    stopRun(d);
-    fs.rmSync(d, { recursive: true, force: true });
+    // stopRun takes the stateDir (tmpDir's root/state), not the root.
+    const stateDir = path.join(d, 'state');
+    let sup = null;
+    try { sup = JSON.parse(fs.readFileSync(path.join(stateDir, 'state.json'), 'utf8')).pid; } catch { /* no run */ }
+    stopRun(stateDir);
+    if (sup) await waitDead(sup);
+    fs.rmSync(d, { recursive: true, force: true, maxRetries: 5 });
   }
   while (extraPids.length) try { process.kill(extraPids.pop(), 'SIGKILL'); } catch { /* gone */ }
 });
@@ -40,16 +45,125 @@ function stepScript(root, name, body) {
 function alive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
-async function waitDead(pid, ms = 5000) {
-  const t = Date.now();
-  while (alive(pid) && Date.now() - t < ms) await new Promise((r) => setTimeout(r, 25));
-  return !alive(pid);
+
+// Event probe instead of wall-clock polling: every node process a run starts
+// (supervisor, step, grandchildren) inherits NODE_OPTIONS=--require PROBE, which
+// connects to this loopback server and sends its pid. The socket's 'close' is
+// the process's exit; a supervisor also reports each setInterval tick (its lease
+// check) as an event. Every wait below is capped at WAIT_CAP_MS.
+const net = require('node:net');
+const WAIT_CAP_MS = 5000;
+const PROBE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sm-resumable-probe-')), 'probe.cjs');
+fs.writeFileSync(PROBE, `'use strict';
+const port = Number(process.env.RR_PROBE_PORT);
+if (port) {
+  const net = require('node:net');
+  const sup = process.argv.includes('__supervise');
+  const s = net.connect(port, '127.0.0.1');
+  s.on('error', () => {});
+  s.write(JSON.stringify({ pid: process.pid }) + '\\n');
+  s.unref();
+  if (sup) {
+    const orig = global.setInterval;
+    global.setInterval = (fn, ms, ...a) => orig(function tick(...b) {
+      fn.apply(this, b);
+      try { s.write(JSON.stringify({ pid: process.pid, tick: true }) + '\\n'); } catch { /* closed */ }
+    }, ms, ...a);
+  }
 }
-async function waitFile(file, ms = 5000) {
-  const t = Date.now();
-  while (!fs.existsSync(file) && Date.now() - t < ms) await new Promise((r) => setTimeout(r, 25));
-  return fs.existsSync(file);
+`);
+const { EventEmitter } = require('node:events');
+const probeEvents = new EventEmitter();
+probeEvents.setMaxListeners(0);
+const registered = new Set();
+const exited = new Set();
+const probeServer = net.createServer((sock) => {
+  let pid = null;
+  let buf = '';
+  sock.on('data', (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const msg = JSON.parse(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+      if (pid === null) { pid = msg.pid; registered.add(pid); probeEvents.emit(`up:${pid}`); }
+      if (msg.tick) probeEvents.emit(`tick:${pid}`);
+    }
+  });
+  sock.on('error', () => {});
+  sock.on('close', () => { if (pid !== null) { exited.add(pid); probeEvents.emit(`exit:${pid}`); } });
+});
+const probeReady = new Promise((resolve) => probeServer.listen(0, '127.0.0.1', resolve));
+afterAll(() => new Promise((resolve) => probeServer.close(() => resolve())));
+beforeAll(() => probeReady);
+
+function probeEnv(extraRequire) {
+  const req = [`--require ${PROBE}`].concat(extraRequire ? [`--require ${extraRequire}`] : []);
+  return { NODE_OPTIONS: req.join(' '), RR_PROBE_PORT: String(probeServer.address().port) };
 }
+
+/** startOrAttach with the probe in the run's environment. */
+function start(opts, extraRequire) {
+  const env = probeEnv(extraRequire);
+  const prev = {};
+  for (const k of Object.keys(env)) { prev[k] = process.env[k]; process.env[k] = env[k]; }
+  try {
+    return startOrAttach(opts);
+  } finally {
+    for (const k of Object.keys(env)) if (prev[k] === undefined) delete process.env[k]; else process.env[k] = prev[k];
+  }
+}
+
+/** Resolve with the first of `events` on probeEvents, or 'cap' after WAIT_CAP_MS. */
+function firstEvent(events) {
+  return new Promise((resolve) => {
+    const offs = [];
+    const done = (v) => { clearTimeout(cap); for (const off of offs) off(); resolve(v); };
+    const cap = setTimeout(() => done('cap'), WAIT_CAP_MS);
+    for (const e of events) {
+      const h = () => done(e);
+      probeEvents.once(e, h);
+      offs.push(() => probeEvents.off(e, h));
+    }
+  });
+}
+
+/**
+ * Wait for pid's probe socket to close: the kernel closes it when the process
+ * exits. (kill(pid, 0) alone is not proof: a run's supervisor is this worker's
+ * child and stays a zombie until node reaps it.)
+ */
+async function waitDead(pid) {
+  const reaped = typeof supervisorExited === "function" ? supervisorExited(pid) : null;
+  if (reaped) {
+    // A supervisor is this worker's child: wait for node to reap it, so a
+    // following startOrAttach does not see its zombie as a live run.
+    let cap;
+    await Promise.race([reaped, new Promise((r) => { cap = setTimeout(r, WAIT_CAP_MS); })]);
+    clearTimeout(cap);
+    return !alive(pid);
+  }
+  if (exited.has(pid) || !alive(pid)) return true;
+  if (!registered.has(pid)) await firstEvent([`up:${pid}`, `exit:${pid}`]);
+  if (!exited.has(pid) && alive(pid)) await firstEvent([`exit:${pid}`]);
+  return exited.has(pid) || !alive(pid);
+}
+
+/** Wait until pred() is true, re-checking on each fs.watch event in dir. */
+function until(pred, dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  return new Promise((resolve) => {
+    if (pred()) return resolve(true);
+    const w = fs.watch(dir, () => { if (pred()) finish(true); });
+    const cap = setTimeout(() => finish(pred()), WAIT_CAP_MS);
+    function finish(v) { clearTimeout(cap); w.close(); resolve(v); }
+    if (pred()) finish(true); // written between the first check and the watch
+  });
+}
+/** A step's mark file exists AND is fully written (steps write JSON or a pid number). */
+const waitFile = (file) => until(() => {
+  try { const t = fs.readFileSync(file, 'utf8'); JSON.parse(t); return t.length > 0; } catch { return false; }
+}, path.dirname(file));
 
 test('DEFAULT_LEASE_MS is 20 minutes', () => {
   expect(DEFAULT_LEASE_MS).toBe(20 * 60 * 1000);
@@ -73,7 +187,7 @@ test('requiring the module spawns nothing', () => {
 posix('pending then done across two waits', async () => {
   const { root, stateDir } = tmpDir();
   const s = stepScript(root, 'ok', `setTimeout(() => rr.writeResult(stateDir, key, { ok: true, n: 7 }), 700);`);
-  const r = startOrAttach({ stateDir, key: 'k1', argv: [s, stateDir, 'k1'], cwd: root });
+  const r = start({ stateDir, key: 'k1', argv: [s, stateDir, 'k1'], cwd: root });
   expect(r.started).toBe(true);
   const w1 = await waitForResult({ stateDir, key: 'k1', waitMs: 150, pollMs: 50 });
   expect(w1.status).toBe('pending');
@@ -87,8 +201,8 @@ posix('attach with the same key starts one child', async () => {
   const { root, stateDir } = tmpDir();
   const count = path.join(root, 'count.txt');
   const s = stepScript(root, 'once', `fs.appendFileSync(mark, 'x'); setTimeout(() => rr.writeResult(stateDir, key, { ok: true }), 800);`);
-  const a = startOrAttach({ stateDir, key: 'same', argv: [s, stateDir, 'same', count], cwd: root });
-  const b = startOrAttach({ stateDir, key: 'same', argv: [s, stateDir, 'same', count], cwd: root });
+  const a = start({ stateDir, key: 'same', argv: [s, stateDir, 'same', count], cwd: root });
+  const b = start({ stateDir, key: 'same', argv: [s, stateDir, 'same', count], cwd: root });
   expect(a.started).toBe(true);
   expect(b).toEqual({ pid: a.pid, started: false });
   const w = await waitForResult({ stateDir, key: 'same', waitMs: 5000, pollMs: 50 });
@@ -104,12 +218,12 @@ posix('a new key kills the old step and its child', async () => {
     const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
     fs.writeFileSync(mark, JSON.stringify({ step: process.pid, child: g.pid }));
     setTimeout(() => {}, 60000);`);
-  const a = startOrAttach({ stateDir, key: 'old', argv: [old, stateDir, 'old', pidFile], cwd: root });
+  const a = start({ stateDir, key: 'old', argv: [old, stateDir, 'old', pidFile], cwd: root });
   expect(await waitFile(pidFile)).toBe(true);
   const pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
   extraPids.push(pids.step, pids.child);
   const fresh = stepScript(root, 'fresh', `setTimeout(() => rr.writeResult(stateDir, key, { ok: 'new' }), 300);`);
-  const b = startOrAttach({ stateDir, key: 'new', argv: [fresh, stateDir, 'new'], cwd: root });
+  const b = start({ stateDir, key: 'new', argv: [fresh, stateDir, 'new'], cwd: root });
   expect(b.started).toBe(true);
   expect(b.pid).not.toBe(a.pid);
   expect(await waitDead(a.pid)).toBe(true);
@@ -122,7 +236,7 @@ posix('a new key kills the old step and its child', async () => {
 posix('a step that exits without a result is lost with its log text', async () => {
   const { root, stateDir } = tmpDir();
   const s = stepScript(root, 'crash', `console.error('voice model exploded'); setTimeout(() => process.exit(3), 300);`);
-  startOrAttach({ stateDir, key: 'c', argv: [s, stateDir, 'c'], cwd: root });
+  start({ stateDir, key: 'c', argv: [s, stateDir, 'c'], cwd: root });
   const w = await waitForResult({ stateDir, key: 'c', waitMs: 5000, pollMs: 50 });
   expect(w.status).toBe('lost');
   expect(w.error).toContain('voice model exploded');
@@ -132,7 +246,7 @@ posix('a step that exits without a result is lost with its log text', async () =
 posix('a result for another key is ignored, and an unparsable result is not yet written', async () => {
   const { root, stateDir } = tmpDir();
   const s = stepScript(root, 'slow', `setTimeout(() => {}, 1500);`);
-  startOrAttach({ stateDir, key: 'mine', argv: [s, stateDir, 'mine'], cwd: root });
+  start({ stateDir, key: 'mine', argv: [s, stateDir, 'mine'], cwd: root });
   writeResult(stateDir, 'theirs', { ok: true });
   expect((await waitForResult({ stateDir, key: 'mine', waitMs: 200, pollMs: 50 })).status).toBe('pending');
   fs.writeFileSync(path.join(stateDir, 'result.json'), '{"key":"mine","res');
@@ -149,7 +263,7 @@ posix('lease expiry abandons the run and kills the step and its child', async ()
     const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
     fs.writeFileSync(mark, JSON.stringify({ step: process.pid, child: g.pid }));
     setTimeout(() => {}, 60000);`);
-  const r = startOrAttach({ stateDir, key: 'L', argv: [s, stateDir, 'L', pidFile], cwd: root, leaseMs: 2000 });
+  const r = start({ stateDir, key: 'L', argv: [s, stateDir, 'L', pidFile], cwd: root, leaseMs: 2000 });
   expect(await waitFile(pidFile)).toBe(true);
   const pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
   extraPids.push(pids.step, pids.child);
@@ -171,25 +285,22 @@ posix('a supervisor delayed past the lease length still starts its step and is n
   const delay = path.join(root, 'delay.cjs');
   fs.writeFileSync(delay, `if (process.argv.includes('__supervise')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500);`);
   const s = stepScript(root, 'late', `fs.writeFileSync(mark, String(process.pid)); setTimeout(() => {}, 60000);`);
-  const prev = process.env.NODE_OPTIONS;
-  process.env.NODE_OPTIONS = `--require ${delay}`;
-  let r;
-  try {
-    r = startOrAttach({ stateDir, key: 'D', argv: [s, stateDir, 'D', pidFile], cwd: root, leaseMs: 2000 });
-  } finally {
-    if (prev === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = prev;
-  }
+  const r = start({ stateDir, key: 'D', argv: [s, stateDir, 'D', pidFile], cwd: root, leaseMs: 2000 }, delay);
+  // The supervisor's first lease check (500 ms after its step started, 3 s after
+  // startOrAttach): the pre-fix module counts the lease from startOrAttach, abandons
+  // and exits; the fix counts it from the step's start and keeps going.
+  const first = await firstEvent([`tick:${r.pid}`, `exit:${r.pid}`]);
   expect(await waitFile(pidFile)).toBe(true);
   extraPids.push(Number(fs.readFileSync(pidFile, 'utf8')));
-  // The step started 2.5 s after startOrAttach (lease 2 s): no abandonment was recorded.
   expect(fs.existsSync(path.join(stateDir, 'result.json'))).toBe(false);
+  expect(first).toBe(`tick:${r.pid}`);
   expect(alive(r.pid)).toBe(true);
 });
 
 posix('waitForResult checks refresh the lease so a waited-on run is not abandoned', async () => {
   const { root, stateDir } = tmpDir();
   const s = stepScript(root, 'long', `setTimeout(() => rr.writeResult(stateDir, key, { ok: true }), 1500);`);
-  startOrAttach({ stateDir, key: 'W', argv: [s, stateDir, 'W'], cwd: root, leaseMs: 600 });
+  start({ stateDir, key: 'W', argv: [s, stateDir, 'W'], cwd: root, leaseMs: 600 });
   const w = await waitForResult({ stateDir, key: 'W', waitMs: 5000, pollMs: 50 });
   expect(w).toEqual({ status: 'done', result: { ok: true } });
 });
@@ -197,7 +308,7 @@ posix('waitForResult checks refresh the lease so a waited-on run is not abandone
 posix('waitForResult never waits longer than waitMs + pollMs', async () => {
   const { root, stateDir } = tmpDir();
   const s = stepScript(root, 'idle', `setTimeout(() => {}, 1500);`);
-  startOrAttach({ stateDir, key: 'B', argv: [s, stateDir, 'B'], cwd: root });
+  start({ stateDir, key: 'B', argv: [s, stateDir, 'B'], cwd: root });
   const t0 = Date.now();
   const w = await waitForResult({ stateDir, key: 'B', waitMs: 300, pollMs: 200 });
   const took = Date.now() - t0;
@@ -257,7 +368,7 @@ posix('a stale start lock older than 30 s is removed', () => {
   const old = new Date(Date.now() - 60 * 1000);
   fs.utimesSync(lock, old, old);
   const s = stepScript(root, 'stale', `setTimeout(() => rr.writeResult(stateDir, key, { ok: true }), 300);`);
-  const r = startOrAttach({ stateDir, key: 'S', argv: [s, stateDir, 'S'], cwd: root });
+  const r = start({ stateDir, key: 'S', argv: [s, stateDir, 'S'], cwd: root });
   expect(r.started).toBe(true);
   expect(fs.existsSync(lock)).toBe(false);
 });
@@ -272,19 +383,19 @@ posix('a step that leaves a grandchild behind does not outlive the run', async (
     fs.writeFileSync(mark, String(g.pid));
     rr.writeResult(stateDir, key, { ok: true });
     process.exit(0);`);
-  startOrAttach({ stateDir, key: 'G', argv: [s, stateDir, 'G', pidFile], cwd: root });
+  start({ stateDir, key: 'G', argv: [s, stateDir, 'G', pidFile], cwd: root });
   const w = await waitForResult({ stateDir, key: 'G', waitMs: 5000, pollMs: 50 });
   expect(w).toEqual({ status: 'done', result: { ok: true } });
   expect(await waitFile(pidFile)).toBe(true);
   const gc = Number(fs.readFileSync(pidFile, 'utf8'));
   extraPids.push(gc);
-  expect(await waitDead(gc, 2000)).toBe(true);
+  expect(await waitDead(gc)).toBe(true);
 });
 
 posix('a fresh run truncates run.log; attaching leaves it untouched', async () => {
   const { root, stateDir } = tmpDir();
   const s1 = stepScript(root, 'first', `console.log('first-run-output'); rr.writeResult(stateDir, key, { ok: 1 });`);
-  startOrAttach({ stateDir, key: 'R', argv: [s1, stateDir, 'R'], cwd: root });
+  start({ stateDir, key: 'R', argv: [s1, stateDir, 'R'], cwd: root });
   expect((await waitForResult({ stateDir, key: 'R', waitMs: 5000, pollMs: 50 })).status).toBe('done');
   const st1 = JSON.parse(fs.readFileSync(path.join(stateDir, 'state.json'), 'utf8'));
   expect(await waitDead(st1.pid)).toBe(true);
@@ -293,14 +404,11 @@ posix('a fresh run truncates run.log; attaching leaves it untouched', async () =
   // waits for its first output line to reach run.log instead of sleeping.
   const release = path.join(root, 'release');
   const s2 = stepScript(root, 'second', `console.log('second-run-output'); const t = setInterval(() => { if (fs.existsSync(mark)) { clearInterval(t); rr.writeResult(stateDir, key, { ok: 2 }); } }, 20);`);
-  const a = startOrAttach({ stateDir, key: 'R', argv: [s2, stateDir, 'R', release], cwd: root });
+  const a = start({ stateDir, key: 'R', argv: [s2, stateDir, 'R', release], cwd: root });
   expect(a.started).toBe(true);
-  for (let i = 0; i < 500 && !readLogTail(stateDir).includes('second-run-output'); i += 1) {
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  expect(readLogTail(stateDir)).toContain('second-run-output');
+  expect(await until(() => readLogTail(stateDir).includes('second-run-output'), stateDir)).toBe(true);
   expect(readLogTail(stateDir)).not.toContain('first-run-output');
-  const b = startOrAttach({ stateDir, key: 'R', argv: [s2, stateDir, 'R', release], cwd: root });
+  const b = start({ stateDir, key: 'R', argv: [s2, stateDir, 'R', release], cwd: root });
   expect(b).toEqual({ pid: a.pid, started: false });
   expect(readLogTail(stateDir)).toContain('second-run-output');
   fs.writeFileSync(release, '');

@@ -88,8 +88,8 @@ test('kitDestDir follows SM_SCHEDULER_HOME when set', () => {
   }
 });
 
-test('KIT_VERSION is bumped to 46 (standalone.cjs checks a video plays standalone the way bilko.run embeds it)', () => {
-  expect(KIT_VERSION).toBe('46');
+test('KIT_VERSION is bumped to 47 (resumableRun.cjs exposes supervisorExited so callers await a reaped supervisor)', () => {
+  expect(KIT_VERSION).toBe('47');
 });
 
 test('the playbook path both personas name is where the kit installs it by default', () => {

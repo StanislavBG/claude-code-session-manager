@@ -193,6 +193,16 @@ function attachLive(stateDir, key) {
   return null;
 }
 
+// Supervisors this process started -> promise that resolves once node has
+// reaped it (until then kill(pid, 0) still sees the zombie and attachLive would
+// attach to it). The 'exit' listener does not keep the event loop alive (unref).
+const supervisorExits = new Map();
+
+/** Promise that resolves when a supervisor this process started has exited and been reaped; null for any other pid. */
+function supervisorExited(pid) {
+  return supervisorExits.get(pid) || null;
+}
+
 /** Called with start.lock held: re-check, then start a fresh run. */
 function startLocked({ stateDir, key, argv, cwd, leaseMs }) {
   const s = readState(stateDir);
@@ -216,6 +226,10 @@ function startLocked({ stateDir, key, argv, cwd, leaseMs }) {
       env: process.env,
     });
     child.unref();
+    supervisorExits.set(child.pid, new Promise((resolve) => {
+      child.once('exit', () => { supervisorExits.delete(child.pid); resolve(); });
+      child.once('error', () => { supervisorExits.delete(child.pid); resolve(); });
+    }));
   } finally {
     fs.closeSync(logFd);
   }
@@ -302,4 +316,4 @@ if (require.main === module && process.argv[2] === '__supervise') {
   supervise(process.argv.slice(3));
 }
 
-module.exports = { startOrAttach, waitForResult, writeResult, stopRun, readLogTail, winTreeKillArgv, DEFAULT_LEASE_MS };
+module.exports = { startOrAttach, supervisorExited, waitForResult, writeResult, stopRun, readLogTail, winTreeKillArgv, DEFAULT_LEASE_MS };

@@ -3,7 +3,7 @@
 // renderer state passed in as plain shapes — no store imports, no IPC.
 import type { ChatSignalLite, EpicLite, ScheduleJobLite, SlotHolderLite } from './homeSessionRows'
 import { projectNameFromCwd } from './homeProjectRows'
-import { resolveAgentType, type WorldRosterEntry } from './worldRoster'
+import { resolveAgentType, sortRosterEntries, type WorldRosterEntry } from './worldRoster'
 
 export const GUILD_ACTIVE_WINDOW_MS = 30_000
 
@@ -34,12 +34,6 @@ function holderCwd(owner: string, input: GuildRoomsInput): string | null {
   return null
 }
 
-function sortRoster(roster: WorldRosterEntry[]): WorldRosterEntry[] {
-  return roster.sort(
-    (a, b) => b.count - a.count || (a.agentType < b.agentType ? -1 : a.agentType > b.agentType ? 1 : 0),
-  )
-}
-
 export function guildRooms(input: GuildRoomsInput): GuildRoom[] {
   const rooms = new Map<string, Map<string, WorldRosterEntry>>()
   const order: { key: string; cwd: string }[] = []
@@ -67,7 +61,7 @@ export function guildRooms(input: GuildRoomsInput): GuildRoom[] {
     const agentType = resolveAgentType(holder.owner, input.jobs, input.chats, input.epics)
     const cwd = agentType === 'unknown' ? null : holderCwd(holder.owner, input)
     add(cwd, agentType, holder.owner)
-    if (holder.owner.startsWith('chat:')) {
+    if (agentType !== 'unknown' && holder.owner.startsWith('chat:')) {
       const sid = input.epics[holder.owner.slice('chat:'.length)]?.claudeSessionId
       if (sid) chatSessionIds.add(sid)
     }
@@ -88,8 +82,8 @@ export function guildRooms(input: GuildRoomsInput): GuildRoom[] {
   const out: GuildRoom[] = order.map(({ key, cwd }) => ({
     cwd,
     label: projectNameFromCwd(key),
-    roster: sortRoster([...rooms.get(key)!.values()]),
+    roster: sortRosterEntries([...rooms.get(key)!.values()]),
   }))
-  if (other.size > 0) out.push({ cwd: null, label: 'Other projects', roster: sortRoster([...other.values()]) })
+  if (other.size > 0) out.push({ cwd: null, label: 'Other projects', roster: sortRosterEntries([...other.values()]) })
   return out
 }

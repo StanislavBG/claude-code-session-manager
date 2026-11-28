@@ -69,4 +69,16 @@ describe('guildRooms', () => {
     const rooms = guildRooms(base({ holders: [{ owner: 'x', at: '' }] }))
     expect(rooms.map((r) => r.label)).toEqual(['Other projects'])
   })
+
+  it('a not-running chat holder does not suppress its live tab', () => {
+    const rooms = guildRooms(base({
+      tabs: [{ cwd: '/p/a' }],
+      holders: [{ owner: 'chat:e1', at: '' }],
+      chats: { e1: { running: false } },
+      epics: { e1: { cwd: '/p/a', goalText: '', claudeSessionId: 's1' } },
+      liveTabs: [{ tabId: 't1', cwd: '/p/a', sessionUuid: 's1', lastEventAt: now }],
+    }))
+    expect(rooms[0].roster).toEqual([{ agentType: 'claude', count: 1, owners: ['live:t1'] }])
+    expect(rooms[1]).toEqual({ cwd: null, label: 'Other projects', roster: [{ agentType: 'unknown', count: 1, owners: ['chat:e1'] }] })
+  })
 })

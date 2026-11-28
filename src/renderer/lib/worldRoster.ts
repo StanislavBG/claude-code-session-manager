@@ -34,6 +34,13 @@ export function resolveAgentType(
   return UNKNOWN
 }
 
+/** Sorts in place: count desc, then agentType asc. Shared by worldRoster and guildRooms. */
+export function sortRosterEntries(roster: WorldRosterEntry[]): WorldRosterEntry[] {
+  return roster.sort(
+    (a, b) => b.count - a.count || (a.agentType < b.agentType ? -1 : a.agentType > b.agentType ? 1 : 0),
+  )
+}
+
 export function worldRoster(
   holders: SlotHolderLite[],
   jobs: JobWithAgent[],
@@ -51,7 +58,5 @@ export function worldRoster(
     entry.count += 1
     entry.owners.push(holder.owner)
   }
-  return [...byType.values()].sort(
-    (a, b) => b.count - a.count || (a.agentType < b.agentType ? -1 : a.agentType > b.agentType ? 1 : 0),
-  )
+  return sortRosterEntries([...byType.values()])
 }

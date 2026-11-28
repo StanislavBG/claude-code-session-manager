@@ -15,6 +15,8 @@ const { startOrAttach, supervisorExited, waitForResult, writeResult, stopRun, re
 const posix = test.skipIf(process.platform === 'win32');
 const dirs = [];
 const extraPids = [];
+/** The afterEach sweep may SIGKILL only a real, foreign pid: 0 / negatives signal process groups. */
+const killablePid = (pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid;
 afterEach(async () => {
   while (dirs.length) {
     const d = dirs.pop();
@@ -31,7 +33,7 @@ afterEach(async () => {
   // that under CPU starvation (rc=137, no summary) before waitFile required content.
   while (extraPids.length) {
     const pid = extraPids.pop();
-    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) continue;
+    if (!killablePid(pid)) continue;
     try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
   }
 });
@@ -171,6 +173,11 @@ function until(pred, dir) {
 const waitFile = (file) => until(() => {
   try { const t = fs.readFileSync(file, 'utf8'); JSON.parse(t); return t.length > 0; } catch { return false; }
 }, path.dirname(file));
+
+test('the cleanup sweep never signals pid 0, negatives, NaN, 1 or itself', () => {
+  for (const bad of [0, -1, -process.pid, NaN, Number(''), 1, process.pid, 2.5]) expect(killablePid(bad)).toBe(false);
+  expect(killablePid(process.pid + 1000000)).toBe(true);
+});
 
 test('DEFAULT_LEASE_MS is 20 minutes', () => {
   expect(DEFAULT_LEASE_MS).toBe(20 * 60 * 1000);

@@ -379,10 +379,6 @@ function scanSentinel(resultEvent, events) {
 }
 
 /**
- * 'pass' | 'fail' from a result event's structured_output.schedulerVerdict
- * (validator runs under `--json-schema`), else null.
- */
-/**
  * Did a plan-reviewer run return its structured review? Shape only — a plain
  * object carrying a `prds` array; the harvest validates the full schema.
  * @param {{agentType?: string}|null|undefined} queueEntry
@@ -396,6 +392,10 @@ function isPlanReviewStructured(queueEntry, resultEvent) {
   return Array.isArray(/** @type {{prds?: unknown}} */ (so).prds);
 }
 
+/**
+ * 'pass' | 'fail' from a result event's structured_output.schedulerVerdict
+ * (validator runs under `--json-schema`), else null.
+ */
 function structuredSchedulerVerdict(resultEvent) {
   const so = resultEvent && resultEvent.structuredOutput;
   if (!so || typeof so !== 'object') return null;
